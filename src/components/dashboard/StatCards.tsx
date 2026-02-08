@@ -12,7 +12,7 @@ const StatCards = () => {
 
   if (!isAuthenticated) {
     return (
-      <div className="border-3 border-foreground p-8 bg-background shadow-neo text-center">
+      <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
         <p className="font-black text-lg">Connect Strava to see your stats</p>
         <p className="text-sm font-bold text-muted-foreground mt-2">
           Go to Settings to link your Strava account
@@ -25,7 +25,7 @@ const StatCards = () => {
     return (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="border-3 border-foreground p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]">
+          <div key={i} className="border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ))}
@@ -88,7 +88,7 @@ const StatCards = () => {
       {cards.map((card, i) => (
         <div
           key={i}
-          className="border-3 border-foreground p-5 bg-background shadow-neo"
+          className="border-3 border-border p-5 bg-background shadow-neo"
         >
           <p className="text-xs font-black uppercase tracking-wider mb-2">
             {card.label}

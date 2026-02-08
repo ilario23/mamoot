@@ -42,6 +42,9 @@
     /* Sharp rectangles by default */
     --radius: 0rem;
 
+    /* Neo shadow = black in light mode */
+    --neo-shadow: 0 0% 0%;
+
     /* Sidebar */
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 0 0% 0%;
@@ -85,14 +88,16 @@
   }
 
   .dark {
-    --background: 0 0% 8%;
-    --foreground: 0 0% 95%;
+    /* Cool purple-tinted base for character */
+    --background: 250 15% 7%;
+    --foreground: 60 5% 92%;
 
-    --card: 0 0% 12%;
-    --card-foreground: 0 0% 95%;
+    /* Elevated card surfaces with subtle layering */
+    --card: 250 10% 12%;
+    --card-foreground: 60 5% 92%;
 
-    --popover: 0 0% 12%;
-    --popover-foreground: 0 0% 95%;
+    --popover: 250 10% 14%;
+    --popover-foreground: 60 5% 92%;
 
     /* Magenta primary accent — unchanged */
     --primary: 312 100% 67%;
@@ -102,8 +107,9 @@
     --secondary: 217 91% 60%;
     --secondary-foreground: 0 0% 100%;
 
-    --muted: 0 0% 18%;
-    --muted-foreground: 0 0% 60%;
+    /* Muted tones with tint */
+    --muted: 250 8% 18%;
+    --muted-foreground: 250 5% 55%;
 
     /* Bright Yellow — unchanged */
     --accent: 48 96% 53%;
@@ -112,20 +118,23 @@
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Borders = off-white */
-    --border: 0 0% 95%;
-    --input: 0 0% 95%;
+    /* KEY: Borders are medium gray, not white */
+    --border: 250 8% 28%;
+    --input: 250 8% 28%;
     --ring: 312 100% 67%;
 
-    /* Sidebar */
-    --sidebar-background: 0 0% 10%;
-    --sidebar-foreground: 0 0% 95%;
+    /* Sidebar with consistent tinting */
+    --sidebar-background: 250 15% 9%;
+    --sidebar-foreground: 60 5% 92%;
     --sidebar-primary: 312 100% 67%;
     --sidebar-primary-foreground: 0 0% 0%;
     --sidebar-accent: 48 96% 53%;
     --sidebar-accent-foreground: 0 0% 0%;
-    --sidebar-border: 0 0% 95%;
+    --sidebar-border: 250 8% 28%;
     --sidebar-ring: 312 100% 67%;
+
+    /* Neo shadow: muted magenta glow */
+    --neo-shadow: 312 50% 20%;
 
     /* HR Zone colors — keep vibrant */
     --zone-1: 84 78% 55%;

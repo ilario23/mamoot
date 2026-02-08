@@ -6,14 +6,14 @@ interface Props {
 
 const SplitsTable = ({ splits }: Props) => {
   return (
-    <div className="border-3 border-foreground bg-background shadow-neo overflow-hidden">
-      <div className="p-4 border-b-3 border-foreground">
+    <div className="border-3 border-border bg-background shadow-neo overflow-hidden">
+      <div className="p-4 border-b-3 border-border">
         <h3 className="font-black text-lg uppercase tracking-wider">Splits</h3>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b-3 border-foreground bg-muted">
+            <tr className="border-b-3 border-border bg-muted">
               <th className="text-left p-3 font-black text-xs uppercase">
                 KM
               </th>
@@ -35,7 +35,7 @@ const SplitsTable = ({ splits }: Props) => {
             {splits.map((split) => (
               <tr
                 key={split.km}
-                className="border-b-3 border-foreground last:border-b-0"
+                className="border-b-3 border-border last:border-b-0"
               >
                 <td className="p-3 font-black text-sm">{split.km}</td>
                 <td className="p-3 font-bold text-sm text-right">

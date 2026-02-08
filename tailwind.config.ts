@@ -82,9 +82,9 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        neo: "4px 4px 0px 0px hsl(var(--foreground))",
-        "neo-sm": "2px 2px 0px 0px hsl(var(--foreground))",
-        "neo-lg": "6px 6px 0px 0px hsl(var(--foreground))",
+        neo: "4px 4px 0px 0px hsl(var(--neo-shadow))",
+        "neo-sm": "2px 2px 0px 0px hsl(var(--neo-shadow))",
+        "neo-lg": "6px 6px 0px 0px hsl(var(--neo-shadow))",
       },
       keyframes: {
         "accordion-down": {

@@ -20,7 +20,7 @@ const TimePeriodSelector = ({ value, onChange }: TimePeriodSelectorProps) => {
             role="radio"
             aria-checked={isActive}
             onClick={() => onChange(option.value)}
-            className={`px-4 py-2 text-sm font-bold border-3 border-foreground transition-all ${
+            className={`px-4 py-2 text-sm font-bold border-3 border-border transition-all ${
               isActive
                 ? "bg-primary text-primary-foreground shadow-neo-sm"
                 : "bg-background hover:bg-muted"

@@ -51,7 +51,7 @@ const ActivitySummaryCards = ({activities}: ActivitySummaryCardsProps) => {
 
   if (stats.length === 0) {
     return (
-      <div className='border-3 border-foreground p-5 bg-background shadow-neo text-center'>
+      <div className='border-3 border-border p-5 bg-background shadow-neo text-center'>
         <p className='text-sm font-bold text-muted-foreground'>
           No activities recorded this year
         </p>
@@ -67,7 +67,7 @@ const ActivitySummaryCards = ({activities}: ActivitySummaryCardsProps) => {
         return (
           <div
             key={s.type}
-            className='border-3 border-foreground p-4 bg-background shadow-neo'
+            className='border-3 border-border p-4 bg-background shadow-neo'
           >
             <div className='flex items-center gap-2 mb-3'>
               <Icon className='h-5 w-5' />

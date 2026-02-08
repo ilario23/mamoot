@@ -18,7 +18,7 @@ const ActivityMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="border-3 border-foreground bg-muted shadow-neo flex items-center justify-center min-h-[300px] md:min-h-[400px]">
+      <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[300px] md:min-h-[400px]">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     ),
@@ -37,14 +37,14 @@ const ActivityDetail = () => {
   if (!isAuthenticated) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="border-3 border-foreground p-8 shadow-neo text-center">
+        <div className="border-3 border-border p-8 shadow-neo text-center">
           <h2 className="font-black text-2xl mb-4">Not Connected</h2>
           <p className="font-bold text-muted-foreground mb-4">
             Connect your Strava account to view activity details.
           </p>
           <button
             onClick={() => router.push("/settings")}
-            className="px-6 py-3 bg-foreground text-background font-black border-3 border-foreground hover:bg-primary transition-colors"
+            className="px-6 py-3 bg-foreground text-background font-black border-3 border-border hover:bg-primary transition-colors"
           >
             Go to Settings
           </button>
@@ -66,14 +66,14 @@ const ActivityDetail = () => {
   if (!activity) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="border-3 border-foreground p-8 shadow-neo text-center">
+        <div className="border-3 border-border p-8 shadow-neo text-center">
           <h2 className="font-black text-2xl mb-4">Activity Not Found</h2>
           <p className="font-bold text-muted-foreground mb-4">
             This activity doesn&apos;t exist or hasn&apos;t been synced yet.
           </p>
           <button
             onClick={() => router.push("/")}
-            className="px-6 py-3 bg-foreground text-background font-black border-3 border-foreground hover:bg-primary transition-colors"
+            className="px-6 py-3 bg-foreground text-background font-black border-3 border-border hover:bg-primary transition-colors"
           >
             Back to Dashboard
           </button>
@@ -136,7 +136,7 @@ const ActivityDetail = () => {
         {stats.map((stat, i) => (
           <div
             key={i}
-            className="border-3 border-foreground p-4 bg-background shadow-neo-sm"
+            className="border-3 border-border p-4 bg-background shadow-neo-sm"
           >
             <p className="text-xs font-black uppercase tracking-wider text-muted-foreground">
               {stat.label}
@@ -150,7 +150,7 @@ const ActivityDetail = () => {
       {detail?.map?.summary_polyline ? (
         <ActivityMap polyline={detail.map.summary_polyline} />
       ) : (
-        <div className="border-3 border-foreground p-8 bg-muted shadow-neo flex items-center justify-center min-h-[200px]">
+        <div className="border-3 border-border p-8 bg-muted shadow-neo flex items-center justify-center min-h-[200px]">
           <p className="font-black text-muted-foreground uppercase">
             No route data available
           </p>
@@ -159,13 +159,13 @@ const ActivityDetail = () => {
 
       {/* Charts */}
       {streamLoading ? (
-        <div className="border-3 border-foreground p-8 bg-background shadow-neo flex items-center justify-center min-h-[200px]">
+        <div className="border-3 border-border p-8 bg-background shadow-neo flex items-center justify-center min-h-[200px]">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : stream && stream.length > 0 ? (
         <ActivityCharts stream={stream} />
       ) : (
-        <div className="border-3 border-foreground p-8 bg-muted shadow-neo flex items-center justify-center min-h-[200px]">
+        <div className="border-3 border-border p-8 bg-muted shadow-neo flex items-center justify-center min-h-[200px]">
           <p className="font-black text-muted-foreground uppercase">
             No detailed stream data available for this activity
           </p>

@@ -23,7 +23,7 @@ const PersonaAvatar = ({ persona, size = "sm" }: { persona: Persona; size?: "sm"
 
   return (
     <div
-      className={`${sizeClasses} ${persona.color} rounded-full border-3 border-foreground flex items-center justify-center shadow-neo-sm shrink-0`}
+      className={`${sizeClasses} ${persona.color} rounded-full border-3 border-border flex items-center justify-center shadow-neo-sm shrink-0`}
     >
       <persona.icon className={`${iconSize} text-foreground`} />
     </div>
@@ -87,14 +87,14 @@ const AITeamChat = () => {
   return (
     <div className="flex flex-col h-full">
       {/* Persona selector */}
-      <div className="p-3 border-b-3 border-foreground flex gap-2">
+      <div className="p-3 border-b-3 border-border flex gap-2">
         {personas.map((p) => (
           <button
             key={p.id}
             onClick={() => setActivePersona(p.id)}
             aria-label={`Switch to ${p.label}`}
             tabIndex={0}
-            className={`flex-1 flex items-center justify-center gap-2 px-2 py-2 rounded-full border-3 border-foreground font-bold text-xs transition-all ${
+            className={`flex-1 flex items-center justify-center gap-2 px-2 py-2 rounded-full border-3 border-border font-bold text-xs transition-all ${
               activePersona === p.id
                 ? "bg-primary text-primary-foreground shadow-neo-sm"
                 : "bg-background hover:bg-muted"
@@ -119,7 +119,7 @@ const AITeamChat = () => {
                 <PersonaAvatar persona={currentPersona} size="md" />
               )}
               <div
-                className={`flex-1 p-3 border-3 border-foreground text-sm font-medium ${
+                className={`flex-1 p-3 border-3 border-border text-sm font-medium ${
                   isUser ? "bg-muted ml-10" : "bg-accent/20 mr-10"
                 }`}
               >
@@ -134,20 +134,20 @@ const AITeamChat = () => {
       </div>
 
       {/* Input */}
-      <div className="p-3 border-t-3 border-foreground flex gap-2">
+      <div className="p-3 border-t-3 border-border flex gap-2">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
           placeholder="Ask your AI team..."
           aria-label="Message input"
-          className="flex-1 px-3 py-2 border-3 border-foreground font-medium text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+          className="flex-1 px-3 py-2 border-3 border-border font-medium text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary"
         />
         <button
           onClick={handleSend}
           aria-label="Send message"
           tabIndex={0}
-          className="px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-foreground hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2"
+          className="px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-border hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2"
         >
           <Send className="h-4 w-4" />
           <span className="hidden sm:inline">Send</span>

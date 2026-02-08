@@ -73,7 +73,7 @@ const Records = () => {
         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
           Records
         </h1>
-        <div className="border-3 border-foreground p-8 bg-background shadow-neo text-center">
+        <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
           <p className="font-black text-lg">
             Connect Strava to see your records
           </p>
@@ -92,7 +92,7 @@ const Records = () => {
         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
           Records
         </h1>
-        <div className="border-3 border-foreground p-8 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
+        <div className="border-3 border-border p-8 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       </div>
@@ -106,7 +106,7 @@ const Records = () => {
         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
           Records
         </h1>
-        <div className="border-3 border-foreground p-8 bg-background shadow-neo text-center">
+        <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
           <p className="font-black text-lg">No activities found</p>
           <p className="text-sm font-bold text-muted-foreground mt-2">
             Record some activities on Strava to see your personal bests here

@@ -51,7 +51,7 @@ const Calendar = () => {
         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
           Activity Calendar
         </h1>
-        <div className="border-3 border-foreground p-8 bg-background shadow-neo text-center">
+        <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
           <p className="font-black text-lg">Connect Strava to see your calendar</p>
           <p className="text-sm font-bold text-muted-foreground mt-2">
             Go to Settings to link your Strava account
@@ -86,12 +86,12 @@ const Calendar = () => {
           onValueChange={handleYearChange}
         >
           <SelectTrigger
-            className="w-[120px] border-3 border-foreground font-black shadow-neo-sm"
+            className="w-[120px] border-3 border-border font-black shadow-neo-sm"
             aria-label="Select year"
           >
             <SelectValue placeholder="Year" />
           </SelectTrigger>
-          <SelectContent className="border-3 border-foreground shadow-neo-sm">
+          <SelectContent className="border-3 border-border shadow-neo-sm">
             {availableYears.map((year) => (
               <SelectItem
                 key={year}

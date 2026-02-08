@@ -21,7 +21,7 @@ interface RecordCardProps {
 const RecordCard = ({ record, bucket, activityType }: RecordCardProps) => {
   if (!record) {
     return (
-      <div className="border-3 border-foreground bg-background p-5 shadow-neo opacity-50">
+      <div className="border-3 border-border bg-background p-5 shadow-neo opacity-50">
         <p className="text-xs font-black uppercase tracking-wider text-muted-foreground mb-2">
           {bucket.label}
         </p>
@@ -45,7 +45,7 @@ const RecordCard = ({ record, bucket, activityType }: RecordCardProps) => {
   const isPR = effort.pr_rank === 1;
 
   return (
-    <div className="border-3 border-foreground bg-background p-5 shadow-neo hover:shadow-neo-lg transition-shadow">
+    <div className="border-3 border-border bg-background p-5 shadow-neo hover:shadow-neo-lg transition-shadow">
       {/* Distance label + PR badge */}
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs font-black uppercase tracking-wider">
@@ -53,7 +53,7 @@ const RecordCard = ({ record, bucket, activityType }: RecordCardProps) => {
         </p>
         <div className="flex items-center gap-1.5">
           {isPR && (
-            <span className="text-[10px] font-black uppercase bg-accent text-foreground px-1.5 py-0.5 border-2 border-foreground">
+            <span className="text-[10px] font-black uppercase bg-accent text-foreground px-1.5 py-0.5 border-2 border-border">
               PR
             </span>
           )}

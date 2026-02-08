@@ -51,7 +51,7 @@ const ActivityCharts = ({ stream }: Props) => {
       </h3>
 
       {/* Pace */}
-      <div className="border-3 border-foreground p-4 bg-background shadow-neo-sm">
+      <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
         <p className="font-black text-xs uppercase mb-3">Pace (min/km)</p>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={chartData}>
@@ -82,7 +82,7 @@ const ActivityCharts = ({ stream }: Props) => {
       </div>
 
       {/* Heart Rate with zone bands */}
-      <div className="border-3 border-foreground p-4 bg-background shadow-neo-sm">
+      <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
         <p className="font-black text-xs uppercase mb-3">Heart Rate (bpm)</p>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={chartData}>
@@ -145,7 +145,7 @@ const ActivityCharts = ({ stream }: Props) => {
       </div>
 
       {/* Elevation */}
-      <div className="border-3 border-foreground p-4 bg-background shadow-neo-sm">
+      <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
         <p className="font-black text-xs uppercase mb-3">Elevation (m)</p>
         <ResponsiveContainer width="100%" height={200}>
           <AreaChart data={chartData}>

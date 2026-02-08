@@ -45,7 +45,7 @@ const ActivityTypeFilter = ({
             role="radio"
             aria-checked={isActive}
             onClick={() => onChange(type)}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-bold border-3 border-foreground transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-bold border-3 border-border transition-all ${
               isActive
                 ? `${ACTIVE_BG[type]} shadow-neo-sm`
                 : "bg-background hover:bg-muted"

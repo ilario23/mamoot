@@ -8,7 +8,7 @@ const AIChat = () => {
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight mb-4">
         AI Team
       </h1>
-      <div className="flex-1 border-3 border-foreground bg-background shadow-neo overflow-hidden">
+      <div className="flex-1 border-3 border-border bg-background shadow-neo overflow-hidden">
         <AITeamChat />
       </div>
     </div>

@@ -186,8 +186,8 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
   };
 
   return (
-    <div className="border-3 border-foreground bg-background shadow-neo">
-      <div className="p-5 border-b-3 border-foreground">
+    <div className="border-3 border-border bg-background shadow-neo">
+      <div className="p-5 border-b-3 border-border">
         <h3 className="font-black text-lg uppercase tracking-wider">
           Contribution Calendar
         </h3>
@@ -301,16 +301,16 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
                           </TooltipTrigger>
                           <TooltipContent
                             side="top"
-                            className="border-3 border-foreground bg-popover shadow-neo-sm p-3 max-w-xs"
+                            className="border-3 border-border bg-popover shadow-neo-sm p-3 max-w-xs"
                           >
                             <TooltipBody dayData={dayData} />
                           </TooltipContent>
                         </Tooltip>
                         <PopoverContent
                           side="top"
-                          className="border-3 border-foreground shadow-neo-sm p-0 w-auto min-w-[200px]"
+                          className="border-3 border-border shadow-neo-sm p-0 w-auto min-w-[200px]"
                         >
-                          <div className="p-3 border-b-3 border-foreground">
+                          <div className="p-3 border-b-3 border-border">
                             <p className="text-xs font-black uppercase tracking-wider">
                               {format(dayData.date, "MMM d, yyyy")}
                             </p>
@@ -360,7 +360,7 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
                         </TooltipTrigger>
                         <TooltipContent
                           side="top"
-                          className="border-3 border-foreground bg-popover shadow-neo-sm p-3 max-w-xs"
+                          className="border-3 border-border bg-popover shadow-neo-sm p-3 max-w-xs"
                         >
                           <TooltipBody dayData={dayData} />
                         </TooltipContent>
@@ -402,7 +402,7 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
                   {config.colors.map((color, i) => (
                     <div
                       key={i}
-                      className="border border-foreground/20"
+                      className="border border-border/20"
                       style={{
                         width: 10,
                         height: 10,
@@ -449,7 +449,7 @@ const DayCell = ({
           height: size,
           backgroundColor: "var(--activity-empty)",
         }}
-        className="border border-foreground/10"
+        className="border border-border/10"
       />
     );
   }
@@ -464,7 +464,7 @@ const DayCell = ({
           height: size,
           backgroundColor: color,
         }}
-        className="border border-foreground/20"
+        className="border border-border/20"
       />
     );
   }
@@ -474,7 +474,7 @@ const DayCell = ({
   return (
     <div
       style={{ width: size, height: size, overflow: "hidden" }}
-      className="border border-foreground/20 flex flex-col"
+      className="border border-border/20 flex flex-col"
     >
       {dayData.activities.map((a) => {
         const color = getActivityColor(a.type, a.level);
@@ -504,7 +504,7 @@ const TooltipBody = ({ dayData }: { dayData: DayData }) => (
       return (
         <div key={a.id} className="flex items-center gap-2 text-xs">
           <div
-            className="w-2.5 h-2.5 shrink-0 border border-foreground/20"
+            className="w-2.5 h-2.5 shrink-0 border border-border/20"
             style={{
               backgroundColor: getActivityColor(a.type, a.level),
             }}

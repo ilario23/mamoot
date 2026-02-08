@@ -24,7 +24,7 @@ const SyncProgress = ({ state }: SyncProgressProps) => {
 
   return (
     <div
-      className="border-3 border-foreground bg-background p-4 shadow-neo"
+      className="border-3 border-border bg-background p-4 shadow-neo"
       role="status"
       aria-live="polite"
     >
@@ -51,7 +51,7 @@ const SyncProgress = ({ state }: SyncProgressProps) => {
       </div>
 
       {/* Progress bar */}
-      <div className="h-3 border-2 border-foreground bg-muted overflow-hidden">
+      <div className="h-3 border-2 border-border bg-muted overflow-hidden">
         <div
           className={`h-full transition-all duration-500 ${
             isDone

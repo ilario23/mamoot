@@ -16,7 +16,7 @@ const BottomNav = () => {
   const pathname = usePathname();
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 flex border-t-3 border-foreground bg-background z-40">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 flex border-t-3 border-border bg-background z-40">
       {items.map((item) => {
         const isActive =
           item.href === "/"

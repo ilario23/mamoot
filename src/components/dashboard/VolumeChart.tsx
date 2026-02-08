@@ -59,7 +59,7 @@ const VolumeChart = () => {
 
   if (isLoading) {
     return (
-      <div className="border-3 border-foreground p-5 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
+      <div className="border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -68,7 +68,7 @@ const VolumeChart = () => {
   if (chartData.length === 0) return null;
 
   return (
-    <div className="border-3 border-foreground p-5 bg-background shadow-neo">
+    <div className="border-3 border-border p-5 bg-background shadow-neo">
       <h3 className="font-black text-lg mb-4 uppercase tracking-wider">
         4-Week Volume by Zone
       </h3>

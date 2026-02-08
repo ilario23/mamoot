@@ -74,7 +74,7 @@ const PaceProgressionChart = ({
   if (bucketKeys.length === 0) return null;
 
   return (
-    <div className="border-3 border-foreground p-5 bg-background shadow-neo">
+    <div className="border-3 border-border p-5 bg-background shadow-neo">
       <h3 className="font-black text-lg mb-4 uppercase tracking-wider">
         Pace Progression
       </h3>

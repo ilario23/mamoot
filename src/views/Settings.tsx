@@ -189,7 +189,7 @@ const Settings = () => {
       </h1>
 
       {/* Appearance */}
-      <div className="border-3 border-foreground p-5 bg-background shadow-neo">
+      <div className="border-3 border-border p-5 bg-background shadow-neo">
         <h3 className="font-black text-lg uppercase tracking-wider mb-4">
           Appearance
         </h3>
@@ -211,13 +211,13 @@ const Settings = () => {
             checked={isDark}
             onCheckedChange={handleToggleDarkMode}
             aria-label="Toggle dark mode"
-            className="border-3 border-foreground"
+            className="border-3 border-border"
           />
         </div>
       </div>
 
       {/* Strava Connection */}
-      <div className="border-3 border-foreground p-5 bg-background shadow-neo">
+      <div className="border-3 border-border p-5 bg-background shadow-neo">
         <h3 className="font-black text-lg uppercase tracking-wider mb-4">
           Strava Account
         </h3>
@@ -233,11 +233,11 @@ const Settings = () => {
                 <img
                   src={athlete.profile_medium}
                   alt={athleteDisplayName}
-                  className="w-10 h-10 rounded-full border-3 border-foreground shadow-neo-sm object-cover"
+                  className="w-10 h-10 rounded-full border-3 border-border shadow-neo-sm object-cover"
                 />
               ) : (
                 <div
-                  className="w-10 h-10 rounded-full border-3 border-foreground flex items-center justify-center shadow-neo-sm"
+                  className="w-10 h-10 rounded-full border-3 border-border flex items-center justify-center shadow-neo-sm"
                   style={{ backgroundColor: "#FC4C02" }}
                 >
                   <Link2 className="h-5 w-5 text-white" />
@@ -252,7 +252,7 @@ const Settings = () => {
             </div>
             <button
               onClick={handleStravaDisconnect}
-              className="px-5 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-foreground shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
+              className="px-5 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
               aria-label="Disconnect Strava"
               tabIndex={0}
             >
@@ -265,7 +265,7 @@ const Settings = () => {
         ) : (
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full border-3 border-foreground bg-muted flex items-center justify-center">
+              <div className="w-10 h-10 rounded-full border-3 border-border bg-muted flex items-center justify-center">
                 <Link2Off className="h-5 w-5 text-muted-foreground" />
               </div>
               <div>
@@ -277,7 +277,7 @@ const Settings = () => {
             </div>
             <button
               onClick={handleStravaConnect}
-              className="px-5 py-3 font-black text-sm text-white border-3 border-foreground shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
+              className="px-5 py-3 font-black text-sm text-white border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
               style={{ backgroundColor: "#FC4C02" }}
               aria-label="Connect with Strava"
               tabIndex={0}
@@ -290,7 +290,7 @@ const Settings = () => {
 
       {/* Max HR & Resting HR */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="border-3 border-foreground p-5 bg-background shadow-neo">
+        <div className="border-3 border-border p-5 bg-background shadow-neo">
           <label className="font-black text-xs uppercase tracking-wider block mb-2">
             Maximum Heart Rate
           </label>
@@ -303,11 +303,11 @@ const Settings = () => {
                 maxHr: parseInt(e.target.value) || 0,
               }))
             }
-            className="w-full px-4 py-3 border-3 border-foreground font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
         </div>
-        <div className="border-3 border-foreground p-5 bg-background shadow-neo">
+        <div className="border-3 border-border p-5 bg-background shadow-neo">
           <label className="font-black text-xs uppercase tracking-wider block mb-2">
             Resting Heart Rate
           </label>
@@ -320,14 +320,14 @@ const Settings = () => {
                 restingHr: parseInt(e.target.value) || 0,
               }))
             }
-            className="w-full px-4 py-3 border-3 border-foreground font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
         </div>
       </div>
 
       {/* HR Zone Editors */}
-      <div className="border-3 border-foreground p-5 bg-background shadow-neo">
+      <div className="border-3 border-border p-5 bg-background shadow-neo">
         <h3 className="font-black text-lg uppercase tracking-wider mb-4">
           Heart Rate Zones
         </h3>
@@ -350,14 +350,14 @@ const Settings = () => {
                   type="number"
                   value={formState.zones[zone][0]}
                   onChange={(e) => handleZoneChange(zone, 0, e.target.value)}
-                  className="w-20 px-3 py-2 border-3 border-foreground font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                  className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
                 />
                 <span className="font-black">—</span>
                 <input
                   type="number"
                   value={formState.zones[zone][1]}
                   onChange={(e) => handleZoneChange(zone, 1, e.target.value)}
-                  className="w-20 px-3 py-2 border-3 border-foreground font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                  className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
                 />
                 <span className="font-bold text-xs text-muted-foreground">
                   bpm
@@ -369,11 +369,11 @@ const Settings = () => {
       </div>
 
       {/* Visual zone bar */}
-      <div className="border-3 border-foreground p-4 bg-background shadow-neo-sm">
+      <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
         <p className="font-black text-xs uppercase tracking-wider mb-3">
           Zone Distribution
         </p>
-        <div className="flex h-8 border-3 border-foreground overflow-hidden">
+        <div className="flex h-8 border-3 border-border overflow-hidden">
           {zoneKeys.map((zone, i) => {
             const zoneNum = i + 1;
             const range = formState.zones[zone][1] - formState.zones[zone][0];
@@ -399,7 +399,7 @@ const Settings = () => {
       {/* Save button */}
       <button
         onClick={handleSave}
-        className="px-8 py-4 rounded-full bg-primary text-primary-foreground font-black text-lg border-3 border-foreground shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px]"
+        className="px-8 py-4 rounded-full bg-primary text-primary-foreground font-black text-lg border-3 border-border shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px]"
       >
         Save Configuration
       </button>
