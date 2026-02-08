@@ -1,3 +1,5 @@
+"use client";
+
 import { useMemo } from "react";
 import {
   BarChart,
@@ -9,17 +11,24 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { runs, getZoneForHr, ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
+import { getZoneForHr, ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
 import { useSettings } from "@/contexts/SettingsContext";
+import { useActivities } from "@/hooks/useStrava";
+import { useStravaAuth } from "@/contexts/StravaAuthContext";
+import { Loader2 } from "lucide-react";
 
 const VolumeChart = () => {
   const { settings } = useSettings();
+  const { isAuthenticated } = useStravaAuth();
+  const { data: activities, isLoading } = useActivities();
 
   const chartData = useMemo(() => {
-    const weeks: Record<string, Record<string, number>> = {};
-    const now = new Date("2026-02-08");
+    if (!activities || activities.length === 0) return [];
 
-    runs.forEach((run) => {
+    const weeks: Record<string, Record<string, number>> = {};
+    const now = new Date();
+
+    activities.forEach((run) => {
       const runDate = new Date(run.date);
       const diffDays = Math.floor(
         (now.getTime() - runDate.getTime()) / (1000 * 60 * 60 * 24)
@@ -44,7 +53,19 @@ const VolumeChart = () => {
       z4: Number((weeks[week]?.z4 || 0).toFixed(1)),
       z5: Number((weeks[week]?.z5 || 0).toFixed(1)),
     }));
-  }, [settings.zones]);
+  }, [activities, settings.zones]);
+
+  if (!isAuthenticated) return null;
+
+  if (isLoading) {
+    return (
+      <div className="border-3 border-foreground p-5 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (chartData.length === 0) return null;
 
   return (
     <div className="border-3 border-foreground p-5 bg-background shadow-neo">
