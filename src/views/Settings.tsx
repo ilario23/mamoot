@@ -176,6 +176,7 @@ const Settings = () => {
     "z3",
     "z4",
     "z5",
+    "z6",
   ];
 
   const athleteDisplayName = athlete

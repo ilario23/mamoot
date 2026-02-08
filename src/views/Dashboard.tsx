@@ -2,7 +2,7 @@
 
 import StatCards from "@/components/dashboard/StatCards";
 import VolumeChart from "@/components/dashboard/VolumeChart";
-import RecentRuns from "@/components/dashboard/RecentRuns";
+import PaceZoneDistribution from "@/components/dashboard/PaceZoneDistribution";
 
 const Dashboard = () => {
   return (
@@ -12,7 +12,7 @@ const Dashboard = () => {
       </h1>
       <StatCards />
       <VolumeChart />
-      <RecentRuns />
+      <PaceZoneDistribution />
     </div>
   );
 };

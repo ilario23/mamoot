@@ -82,6 +82,10 @@ export default {
             DEFAULT: "hsl(var(--nav-records))",
             foreground: "hsl(var(--nav-records-foreground))",
           },
+          segments: {
+            DEFAULT: "hsl(var(--nav-segments))",
+            foreground: "hsl(var(--nav-segments-foreground))",
+          },
           ai: {
             DEFAULT: "hsl(var(--nav-ai))",
             foreground: "hsl(var(--nav-ai-foreground))",

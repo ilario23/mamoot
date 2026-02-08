@@ -214,12 +214,56 @@ export interface StravaBestEffort {
   achievements: unknown[];
 }
 
+/** A segment effort recorded when an athlete passes through a segment */
+export interface StravaSegmentEffort {
+  id: number;
+  name: string;
+  elapsed_time: number; // seconds
+  moving_time: number; // seconds
+  start_date_local: string;
+  distance: number; // meters
+  average_heartrate?: number;
+  max_heartrate?: number;
+  average_cadence?: number;
+  pr_rank: number | null; // 1 = PR, 2 = 2nd, 3 = 3rd
+  segment: {
+    id: number;
+    name: string;
+    distance: number;
+    average_grade: number;
+    maximum_grade: number;
+    elevation_high: number;
+    elevation_low: number;
+    city: string;
+    state: string;
+    climb_category: number;
+    starred: boolean;
+  };
+  achievements: { type_id: number; type: string; rank: number }[];
+}
+
+/** A starred (favourite) segment from the authenticated athlete */
+export interface StravaStarredSegment {
+  id: number;
+  name: string;
+  distance: number;
+  average_grade: number;
+  maximum_grade: number;
+  elevation_high: number;
+  elevation_low: number;
+  city: string;
+  state: string;
+  climb_category: number;
+  athlete_pr_effort?: { elapsed_time: number; distance: number };
+  starred_date: string;
+}
+
 /** Strava DetailedActivity */
 export interface StravaDetailedActivity extends StravaSummaryActivity {
   description: string;
   device_name: string;
   calories: number;
-  segment_efforts: unknown[];
+  segment_efforts: StravaSegmentEffort[];
   splits_metric: StravaSplit[];
   laps: StravaLap[];
   best_efforts: StravaBestEffort[];
@@ -364,6 +408,35 @@ export const fetchActivityStreams = async (
 
 export const fetchActivityZones = (activityId: number) =>
   stravaFetch<unknown[]>(`/activities/${activityId}/zones`);
+
+export const fetchStarredSegments = () =>
+  stravaFetch<StravaStarredSegment[]>("/segments/starred");
+
+/** Detailed segment info returned by GET /segments/{id} */
+export interface StravaSegmentDetail {
+  id: number;
+  name: string;
+  distance: number;
+  average_grade: number;
+  maximum_grade: number;
+  elevation_high: number;
+  elevation_low: number;
+  city: string;
+  state: string;
+  climb_category: number;
+  starred: boolean;
+  athlete_count: number;
+  effort_count: number;
+  total_elevation_gain: number;
+  map: {
+    polyline: string;
+  };
+  start_latlng: [number, number];
+  end_latlng: [number, number];
+}
+
+export const fetchSegmentDetail = (segmentId: number) =>
+  stravaFetch<StravaSegmentDetail>(`/segments/${segmentId}`);
 
 // ----- Data transformation -----
 

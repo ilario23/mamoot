@@ -31,11 +31,31 @@ const ActivityCharts = ({ stream }: Props) => {
         pace:
           p.velocity > 0
             ? Number((1000 / p.velocity / 60).toFixed(2))
-            : 0,
+            : null,
         heartrate: p.heartrate,
         altitude: p.altitude,
       }));
   }, [stream]);
+
+  const paceDomain = useMemo(() => {
+    const paceValues = chartData
+      .map((d) => d.pace)
+      .filter((p): p is number => p !== null && p > 0);
+    if (paceValues.length === 0) return [0, 10];
+    const min = Math.min(...paceValues);
+    const max = Math.max(...paceValues);
+    const padding = (max - min) * 0.15 || 0.5;
+    return [
+      Math.max(0, Math.floor((min - padding) * 2) / 2),
+      Math.ceil((max + padding) * 2) / 2,
+    ];
+  }, [chartData]);
+
+  const formatPace = (value: number): string => {
+    const minutes = Math.floor(value);
+    const seconds = Math.round((value - minutes) * 60);
+    return `${minutes}'${seconds.toString().padStart(2, "0")}"`;
+  };
 
   const commonTooltipStyle = {
     border: "3px solid #000",
@@ -67,15 +87,21 @@ const ActivityCharts = ({ stream }: Props) => {
               stroke="#000"
               strokeWidth={2}
               tick={{ fontWeight: 700, fontSize: 11 }}
-              domain={["auto", "auto"]}
+              domain={paceDomain}
+              allowDataOverflow
+              tickFormatter={formatPace}
             />
-            <Tooltip contentStyle={commonTooltipStyle} />
+            <Tooltip
+              contentStyle={commonTooltipStyle}
+              formatter={(value: number) => [formatPace(value), "Pace"]}
+            />
             <Line
               type="monotone"
               dataKey="pace"
               stroke={ZONE_COLORS[2]}
               strokeWidth={3}
               dot={false}
+              connectNulls
             />
           </LineChart>
         </ResponsiveContainer>
@@ -130,6 +156,12 @@ const ActivityCharts = ({ stream }: Props) => {
               y1={settings.zones.z5[0]}
               y2={settings.zones.z5[1]}
               fill={ZONE_COLORS[5]}
+              fillOpacity={0.15}
+            />
+            <ReferenceArea
+              y1={settings.zones.z6[0]}
+              y2={settings.zones.z6[1]}
+              fill={ZONE_COLORS[6]}
               fillOpacity={0.15}
             />
 

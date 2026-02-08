@@ -12,6 +12,7 @@ import { useActivities, useActivityDetail, useActivityStreams } from "@/hooks/us
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import ActivityCharts from "@/components/activity/ActivityCharts";
 import SplitsTable from "@/components/activity/SplitsTable";
+import SegmentEffortsTable from "@/components/activity/SegmentEffortsTable";
 
 const ActivityMap = dynamic(
   () => import("@/components/activity/ActivityMap"),
@@ -174,6 +175,11 @@ const ActivityDetail = () => {
 
       {/* Splits */}
       {splits.length > 0 && <SplitsTable splits={splits} />}
+
+      {/* Segment Efforts */}
+      {detail?.segment_efforts && detail.segment_efforts.length > 0 && (
+        <SegmentEffortsTable efforts={detail.segment_efforts} />
+      )}
     </div>
   );
 };

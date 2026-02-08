@@ -39,7 +39,7 @@ const VolumeChart = () => {
 
       const weekLabel = `W${4 - weekNum}`;
       if (!weeks[weekLabel])
-        weeks[weekLabel] = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
+        weeks[weekLabel] = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0, z6: 0 };
 
       const zone = getZoneForHr(run.avgHr, settings.zones);
       weeks[weekLabel][`z${zone}`] += run.distance;
@@ -52,6 +52,7 @@ const VolumeChart = () => {
       z3: Number((weeks[week]?.z3 || 0).toFixed(1)),
       z4: Number((weeks[week]?.z4 || 0).toFixed(1)),
       z5: Number((weeks[week]?.z5 || 0).toFixed(1)),
+      z6: Number((weeks[week]?.z6 || 0).toFixed(1)),
     }));
   }, [activities, settings.zones]);
 
@@ -111,7 +112,7 @@ const VolumeChart = () => {
               return ZONE_NAMES[num] || value;
             }}
           />
-          {[1, 2, 3, 4, 5].map((z) => (
+          {[1, 2, 3, 4, 5, 6].map((z) => (
             <Bar
               key={z}
               dataKey={`z${z}`}

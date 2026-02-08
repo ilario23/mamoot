@@ -9,10 +9,13 @@ import {
   forceRefreshActivities,
 } from '@/lib/stravaCache';
 import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
+import {fetchStarredSegments, fetchSegmentDetail} from '@/lib/strava';
 import type {
   StravaDetailedActivity,
   StravaAthleteStats,
   StravaAthleteZones,
+  StravaStarredSegment,
+  StravaSegmentDetail,
 } from '@/lib/strava';
 
 // ----- Stale time constants -----
@@ -86,6 +89,33 @@ export const useAthleteZones = () => {
     queryFn: cachedGetAthleteZones,
     enabled: isAuthenticated,
     staleTime: ONE_DAY,
+    gcTime: ONE_DAY,
+  });
+};
+
+/** Fetch athlete's starred segments — refreshed hourly */
+export const useStarredSegments = () => {
+  const {isAuthenticated} = useStravaAuth();
+
+  return useQuery<StravaStarredSegment[]>({
+    queryKey: ['strava', 'starred-segments'],
+    queryFn: fetchStarredSegments,
+    enabled: isAuthenticated,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_DAY,
+    refetchOnWindowFocus: false,
+  });
+};
+
+/** Fetch segment detail (includes polyline for map) — cached forever since segments don't change */
+export const useSegmentDetail = (segmentId: number | null) => {
+  const {isAuthenticated} = useStravaAuth();
+
+  return useQuery<StravaSegmentDetail>({
+    queryKey: ['strava', 'segment', segmentId],
+    queryFn: () => fetchSegmentDetail(segmentId!),
+    enabled: isAuthenticated && segmentId !== null,
+    staleTime: Infinity,
     gcTime: ONE_DAY,
   });
 };

@@ -8,11 +8,23 @@ interface SettingsContextType {
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
+/** Migrate saved settings that only have 5 zones to the 6-zone model */
+const migrateSettings = (parsed: unknown): UserSettings => {
+  const s = parsed as UserSettings;
+  if (!s.zones?.z6) {
+    const z5Max = s.zones.z5[1];
+    s.zones.z5 = [s.zones.z5[0], Math.round((z5Max + s.maxHr) / 2)];
+    s.zones.z6 = [s.zones.z5[1] + 1, s.maxHr];
+  }
+  return s;
+};
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<UserSettings>(() => {
     try {
       const saved = localStorage.getItem("runteam-settings");
-      return saved ? JSON.parse(saved) : defaultSettings;
+      if (!saved) return defaultSettings;
+      return migrateSettings(JSON.parse(saved));
     } catch {
       return defaultSettings;
     }

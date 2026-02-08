@@ -3,7 +3,7 @@
 import {useState, useEffect, useCallback, useRef} from 'react';
 import {db} from '@/lib/db';
 import {fetchActivityDetail} from '@/lib/strava';
-import type {StravaDetailedActivity, StravaBestEffort} from '@/lib/strava';
+import type {StravaDetailedActivity, StravaBestEffort, StravaSegmentEffort} from '@/lib/strava';
 import type {ActivitySummary} from '@/lib/mockData';
 
 // ----- Constants -----
@@ -32,9 +32,22 @@ export interface SyncState {
   cooldownSeconds: number;
   /** All best efforts collected so far from synced activities */
   bestEfforts: BestEffortWithMeta[];
+  /** All segment efforts collected so far from synced activities */
+  segmentEfforts: SegmentEffortWithMeta[];
 }
 
 export interface BestEffortWithMeta extends StravaBestEffort {
+  /** The parent activity's sport_type for filtering */
+  activitySportType: string;
+  /** The parent activity's start_date_local for time filtering */
+  activityDate: string;
+  /** The parent activity's name */
+  activityName: string;
+}
+
+export interface SegmentEffortWithMeta extends StravaSegmentEffort {
+  /** The parent activity's ID */
+  activityId: number;
   /** The parent activity's sport_type for filtering */
   activitySportType: string;
   /** The parent activity's start_date_local for time filtering */
@@ -58,6 +71,20 @@ const extractBestEfforts = (
   }));
 };
 
+const extractSegmentEfforts = (
+  detail: StravaDetailedActivity,
+): SegmentEffortWithMeta[] => {
+  if (!detail.segment_efforts || detail.segment_efforts.length === 0) return [];
+
+  return detail.segment_efforts.map((effort) => ({
+    ...effort,
+    activityId: detail.id,
+    activitySportType: detail.sport_type,
+    activityDate: detail.start_date_local.split('T')[0],
+    activityName: detail.name,
+  }));
+};
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,6 +101,7 @@ export const useSyncActivityDetails = (
     isRateLimited: false,
     cooldownSeconds: 0,
     bestEfforts: [],
+    segmentEfforts: [],
   });
 
   // Guard: prevent concurrent sync runs
@@ -104,12 +132,14 @@ export const useSyncActivityDetails = (
     // 1. Check which activities are already cached in IndexedDB
     const cachedIds = new Set<number>();
     const allEfforts: BestEffortWithMeta[] = [];
+    const allSegmentEfforts: SegmentEffortWithMeta[] = [];
 
     const cachedDetails = await db.activityDetails.bulkGet(activityIds);
     for (const cached of cachedDetails) {
       if (cached) {
         cachedIds.add(cached.id);
         allEfforts.push(...extractBestEfforts(cached.data));
+        allSegmentEfforts.push(...extractSegmentEfforts(cached.data));
       }
     }
 
@@ -120,6 +150,7 @@ export const useSyncActivityDetails = (
       total,
       synced: cachedIds.size,
       bestEfforts: [...allEfforts],
+      segmentEfforts: [...allSegmentEfforts],
     }));
 
     // If everything is cached, we're done
@@ -161,6 +192,7 @@ export const useSyncActivityDetails = (
         if (result.status === 'fulfilled') {
           successCount++;
           allEfforts.push(...extractBestEfforts(result.value));
+          allSegmentEfforts.push(...extractSegmentEfforts(result.value));
         } else if (
           result.reason instanceof Error &&
           result.reason.message.includes('429')
@@ -175,6 +207,7 @@ export const useSyncActivityDetails = (
         ...prev,
         synced: prev.synced + successCount,
         bestEfforts: [...allEfforts],
+        segmentEfforts: [...allSegmentEfforts],
       }));
 
       // If rate limited, pause with countdown then retry failed items

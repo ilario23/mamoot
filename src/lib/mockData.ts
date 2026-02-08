@@ -51,6 +51,7 @@ export interface UserSettings {
     z3: [number, number];
     z4: [number, number];
     z5: [number, number];
+    z6: [number, number];
   };
 }
 
@@ -67,11 +68,12 @@ export const defaultSettings: UserSettings = {
   maxHr: 190,
   restingHr: 55,
   zones: {
-    z1: [90, 128],
-    z2: [129, 145],
-    z3: [146, 162],
-    z4: [163, 175],
-    z5: [176, 190],
+    z1: [90, 114],
+    z2: [115, 133],
+    z3: [134, 152],
+    z4: [153, 167],
+    z5: [168, 181],
+    z6: [182, 190],
   },
 };
 
@@ -97,7 +99,8 @@ export function getZoneForHr(hr: number, zones: UserSettings['zones']): number {
   if (hr <= zones.z2[1]) return 2;
   if (hr <= zones.z3[1]) return 3;
   if (hr <= zones.z4[1]) return 4;
-  return 5;
+  if (hr <= zones.z5[1]) return 5;
+  return 6;
 }
 
 export const ZONE_COLORS: Record<number, string> = {
@@ -106,14 +109,16 @@ export const ZONE_COLORS: Record<number, string> = {
   3: 'hsl(48 96% 53%)',
   4: 'hsl(312 100% 67%)',
   5: 'hsl(0 84% 60%)',
+  6: 'hsl(270 70% 55%)',
 };
 
 export const ZONE_NAMES: Record<number, string> = {
   1: 'Recovery',
-  2: 'Endurance',
-  3: 'Tempo',
+  2: 'Aerobic Endurance',
+  3: 'Aerobic Power',
   4: 'Threshold',
-  5: 'VO2 Max',
+  5: 'Anaerobic Endurance',
+  6: 'Anaerobic Power',
 };
 
 // ----- Activity type configuration -----

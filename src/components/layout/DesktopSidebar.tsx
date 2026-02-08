@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {LayoutDashboard, CalendarDays, List, Bot, Trophy} from 'lucide-react';
+import {LayoutDashboard, CalendarDays, List, Bot, Trophy, Mountain} from 'lucide-react';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 
 const navItems = [
@@ -10,6 +10,7 @@ const navItems = [
   {href: '/calendar', icon: CalendarDays, label: 'Calendar', activeClass: 'bg-nav-calendar text-nav-calendar-foreground'},
   {href: '/activities', icon: List, label: 'Activities', activeClass: 'bg-nav-activities text-nav-activities-foreground'},
   {href: '/records', icon: Trophy, label: 'Records', activeClass: 'bg-nav-records text-nav-records-foreground'},
+  {href: '/segments', icon: Mountain, label: 'Segments', activeClass: 'bg-nav-segments text-nav-segments-foreground'},
   {href: '/ai-chat', icon: Bot, label: 'AI Team', activeClass: 'bg-nav-ai text-nav-ai-foreground'},
 ];
 
