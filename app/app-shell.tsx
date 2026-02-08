@@ -3,9 +3,26 @@
 import DesktopSidebar from '@/components/layout/DesktopSidebar';
 import BottomNav from '@/components/layout/BottomNav';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
+import LoginWall from '@/components/auth/LoginWall';
+import {useStravaAuth} from '@/contexts/StravaAuthContext';
+import {Loader2} from 'lucide-react';
 import type {ReactNode} from 'react';
 
 const AppShell = ({children}: {children: ReactNode}) => {
+  const {isAuthenticated, isLoading} = useStravaAuth();
+
+  if (isLoading) {
+    return (
+      <div className='min-h-screen flex items-center justify-center bg-background'>
+        <Loader2 className='h-8 w-8 animate-spin text-primary' />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginWall />;
+  }
+
   return (
     <div className='min-h-screen flex w-full bg-background'>
       {/* Desktop Sidebar */}
