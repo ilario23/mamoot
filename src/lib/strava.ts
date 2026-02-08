@@ -411,6 +411,7 @@ export const transformActivity = (
     elevationGain: Math.round(a.total_elevation_gain),
     calories: Math.round(a.calories ?? 0),
     hasDetailedData: true,
+    polyline: a.map?.summary_polyline ?? undefined,
   };
 };
 

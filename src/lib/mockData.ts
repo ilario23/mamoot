@@ -20,6 +20,7 @@ export interface ActivitySummary {
   elevationGain: number;
   calories: number;
   hasDetailedData: boolean;
+  polyline?: string; // encoded Google polyline for the route
 }
 
 /** @deprecated Use ActivitySummary instead */

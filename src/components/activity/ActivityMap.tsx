@@ -4,46 +4,7 @@ import { useEffect } from "react";
 import { MapContainer, TileLayer, Polyline, CircleMarker, useMap } from "react-leaflet";
 import type { LatLngTuple, LatLngBoundsExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
-
-// ---------------------------------------------------------------------------
-// Google polyline encoding decoder (compact implementation)
-// Ref: https://developers.google.com/maps/documentation/utilities/polylinealgorithm
-// ---------------------------------------------------------------------------
-const decodePolyline = (encoded: string): LatLngTuple[] => {
-  const points: LatLngTuple[] = [];
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-
-  while (index < encoded.length) {
-    let shift = 0;
-    let result = 0;
-    let byte: number;
-
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
-
-    shift = 0;
-    result = 0;
-
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    lng += result & 1 ? ~(result >> 1) : result >> 1;
-
-    points.push([lat / 1e5, lng / 1e5]);
-  }
-
-  return points;
-};
+import { decodePolyline } from "@/lib/polyline";
 
 // ---------------------------------------------------------------------------
 // Inner component that auto-fits map bounds to the route
@@ -83,7 +44,7 @@ const ActivityMap = ({ polyline }: ActivityMapProps) => {
 
   if (positions.length === 0) {
     return (
-      <div className="border-3 border-foreground p-8 bg-muted shadow-neo flex items-center justify-center min-h-[300px] md:min-h-[400px]">
+      <div className="border-3 border-border p-8 bg-muted shadow-neo flex items-center justify-center min-h-[300px] md:min-h-[400px]">
         <p className="font-black text-muted-foreground uppercase">
           No route data available
         </p>
@@ -95,7 +56,7 @@ const ActivityMap = ({ polyline }: ActivityMapProps) => {
   const endPoint = positions[positions.length - 1];
 
   return (
-    <div className="border-3 border-foreground shadow-neo overflow-hidden min-h-[300px] md:min-h-[400px]">
+    <div className="border-3 border-border shadow-neo overflow-hidden min-h-[300px] md:min-h-[400px]">
       <MapContainer
         center={startPoint}
         zoom={13}
