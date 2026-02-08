@@ -1,0 +1,62 @@
+import { Split, formatPace } from "@/lib/mockData";
+
+interface Props {
+  splits: Split[];
+}
+
+const SplitsTable = ({ splits }: Props) => {
+  return (
+    <div className="border-3 border-foreground bg-background shadow-neo overflow-hidden">
+      <div className="p-4 border-b-3 border-foreground">
+        <h3 className="font-black text-lg uppercase tracking-wider">Splits</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b-3 border-foreground bg-muted">
+              <th className="text-left p-3 font-black text-xs uppercase">
+                KM
+              </th>
+              <th className="text-right p-3 font-black text-xs uppercase">
+                Pace
+              </th>
+              <th className="text-right p-3 font-black text-xs uppercase">
+                Avg HR
+              </th>
+              <th className="text-right p-3 font-black text-xs uppercase">
+                Elev ↑
+              </th>
+              <th className="text-right p-3 font-black text-xs uppercase">
+                Elev ↓
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {splits.map((split) => (
+              <tr
+                key={split.km}
+                className="border-b-3 border-foreground last:border-b-0"
+              >
+                <td className="p-3 font-black text-sm">{split.km}</td>
+                <td className="p-3 font-bold text-sm text-right">
+                  {formatPace(split.pace)}/km
+                </td>
+                <td className="p-3 font-bold text-sm text-right">
+                  {split.avgHr} bpm
+                </td>
+                <td className="p-3 font-bold text-sm text-right">
+                  {split.elevationGain}m
+                </td>
+                <td className="p-3 font-bold text-sm text-right">
+                  {split.elevationLoss}m
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+export default SplitsTable;
