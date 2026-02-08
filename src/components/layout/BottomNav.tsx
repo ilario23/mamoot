@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, CalendarDays, Settings, Bot } from "lucide-react";
+import { LayoutDashboard, CalendarDays, Settings, Bot, Trophy } from "lucide-react";
 
 const items = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/calendar", icon: CalendarDays, label: "Calendar" },
+  { href: "/records", icon: Trophy, label: "Records" },
   { href: "/ai-chat", icon: Bot, label: "AI Team" },
   { href: "/settings", icon: Settings, label: "Settings" },
 ];

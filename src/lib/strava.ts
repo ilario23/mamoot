@@ -196,6 +196,24 @@ export interface StravaSummaryActivity {
   gear_id?: string;
 }
 
+/** A best effort for a standard distance within an activity */
+export interface StravaBestEffort {
+  id: number;
+  resource_state: number;
+  name: string; // e.g. "400m", "1k", "1 Mile", "5k", "10k", "Half-Marathon"
+  activity: { id: number; resource_state: number };
+  athlete: { id: number; resource_state: number };
+  elapsed_time: number; // seconds
+  moving_time: number; // seconds
+  start_date: string;
+  start_date_local: string;
+  distance: number; // meters
+  start_index: number;
+  end_index: number;
+  pr_rank: number | null; // 1 = PR, 2 = 2nd, 3 = 3rd, null = not top 3
+  achievements: unknown[];
+}
+
 /** Strava DetailedActivity */
 export interface StravaDetailedActivity extends StravaSummaryActivity {
   description: string;
@@ -204,7 +222,7 @@ export interface StravaDetailedActivity extends StravaSummaryActivity {
   segment_efforts: unknown[];
   splits_metric: StravaSplit[];
   laps: StravaLap[];
-  best_efforts: unknown[];
+  best_efforts: StravaBestEffort[];
   gear?: {
     id: string;
     primary: boolean;
