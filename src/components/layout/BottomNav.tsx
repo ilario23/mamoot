@@ -5,11 +5,11 @@ import {usePathname} from 'next/navigation';
 import {LayoutDashboard, CalendarDays, List, Bot, Trophy} from 'lucide-react';
 
 const items = [
-  {href: '/', icon: LayoutDashboard, label: 'Dashboard'},
-  {href: '/calendar', icon: CalendarDays, label: 'Calendar'},
-  {href: '/activities', icon: List, label: 'Activities'},
-  {href: '/records', icon: Trophy, label: 'Records'},
-  {href: '/ai-chat', icon: Bot, label: 'AI Team'},
+  {href: '/', icon: LayoutDashboard, label: 'Dashboard', activeClass: 'bg-nav-dashboard text-nav-dashboard-foreground'},
+  {href: '/calendar', icon: CalendarDays, label: 'Calendar', activeClass: 'bg-nav-calendar text-nav-calendar-foreground'},
+  {href: '/activities', icon: List, label: 'Activities', activeClass: 'bg-nav-activities text-nav-activities-foreground'},
+  {href: '/records', icon: Trophy, label: 'Records', activeClass: 'bg-nav-records text-nav-records-foreground'},
+  {href: '/ai-chat', icon: Bot, label: 'AI Team', activeClass: 'bg-nav-ai text-nav-ai-foreground'},
 ];
 
 const BottomNav = () => {
@@ -25,7 +25,7 @@ const BottomNav = () => {
             key={item.href}
             href={item.href}
             className={`flex-1 flex flex-col items-center gap-1 py-3 font-bold text-xs transition-colors ${
-              isActive ? 'bg-primary text-primary-foreground' : 'bg-background'
+              isActive ? item.activeClass : 'bg-background'
             }`}
           >
             <item.icon className='h-5 w-5' />

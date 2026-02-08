@@ -65,6 +65,28 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        nav: {
+          dashboard: {
+            DEFAULT: "hsl(var(--nav-dashboard))",
+            foreground: "hsl(var(--nav-dashboard-foreground))",
+          },
+          calendar: {
+            DEFAULT: "hsl(var(--nav-calendar))",
+            foreground: "hsl(var(--nav-calendar-foreground))",
+          },
+          activities: {
+            DEFAULT: "hsl(var(--nav-activities))",
+            foreground: "hsl(var(--nav-activities-foreground))",
+          },
+          records: {
+            DEFAULT: "hsl(var(--nav-records))",
+            foreground: "hsl(var(--nav-records-foreground))",
+          },
+          ai: {
+            DEFAULT: "hsl(var(--nav-ai))",
+            foreground: "hsl(var(--nav-ai-foreground))",
+          },
+        },
         zone: {
           1: "hsl(var(--zone-1))",
           2: "hsl(var(--zone-2))",

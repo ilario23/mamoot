@@ -6,11 +6,11 @@ import {LayoutDashboard, CalendarDays, List, Bot, Trophy} from 'lucide-react';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 
 const navItems = [
-  {href: '/', icon: LayoutDashboard, label: 'Dashboard'},
-  {href: '/calendar', icon: CalendarDays, label: 'Calendar'},
-  {href: '/activities', icon: List, label: 'Activities'},
-  {href: '/records', icon: Trophy, label: 'Records'},
-  {href: '/ai-chat', icon: Bot, label: 'AI Team'},
+  {href: '/', icon: LayoutDashboard, label: 'Dashboard', activeClass: 'bg-nav-dashboard text-nav-dashboard-foreground'},
+  {href: '/calendar', icon: CalendarDays, label: 'Calendar', activeClass: 'bg-nav-calendar text-nav-calendar-foreground'},
+  {href: '/activities', icon: List, label: 'Activities', activeClass: 'bg-nav-activities text-nav-activities-foreground'},
+  {href: '/records', icon: Trophy, label: 'Records', activeClass: 'bg-nav-records text-nav-records-foreground'},
+  {href: '/ai-chat', icon: Bot, label: 'AI Team', activeClass: 'bg-nav-ai text-nav-ai-foreground'},
 ];
 
 const DesktopSidebar = () => {
@@ -50,7 +50,7 @@ const DesktopSidebar = () => {
               href={item.href}
               className={`flex items-center gap-3 px-4 py-3 font-bold text-sm border-3 border-border transition-all ${
                 isActive
-                  ? 'bg-primary text-primary-foreground shadow-neo-sm'
+                  ? `${item.activeClass} shadow-neo-sm`
                   : 'bg-background hover:bg-muted'
               }`}
             >

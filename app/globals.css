@@ -55,6 +55,18 @@
     --sidebar-border: 0 0% 0%;
     --sidebar-ring: 312 100% 67%;
 
+    /* Nav section accent colors */
+    --nav-dashboard: 312 100% 67%;
+    --nav-dashboard-foreground: 0 0% 0%;
+    --nav-calendar: 217 91% 60%;
+    --nav-calendar-foreground: 0 0% 100%;
+    --nav-activities: 152 65% 42%;
+    --nav-activities-foreground: 0 0% 100%;
+    --nav-records: 48 96% 53%;
+    --nav-records-foreground: 0 0% 0%;
+    --nav-ai: 265 85% 60%;
+    --nav-ai-foreground: 0 0% 100%;
+
     /* HR Zone colors */
     --zone-1: 84 78% 55%;
     --zone-2: 217 91% 60%;
@@ -135,6 +147,18 @@
 
     /* Neo shadow: muted magenta glow */
     --neo-shadow: 312 50% 20%;
+
+    /* Nav section accent colors */
+    --nav-dashboard: 312 100% 67%;
+    --nav-dashboard-foreground: 0 0% 0%;
+    --nav-calendar: 217 91% 60%;
+    --nav-calendar-foreground: 0 0% 100%;
+    --nav-activities: 152 65% 45%;
+    --nav-activities-foreground: 0 0% 100%;
+    --nav-records: 48 96% 53%;
+    --nav-records-foreground: 0 0% 0%;
+    --nav-ai: 265 85% 63%;
+    --nav-ai-foreground: 0 0% 100%;
 
     /* HR Zone colors — keep vibrant */
     --zone-1: 84 78% 55%;

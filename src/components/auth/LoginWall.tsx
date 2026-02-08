@@ -1,6 +1,6 @@
 'use client';
 
-import {Suspense, useEffect, useState} from 'react';
+import {Suspense, useEffect, useRef} from 'react';
 import {useSearchParams, useRouter} from 'next/navigation';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {toast} from '@/hooks/use-toast';
@@ -17,7 +17,7 @@ const LoginWallContent = () => {
   const {login, handleOAuthCallback, isLoading} = useStravaAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [isExchangingCode, setIsExchangingCode] = useState(false);
+  const isExchangingRef = useRef(false);
 
   // Handle OAuth callback when redirected back from Strava
   useEffect(() => {
@@ -34,17 +34,17 @@ const LoginWallContent = () => {
       return;
     }
 
-    if (code && !isExchangingCode) {
-      setIsExchangingCode(true);
+    if (code && !isExchangingRef.current) {
+      isExchangingRef.current = true;
       handleOAuthCallback(code)
         .then(() => {
           toast({
             title: 'Strava Connected',
             description: 'Your Strava account has been linked successfully.',
           });
-          router.replace('/', {scroll: false});
         })
         .catch(() => {
+          isExchangingRef.current = false;
           toast({
             title: 'Connection Failed',
             description:
@@ -53,17 +53,16 @@ const LoginWallContent = () => {
           });
         })
         .finally(() => {
-          setIsExchangingCode(false);
           router.replace('/', {scroll: false});
         });
     }
-  }, [searchParams, handleOAuthCallback, router, isExchangingCode]);
+  }, [searchParams, handleOAuthCallback, router]);
 
   const handleConnect = () => {
     login();
   };
 
-  if (isLoading || isExchangingCode) {
+  if (isLoading) {
     return (
       <div className='min-h-screen flex items-center justify-center bg-background'>
         <div className='flex flex-col items-center gap-4'>
