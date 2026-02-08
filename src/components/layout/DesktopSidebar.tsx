@@ -1,30 +1,37 @@
-import { Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Settings } from "lucide-react";
-import AITeamChat from "./AITeamChat";
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { LayoutDashboard, CalendarDays, Settings, Bot } from "lucide-react";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/settings", icon: Settings, label: "Settings" },
+  { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/calendar", icon: CalendarDays, label: "Calendar" },
+  { href: "/ai-chat", icon: Bot, label: "AI Team" },
+  { href: "/settings", icon: Settings, label: "Settings" },
 ];
 
 const DesktopSidebar = () => {
-  const location = useLocation();
+  const pathname = usePathname();
 
   return (
-    <aside className="hidden md:flex flex-col w-80 border-r-3 border-foreground bg-background shrink-0 h-screen sticky top-0">
+    <aside className="hidden md:flex flex-col w-64 border-r-3 border-foreground bg-background shrink-0 h-screen sticky top-0">
       {/* Logo */}
       <div className="p-4 border-b-3 border-foreground">
         <h1 className="font-black text-2xl tracking-tight">🏃 RunTeam AI</h1>
       </div>
 
       {/* Nav links */}
-      <nav className="p-3 space-y-2 border-b-3 border-foreground">
+      <nav className="p-3 space-y-2">
         {navItems.map((item) => {
-          const isActive = location.pathname === item.to;
+          const isActive =
+            item.href === "/"
+              ? pathname === "/"
+              : pathname.startsWith(item.href);
           return (
             <Link
-              key={item.to}
-              to={item.to}
+              key={item.href}
+              href={item.href}
               className={`flex items-center gap-3 px-4 py-3 font-bold text-sm border-3 border-foreground transition-all ${
                 isActive
                   ? "bg-primary text-primary-foreground shadow-neo-sm"
@@ -37,11 +44,6 @@ const DesktopSidebar = () => {
           );
         })}
       </nav>
-
-      {/* AI Team Chat — fills remaining space */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <AITeamChat />
-      </div>
     </aside>
   );
 };
