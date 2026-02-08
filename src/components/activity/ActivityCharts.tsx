@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -12,6 +12,7 @@ import {
   ReferenceArea,
   AreaChart,
   Area,
+  Brush,
 } from "recharts";
 import { StreamPoint, ZONE_COLORS } from "@/lib/mockData";
 import { useSettings } from "@/contexts/SettingsContext";
@@ -24,8 +25,10 @@ const ActivityCharts = ({ stream }: Props) => {
   const { settings } = useSettings();
 
   const chartData = useMemo(() => {
-    return stream
-      .filter((_, i) => i % 3 === 0) // Sample every 3rd point for perf
+    const sampleStep = Math.max(1, Math.floor(stream.length / 400));
+
+    const sampled = stream
+      .filter((_, i) => i % sampleStep === 0)
       .map((p) => ({
         distance: Number((p.distance / 1000).toFixed(2)),
         pace:
@@ -35,21 +38,63 @@ const ActivityCharts = ({ stream }: Props) => {
         heartrate: p.heartrate,
         altitude: p.altitude,
       }));
+
+    // 5-point moving average smoothing
+    const smooth = <K extends "pace" | "heartrate" | "altitude">(
+      data: typeof sampled,
+      key: K,
+      window = 5
+    ) => {
+      const half = Math.floor(window / 2);
+      return data.map((point, i) => {
+        const slice = data.slice(Math.max(0, i - half), i + half + 1);
+        const values = slice
+          .map((d) => d[key])
+          .filter((v): v is number => v !== null);
+        if (values.length === 0) return point;
+        const avg = values.reduce((a, b) => a + b, 0) / values.length;
+        return { ...point, [key]: Number(avg.toFixed(2)) };
+      });
+    };
+
+    let result = sampled;
+    result = smooth(result, "pace");
+    result = smooth(result, "heartrate");
+    result = smooth(result, "altitude");
+    return result;
   }, [stream]);
 
-  const paceDomain = useMemo(() => {
+  const [showFullPace, setShowFullPace] = useState(false);
+
+  const { clippedDomain, fullDomain, isCut } = useMemo(() => {
     const paceValues = chartData
       .map((d) => d.pace)
       .filter((p): p is number => p !== null && p > 0);
-    if (paceValues.length === 0) return [0, 10];
-    const min = Math.min(...paceValues);
-    const max = Math.max(...paceValues);
-    const padding = (max - min) * 0.15 || 0.5;
-    return [
-      Math.max(0, Math.floor((min - padding) * 2) / 2),
-      Math.ceil((max + padding) * 2) / 2,
-    ];
+    if (paceValues.length === 0)
+      return { clippedDomain: [0, 10], fullDomain: [0, 10], isCut: false };
+
+    const sorted = [...paceValues].sort((a, b) => a - b);
+    const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+    const min = sorted[0]; // fastest pace (keep 100%)
+    const max = sorted[sorted.length - 1]; // slowest pace
+
+    const pad = (lo: number, hi: number) => {
+      const p = (hi - lo) * 0.1 || 0.5;
+      return [
+        Math.max(0, Math.floor((lo - p) * 2) / 2),
+        Math.ceil((hi + p) * 2) / 2,
+      ];
+    };
+
+    // Fast side: use actual min (100% data), slow side: clip at P95
+    const clipped = pad(min, p95);
+    const full = pad(min, max);
+    const isCut = clipped[1] !== full[1];
+
+    return { clippedDomain: clipped, fullDomain: full, isCut };
   }, [chartData]);
+
+  const paceDomain = showFullPace ? fullDomain : clippedDomain;
 
   const formatPace = (value: number): string => {
     const minutes = Math.floor(value);
@@ -72,9 +117,21 @@ const ActivityCharts = ({ stream }: Props) => {
 
       {/* Pace */}
       <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
-        <p className="font-black text-xs uppercase mb-3">Pace (min/km)</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="font-black text-xs uppercase">Pace (min/km)</p>
+          {isCut && (
+            <button
+              onClick={() => setShowFullPace((v) => !v)}
+              className="text-xs font-bold uppercase border-2 border-border px-2 py-0.5 bg-background hover:bg-foreground hover:text-background transition-colors"
+              aria-label={showFullPace ? "Clip pace outliers" : "Show full pace range"}
+              tabIndex={0}
+            >
+              {showFullPace ? "Clip outliers" : "Show all"}
+            </button>
+          )}
+        </div>
         <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={chartData}>
+          <LineChart data={chartData} syncId="activity">
             <CartesianGrid stroke="#000" strokeOpacity={0.1} />
             <XAxis
               dataKey="distance"
@@ -111,7 +168,7 @@ const ActivityCharts = ({ stream }: Props) => {
       <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
         <p className="font-black text-xs uppercase mb-3">Heart Rate (bpm)</p>
         <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={chartData}>
+          <LineChart data={chartData} syncId="activity">
             <CartesianGrid stroke="#000" strokeOpacity={0.1} />
             <XAxis
               dataKey="distance"
@@ -180,7 +237,7 @@ const ActivityCharts = ({ stream }: Props) => {
       <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
         <p className="font-black text-xs uppercase mb-3">Elevation (m)</p>
         <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={chartData}>
+          <AreaChart data={chartData} syncId="activity" margin={{ bottom: 5 }}>
             <CartesianGrid stroke="#000" strokeOpacity={0.1} />
             <XAxis
               dataKey="distance"
@@ -202,6 +259,13 @@ const ActivityCharts = ({ stream }: Props) => {
               strokeWidth={3}
               fill={ZONE_COLORS[3]}
               fillOpacity={0.3}
+            />
+            <Brush
+              dataKey="distance"
+              height={24}
+              stroke="#000"
+              strokeWidth={2}
+              travellerWidth={10}
             />
           </AreaChart>
         </ResponsiveContainer>
