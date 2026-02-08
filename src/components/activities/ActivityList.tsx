@@ -1,6 +1,8 @@
 'use client';
 
+import {useRef} from 'react';
 import {useRouter} from 'next/navigation';
+import {useVirtualizer} from '@tanstack/react-virtual';
 import {
   formatPace,
   formatDuration,
@@ -31,12 +33,24 @@ const ACCENT_COLOR: Record<ActivityType, string> = {
   Swim: 'var(--activity-swim-3)',
 };
 
+const ITEM_GAP = 12; // Matches space-y-3 (0.75rem = 12px)
+const ESTIMATED_ITEM_HEIGHT = 80;
+
 interface ActivityListProps {
   activities: ActivitySummary[];
 }
 
 const ActivityList = ({activities}: ActivityListProps) => {
   const router = useRouter();
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: activities.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => ESTIMATED_ITEM_HEIGHT,
+    overscan: 5,
+    gap: ITEM_GAP,
+  });
 
   const handleNavigate = (id: string) => {
     router.push(`/activity/${id}`);
@@ -61,113 +75,134 @@ const ActivityList = ({activities}: ActivityListProps) => {
   }
 
   return (
-    <div className='space-y-3'>
-      {activities.map((activity) => {
-        const Icon = ACTIVITY_ICON[activity.type] ?? Footprints;
-        const accentClass = ACCENT_BG[activity.type] ?? 'bg-primary';
-        const dateStr = new Date(activity.date).toLocaleDateString('en-GB', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        });
+    <div ref={scrollContainerRef} className='h-full overflow-auto'>
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const activity = activities[virtualRow.index];
+          const Icon = ACTIVITY_ICON[activity.type] ?? Footprints;
+          const accentClass = ACCENT_BG[activity.type] ?? 'bg-primary';
+          const dateStr = new Date(activity.date).toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          });
 
-        return (
-          <div
-            key={activity.id}
-            role='link'
-            tabIndex={0}
-            aria-label={`${activity.name} — ${activity.distance.toFixed(1)} km on ${dateStr}`}
-            onClick={() => handleNavigate(activity.id)}
-            onKeyDown={(e) => handleKeyDown(e, activity.id)}
-            className='border-3 border-border bg-background shadow-neo cursor-pointer hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all flex overflow-hidden'
-          >
-            {/* Left accent bar */}
-            <div className={`w-2 shrink-0 ${accentClass}`} />
+          return (
+            <div
+              key={activity.id}
+              data-index={virtualRow.index}
+              ref={(node) => virtualizer.measureElement(node)}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              <div
+                role='link'
+                tabIndex={0}
+                aria-label={`${activity.name} — ${activity.distance.toFixed(1)} km on ${dateStr}`}
+                onClick={() => handleNavigate(activity.id)}
+                onKeyDown={(e) => handleKeyDown(e, activity.id)}
+                className='border-3 border-border bg-background shadow-neo cursor-pointer hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] transition-all flex overflow-hidden'
+              >
+                {/* Left accent bar */}
+                <div className={`w-2 shrink-0 ${accentClass}`} />
 
-            {/* Card content */}
-            <div className='flex-1 p-4 min-w-0'>
-              {/* Top row: name, date, icon */}
-              <div className='flex items-center gap-3'>
-                <div className='flex items-center gap-2 flex-1 min-w-0'>
-                  <Icon
-                    className='h-4 w-4 shrink-0 text-muted-foreground'
-                    aria-hidden='true'
-                  />
-                  <p className='font-black text-sm truncate'>{activity.name}</p>
+                {/* Card content */}
+                <div className='flex-1 p-4 min-w-0'>
+                  {/* Top row: name, date, icon */}
+                  <div className='flex items-center gap-3'>
+                    <div className='flex items-center gap-2 flex-1 min-w-0'>
+                      <Icon
+                        className='h-4 w-4 shrink-0 text-muted-foreground'
+                        aria-hidden='true'
+                      />
+                      <p className='font-black text-sm truncate'>{activity.name}</p>
+                    </div>
+                    <span className='text-xs font-bold text-muted-foreground uppercase tracking-wider shrink-0'>
+                      {dateStr}
+                    </span>
+                  </div>
+
+                  {/* Stats row */}
+                  <div className='flex items-center flex-wrap gap-x-3 gap-y-1 mt-2'>
+                    <span className='text-sm font-black'>
+                      {activity.distance.toFixed(1)} km
+                    </span>
+                    <span
+                      className='text-muted-foreground text-xs select-none'
+                      aria-hidden='true'
+                    >
+                      /
+                    </span>
+                    <span className='text-sm font-bold text-muted-foreground'>
+                      {formatDuration(activity.duration)}
+                    </span>
+                    <span
+                      className='text-muted-foreground text-xs select-none'
+                      aria-hidden='true'
+                    >
+                      /
+                    </span>
+                    <span className='text-sm font-bold text-muted-foreground'>
+                      {activity.avgPace > 0
+                        ? `${formatPace(activity.avgPace)}/km`
+                        : '—'}
+                    </span>
+                    {activity.avgHr > 0 && (
+                      <>
+                        <span
+                          className='text-muted-foreground text-xs select-none'
+                          aria-hidden='true'
+                        >
+                          /
+                        </span>
+                        <span className='text-sm font-bold text-muted-foreground'>
+                          {activity.avgHr} bpm
+                        </span>
+                      </>
+                    )}
+                    {activity.elevationGain > 0 && (
+                      <>
+                        <span
+                          className='text-muted-foreground text-xs select-none'
+                          aria-hidden='true'
+                        >
+                          /
+                        </span>
+                        <span className='text-sm font-bold text-muted-foreground'>
+                          {Math.round(activity.elevationGain)} m elev
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <span className='text-xs font-bold text-muted-foreground uppercase tracking-wider shrink-0'>
-                  {dateStr}
-                </span>
-              </div>
 
-              {/* Stats row */}
-              <div className='flex items-center flex-wrap gap-x-3 gap-y-1 mt-2'>
-                <span className='text-sm font-black'>
-                  {activity.distance.toFixed(1)} km
-                </span>
-                <span
-                  className='text-muted-foreground text-xs select-none'
-                  aria-hidden='true'
-                >
-                  /
-                </span>
-                <span className='text-sm font-bold text-muted-foreground'>
-                  {formatDuration(activity.duration)}
-                </span>
-                <span
-                  className='text-muted-foreground text-xs select-none'
-                  aria-hidden='true'
-                >
-                  /
-                </span>
-                <span className='text-sm font-bold text-muted-foreground'>
-                  {activity.avgPace > 0
-                    ? `${formatPace(activity.avgPace)}/km`
-                    : '—'}
-                </span>
-                {activity.avgHr > 0 && (
-                  <>
-                    <span
-                      className='text-muted-foreground text-xs select-none'
-                      aria-hidden='true'
-                    >
-                      /
-                    </span>
-                    <span className='text-sm font-bold text-muted-foreground'>
-                      {activity.avgHr} bpm
-                    </span>
-                  </>
-                )}
-                {activity.elevationGain > 0 && (
-                  <>
-                    <span
-                      className='text-muted-foreground text-xs select-none'
-                      aria-hidden='true'
-                    >
-                      /
-                    </span>
-                    <span className='text-sm font-bold text-muted-foreground'>
-                      {Math.round(activity.elevationGain)} m elev
-                    </span>
-                  </>
+                {/* Route polyline preview */}
+                {activity.polyline && (
+                  <div className='shrink-0 border-l-3 border-border bg-muted/40 flex items-center justify-center px-2'>
+                    <RoutePreview
+                      polyline={activity.polyline}
+                      color={ACCENT_COLOR[activity.type] ?? 'hsl(312, 100%, 67%)'}
+                      width={72}
+                      height={56}
+                    />
+                  </div>
                 )}
               </div>
             </div>
-
-            {/* Route polyline preview */}
-            {activity.polyline && (
-              <div className='shrink-0 border-l-3 border-border bg-muted/40 flex items-center justify-center px-2'>
-                <RoutePreview
-                  polyline={activity.polyline}
-                  color={ACCENT_COLOR[activity.type] ?? 'hsl(312, 100%, 67%)'}
-                  width={72}
-                  height={56}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 };

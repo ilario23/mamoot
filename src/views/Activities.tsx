@@ -124,37 +124,42 @@ const Activities = () => {
   }
 
   return (
-    <div className='space-y-6'>
-      {/* Page title */}
-      <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight'>
-        Activities
-      </h1>
+    <div className='flex flex-col gap-6 h-full'>
+      {/* Fixed header sections */}
+      <div className='shrink-0 space-y-6'>
+        {/* Page title */}
+        <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight'>
+          Activities
+        </h1>
 
-      {/* Filters toolbar */}
-      <ActivityFilters
-        availableYears={availableYears}
-        selectedYear={selectedYear}
-        onYearChange={setSelectedYear}
-        availableTypes={availableTypes}
-        selectedType={selectedType}
-        onTypeChange={setSelectedType}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        sortBy={sortBy}
-        onSortChange={setSortBy}
-      />
+        {/* Filters toolbar */}
+        <ActivityFilters
+          availableYears={availableYears}
+          selectedYear={selectedYear}
+          onYearChange={setSelectedYear}
+          availableTypes={availableTypes}
+          selectedType={selectedType}
+          onTypeChange={setSelectedType}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+        />
 
-      {/* Summary stats */}
-      <ActivityStats activities={filteredActivities} />
+        {/* Summary stats */}
+        <ActivityStats activities={filteredActivities} />
 
-      {/* Results count */}
-      <p className='text-sm font-bold text-muted-foreground'>
-        {filteredActivities.length}{' '}
-        {filteredActivities.length === 1 ? 'activity' : 'activities'} found
-      </p>
+        {/* Results count */}
+        <p className='text-sm font-bold text-muted-foreground'>
+          {filteredActivities.length}{' '}
+          {filteredActivities.length === 1 ? 'activity' : 'activities'} found
+        </p>
+      </div>
 
-      {/* Activity list */}
-      <ActivityList activities={filteredActivities} />
+      {/* Virtual-scrolled activity list — fills remaining space */}
+      <div className='flex-1 min-h-0'>
+        <ActivityList activities={filteredActivities} />
+      </div>
     </div>
   );
 };
