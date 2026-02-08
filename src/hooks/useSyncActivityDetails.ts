@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { db } from "@/lib/db";
-import { fetchActivityDetail } from "@/lib/strava";
-import type { StravaDetailedActivity, StravaBestEffort } from "@/lib/strava";
-import type { ActivitySummary } from "@/lib/mockData";
+import {useState, useEffect, useCallback, useRef} from 'react';
+import {db} from '@/lib/db';
+import {fetchActivityDetail} from '@/lib/strava';
+import type {StravaDetailedActivity, StravaBestEffort} from '@/lib/strava';
+import type {ActivitySummary} from '@/lib/mockData';
 
 // ----- Constants -----
 
@@ -43,11 +43,29 @@ export interface BestEffortWithMeta extends StravaBestEffort {
   activityName: string;
 }
 
+// ----- Helpers -----
+
+const extractBestEfforts = (
+  detail: StravaDetailedActivity,
+): BestEffortWithMeta[] => {
+  if (!detail.best_efforts || detail.best_efforts.length === 0) return [];
+
+  return detail.best_efforts.map((effort) => ({
+    ...effort,
+    activitySportType: detail.sport_type,
+    activityDate: detail.start_date_local.split('T')[0],
+    activityName: detail.name,
+  }));
+};
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
 // ----- Hook -----
 
 export const useSyncActivityDetails = (
   activities: ActivitySummary[] | undefined,
-  enabled: boolean
+  enabled: boolean,
 ) => {
   const [state, setState] = useState<SyncState>({
     total: 0,
@@ -58,36 +76,32 @@ export const useSyncActivityDetails = (
     bestEfforts: [],
   });
 
-  // Refs to avoid stale closures in the async sync loop
+  // Guard: prevent concurrent sync runs
+  const isSyncRunningRef = useRef(false);
   const abortRef = useRef(false);
   const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Extract best efforts from a detailed activity
-  const extractBestEfforts = useCallback(
-    (detail: StravaDetailedActivity): BestEffortWithMeta[] => {
-      if (!detail.best_efforts || detail.best_efforts.length === 0) return [];
+  // Stable ref for activities to avoid re-triggering on reference changes
+  const activitiesRef = useRef<ActivitySummary[] | undefined>(activities);
+  activitiesRef.current = activities;
 
-      return detail.best_efforts.map((effort) => ({
-        ...effort,
-        activitySportType: detail.sport_type,
-        activityDate: detail.start_date_local.split("T")[0],
-        activityName: detail.name,
-      }));
-    },
-    []
-  );
-
-  // Main sync function
+  // Main sync function — uses refs, so no dependency on `activities`
   const runSync = useCallback(async () => {
-    if (!activities || activities.length === 0 || !enabled) return;
+    const currentActivities = activitiesRef.current;
+    if (!currentActivities || currentActivities.length === 0 || !enabled)
+      return;
 
+    // Prevent duplicate concurrent runs
+    if (isSyncRunningRef.current) return;
+    isSyncRunningRef.current = true;
     abortRef.current = false;
-    const activityIds = activities.map((a) => Number(a.id));
+
+    const activityIds = currentActivities.map((a) => Number(a.id));
     const total = activityIds.length;
 
-    setState((prev) => ({ ...prev, total, isSyncing: true }));
+    setState((prev) => ({...prev, total, isSyncing: true}));
 
-    // 1. Check which activities are already cached
+    // 1. Check which activities are already cached in IndexedDB
     const cachedIds = new Set<number>();
     const allEfforts: BestEffortWithMeta[] = [];
 
@@ -103,9 +117,17 @@ export const useSyncActivityDetails = (
 
     setState((prev) => ({
       ...prev,
+      total,
       synced: cachedIds.size,
       bestEfforts: [...allEfforts],
     }));
+
+    // If everything is cached, we're done
+    if (uncachedIds.length === 0) {
+      setState((prev) => ({...prev, isSyncing: false}));
+      isSyncRunningRef.current = false;
+      return;
+    }
 
     // 2. Fetch uncached activities in batches
     let cursor = 0;
@@ -119,32 +141,34 @@ export const useSyncActivityDetails = (
       const results = await Promise.allSettled(
         batchIds.map(async (id) => {
           const detail = await fetchActivityDetail(id);
-          // Cache immediately
+          // Cache to IndexedDB immediately on success
           await db.activityDetails.put({
             id,
             data: detail,
             fetchedAt: Date.now(),
           });
           return detail;
-        })
+        }),
       );
 
-      // Check for rate limiting (429 errors)
+      if (abortRef.current) break;
+
+      // Process results
       let hitRateLimit = false;
+      let successCount = 0;
+
       for (const result of results) {
-        if (result.status === "fulfilled") {
+        if (result.status === 'fulfilled') {
+          successCount++;
           allEfforts.push(...extractBestEfforts(result.value));
         } else if (
           result.reason instanceof Error &&
-          result.reason.message.includes("429")
+          result.reason.message.includes('429')
         ) {
           hitRateLimit = true;
         }
       }
 
-      const successCount = results.filter(
-        (r) => r.status === "fulfilled"
-      ).length;
       cursor += batchIds.length;
 
       setState((prev) => ({
@@ -153,24 +177,26 @@ export const useSyncActivityDetails = (
         bestEfforts: [...allEfforts],
       }));
 
-      // If rate limited, pause with countdown
+      // If rate limited, pause with countdown then retry failed items
       if (hitRateLimit && cursor < uncachedIds.length) {
-        // Rewind cursor for failed requests
+        // Rewind cursor for failed requests so they're retried
         const failedCount = batchIds.length - successCount;
         cursor -= failedCount;
+
+        const cooldownSecs = Math.ceil(RATE_LIMIT_COOLDOWN_MS / 1000);
 
         setState((prev) => ({
           ...prev,
           isRateLimited: true,
-          cooldownSeconds: Math.ceil(RATE_LIMIT_COOLDOWN_MS / 1000),
+          cooldownSeconds: cooldownSecs,
         }));
 
-        // Start countdown
-        let remaining = Math.ceil(RATE_LIMIT_COOLDOWN_MS / 1000);
+        // Countdown timer
+        let remaining = cooldownSecs;
         await new Promise<void>((resolve) => {
           cooldownTimerRef.current = setInterval(() => {
             remaining -= 1;
-            setState((prev) => ({ ...prev, cooldownSeconds: remaining }));
+            setState((prev) => ({...prev, cooldownSeconds: remaining}));
             if (remaining <= 0 || abortRef.current) {
               if (cooldownTimerRef.current) {
                 clearInterval(cooldownTimerRef.current);
@@ -193,7 +219,7 @@ export const useSyncActivityDetails = (
 
       // Wait between batches (skip if this was the last batch)
       if (cursor < uncachedIds.length && !abortRef.current) {
-        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+        await sleep(BATCH_DELAY_MS);
       }
     }
 
@@ -203,9 +229,14 @@ export const useSyncActivityDetails = (
       isRateLimited: false,
       cooldownSeconds: 0,
     }));
-  }, [activities, enabled, extractBestEfforts]);
 
-  // Start sync when activities change
+    isSyncRunningRef.current = false;
+  }, [enabled]); // Only depends on `enabled` — activities come from ref
+
+  // Trigger sync once activities are loaded
+  // Uses a stable ID string to only re-trigger when the actual list changes
+  const activityIdKey = activities?.map((a) => a.id).join(',') ?? '';
+
   useEffect(() => {
     if (!activities || activities.length === 0 || !enabled) return;
 
@@ -218,7 +249,7 @@ export const useSyncActivityDetails = (
         cooldownTimerRef.current = null;
       }
     };
-  }, [activities, enabled, runSync]);
+  }, [activityIdKey, enabled, runSync]);
 
   return state;
 };
