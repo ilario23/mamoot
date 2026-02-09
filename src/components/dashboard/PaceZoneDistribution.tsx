@@ -1,26 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
-import {
-  getZoneForHr,
   formatDuration,
   ZONE_COLORS,
-  ZONE_NAMES,
 } from "@/lib/mockData";
-import { useSettings } from "@/contexts/SettingsContext";
-import { useActivities } from "@/hooks/useStrava";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
+import { useZoneBreakdowns } from "@/hooks/useStrava";
 import { Loader2 } from "lucide-react";
 
 type MetricMode = "time" | "distance";
+
+interface ZoneData {
+  name: string;
+  value: number;
+  zone: number;
+  pct: number;
+}
 
 const PERIOD_OPTIONS = [
   { label: "2 weeks", value: 2 },
@@ -32,55 +29,56 @@ const PERIOD_OPTIONS = [
 const ZONE_KEYS = [1, 2, 3, 4, 5, 6] as const;
 
 const PaceZoneDistribution = () => {
-  const { settings } = useSettings();
   const { isAuthenticated } = useStravaAuth();
-  const { data: activities, isLoading } = useActivities();
   const [metric, setMetric] = useState<MetricMode>("time");
   const [weeks, setWeeks] = useState(4);
 
-  const chartData = useMemo(() => {
-    if (!activities || activities.length === 0) return [];
+  const { data: zoneTotals, isLoading, progress } = useZoneBreakdowns(weeks);
 
-    const now = new Date();
-    const cutoff = new Date(
-      now.getTime() - weeks * 7 * 24 * 60 * 60 * 1000
-    );
+  const { allZoneData, pieData, maxValue } = useMemo(() => {
+    const empty = { allZoneData: [] as ZoneData[], pieData: [] as ZoneData[], maxValue: 0 };
+    if (!zoneTotals) return empty;
 
-    const totals: Record<number, number> = {};
-    ZONE_KEYS.forEach((z) => {
-      totals[z] = 0;
+    const total = metric === "time" ? zoneTotals.totalTime : zoneTotals.totalDistance;
+    if (total === 0) return empty;
+
+    const all = ZONE_KEYS.map((z) => {
+      const zoneData = zoneTotals.zones[z];
+      const value = metric === "time" ? zoneData.time : zoneData.distance;
+      return {
+        name: `Zone ${z}`,
+        value: Number(value.toFixed(metric === "distance" ? 1 : 0)),
+        zone: z,
+        pct: Number(((value / total) * 100).toFixed(1)),
+      };
     });
 
-    activities.forEach((activity) => {
-      const actDate = new Date(activity.date);
-      if (actDate < cutoff) return;
-      if (activity.avgHr <= 0) return;
+    const pie = all.filter((d) => d.value > 0);
+    const max = Math.max(...all.map((d) => d.value));
 
-      const zone = getZoneForHr(activity.avgHr, settings.zones);
-      if (metric === "time") {
-        totals[zone] += activity.duration;
-      } else {
-        totals[zone] += activity.distance;
-      }
-    });
-
-    const total = ZONE_KEYS.reduce((sum, z) => sum + totals[z], 0);
-    if (total === 0) return [];
-
-    return ZONE_KEYS.map((z) => ({
-      name: `Z${z} ${ZONE_NAMES[z]}`,
-      value: Number(totals[z].toFixed(metric === "distance" ? 1 : 0)),
-      zone: z,
-      pct: Number(((totals[z] / total) * 100).toFixed(1)),
-    })).filter((d) => d.value > 0);
-  }, [activities, settings.zones, metric, weeks]);
+    return { allZoneData: all, pieData: pie, maxValue: max };
+  }, [zoneTotals, metric]);
 
   if (!isAuthenticated) return null;
 
   if (isLoading) {
+    const showProgress = progress.total > 0;
     return (
-      <div className="border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
+      <div className="border-3 border-border p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[300px] gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        {showProgress && (
+          <div className="text-center">
+            <p className="text-sm font-bold text-muted-foreground">
+              Analyzing activities: {progress.done} / {progress.total}
+            </p>
+            <div className="w-48 h-1.5 bg-muted mt-2 overflow-hidden rounded-full">
+              <div
+                className="h-full bg-primary transition-all duration-300 rounded-full"
+                style={{ width: `${(progress.done / progress.total) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -98,12 +96,17 @@ const PaceZoneDistribution = () => {
     return `${value.toFixed(1)} km`;
   };
 
+  const hasData = allZoneData.length > 0;
+
   return (
     <div className="border-3 border-border p-5 bg-background shadow-neo">
       {/* Header + controls */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <h3 className="font-black text-lg uppercase tracking-wider">
           Pace Zone Distribution
+          <span className="text-muted-foreground text-sm font-bold ml-2 normal-case">
+            ({weeks} Weeks)
+          </span>
         </h3>
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -153,8 +156,8 @@ const PaceZoneDistribution = () => {
         </div>
       </div>
 
-      {/* Chart or empty state */}
-      {chartData.length === 0 ? (
+      {/* Chart + bars layout or empty state */}
+      {!hasData ? (
         <div className="flex items-center justify-center min-h-[260px]">
           <div className="text-center">
             <p className="font-black text-lg">No data</p>
@@ -164,47 +167,89 @@ const PaceZoneDistribution = () => {
           </div>
         </div>
       ) : (
-        <ResponsiveContainer width="100%" height={320}>
-          <PieChart>
-            <Pie
-              data={chartData}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              outerRadius={110}
-              innerRadius={50}
-              strokeWidth={3}
-              stroke="#000"
-              label={({ name, pct }) => `${name.split(" ")[0]} ${pct}%`}
-              labelLine={{ stroke: "#000", strokeWidth: 2 }}
-            >
-              {chartData.map((entry) => (
-                <Cell
-                  key={`cell-${entry.zone}`}
-                  fill={ZONE_COLORS[entry.zone]}
+        <div className="flex flex-col md:flex-row items-center gap-4">
+          {/* Donut chart */}
+          <div className="w-full md:w-[280px] flex-shrink-0">
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={100}
+                  innerRadius={55}
+                  strokeWidth={3}
+                  stroke="var(--border)"
+                  paddingAngle={1}
+                >
+                  {pieData.map((entry) => (
+                    <Cell
+                      key={`cell-${entry.zone}`}
+                      fill={ZONE_COLORS[entry.zone]}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    border: "3px solid var(--border)",
+                    borderRadius: 0,
+                    fontWeight: 700,
+                    backgroundColor: "var(--background)",
+                    color: "var(--foreground)",
+                  }}
+                  formatter={(value: number, name: string) => [
+                    formatValue(value),
+                    name,
+                  ]}
                 />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                border: "3px solid #000",
-                borderRadius: 0,
-                fontWeight: 700,
-                backgroundColor: "#fff",
-              }}
-              formatter={(value: number, name: string) => [
-                formatValue(value),
-                name,
-              ]}
-            />
-            <Legend
-              formatter={(value: string) => (
-                <span className="font-bold text-xs">{value}</span>
-              )}
-            />
-          </PieChart>
-        </ResponsiveContainer>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Zone bars */}
+          <div className="flex-1 w-full space-y-3">
+            {allZoneData.map((zone) => {
+              const barWidth = maxValue > 0 ? (zone.value / maxValue) * 100 : 0;
+              return (
+                <div
+                  key={zone.zone}
+                  className="flex items-center gap-3"
+                  role="listitem"
+                  aria-label={`${zone.name}: ${zone.pct}%, ${formatValue(zone.value)}`}
+                >
+                  {/* Percentage */}
+                  <span className="w-[52px] text-right text-sm font-black tabular-nums flex-shrink-0">
+                    {zone.pct}%
+                  </span>
+
+                  {/* Zone label */}
+                  <span className="w-[60px] text-sm font-bold flex-shrink-0">
+                    {zone.name}
+                  </span>
+
+                  {/* Bar */}
+                  <div className="flex-1 h-6 bg-muted/50 rounded-sm overflow-hidden relative border border-border/30">
+                    <div
+                      className="h-full rounded-sm transition-all duration-500 ease-out"
+                      style={{
+                        width: `${barWidth}%`,
+                        backgroundColor: ZONE_COLORS[zone.zone],
+                        minWidth: zone.value > 0 ? "4px" : "0px",
+                      }}
+                    />
+                  </div>
+
+                  {/* Value */}
+                  <span className="w-[70px] text-right text-sm font-bold tabular-nums flex-shrink-0 text-muted-foreground">
+                    {formatValue(zone.value)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );

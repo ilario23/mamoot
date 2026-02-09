@@ -23,7 +23,9 @@ import type {
   StravaAthleteZones,
   StravaSummaryGear,
 } from './strava';
-import type {ActivitySummary, StreamPoint} from './mockData';
+import type {ActivitySummary, StreamPoint, UserSettings} from './mockData';
+import {computeZoneBreakdown, hashZoneSettings} from './zoneCompute';
+import type {ZoneBreakdown} from './zoneCompute';
 
 // ----- Staleness thresholds (ms) -----
 
@@ -218,6 +220,82 @@ export const cachedGetAthleteGear = async (): Promise<{
   });
 
   return {bikes, shoes};
+};
+
+// ----- Zone Breakdowns -----
+
+/**
+ * Returns a zone breakdown for a single activity.
+ * Checks IndexedDB first; if the cached breakdown matches the current
+ * zone settings (via settingsHash), returns it immediately.
+ * Otherwise, loads streams (from cache or API), computes the breakdown,
+ * and stores it.
+ */
+export const cachedGetZoneBreakdown = async (
+  activityId: number,
+  zones: UserSettings['zones'],
+): Promise<ZoneBreakdown> => {
+  const currentHash = hashZoneSettings(zones);
+  const cached = await db.zoneBreakdowns.get(activityId);
+
+  if (cached && cached.settingsHash === currentHash) {
+    return {zones: cached.zones, settingsHash: cached.settingsHash};
+  }
+
+  // Load streams (from IndexedDB cache or Strava API)
+  const stream = await cachedGetActivityStreams(activityId);
+  const breakdown = computeZoneBreakdown(stream, zones);
+
+  // Persist the computed breakdown
+  await db.zoneBreakdowns.put({
+    activityId,
+    settingsHash: breakdown.settingsHash,
+    zones: breakdown.zones,
+    computedAt: Date.now(),
+  });
+
+  return breakdown;
+};
+
+/**
+ * Processes multiple activity IDs with a concurrency limiter.
+ * Returns a Map of activityId -> ZoneBreakdown.
+ * Calls onProgress after each activity is processed.
+ */
+export const batchGetZoneBreakdowns = async (
+  activityIds: number[],
+  zones: UserSettings['zones'],
+  onProgress?: (done: number, total: number) => void,
+): Promise<Map<number, ZoneBreakdown>> => {
+  const results = new Map<number, ZoneBreakdown>();
+  const total = activityIds.length;
+  let done = 0;
+
+  const MAX_CONCURRENCY = 5;
+
+  // Process in batches of MAX_CONCURRENCY
+  for (let i = 0; i < activityIds.length; i += MAX_CONCURRENCY) {
+    const batch = activityIds.slice(i, i + MAX_CONCURRENCY);
+
+    const batchResults = await Promise.allSettled(
+      batch.map(async (id) => {
+        const breakdown = await cachedGetZoneBreakdown(id, zones);
+        return {id, breakdown};
+      }),
+    );
+
+    for (const result of batchResults) {
+      done++;
+      if (result.status === 'fulfilled') {
+        results.set(result.value.id, result.value.breakdown);
+      }
+      // Silently skip failed activities (e.g. no stream data available)
+    }
+
+    onProgress?.(done, total);
+  }
+
+  return results;
 };
 
 // ----- Force refresh helpers -----

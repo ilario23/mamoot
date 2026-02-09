@@ -1,4 +1,5 @@
 import {useQuery, useQueryClient} from '@tanstack/react-query';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {
   cachedGetAllActivities,
@@ -8,9 +9,13 @@ import {
   cachedGetAthleteZones,
   cachedGetAthleteGear,
   forceRefreshActivities,
+  batchGetZoneBreakdowns,
 } from '@/lib/stravaCache';
 import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
 import {fetchStarredSegments, fetchSegmentDetail} from '@/lib/strava';
+import {aggregateZoneBreakdowns} from '@/lib/zoneCompute';
+import type {AggregatedZoneTotals} from '@/lib/zoneCompute';
+import {useSettings} from '@/contexts/SettingsContext';
 import type {
   StravaDetailedActivity,
   StravaAthleteStats,
@@ -134,6 +139,109 @@ export const useAthleteGear = () => {
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
   });
+};
+
+// ----- Zone Breakdowns (stream-based) -----
+
+interface ZoneBreakdownProgress {
+  done: number;
+  total: number;
+}
+
+interface UseZoneBreakdownsResult {
+  data: AggregatedZoneTotals | undefined;
+  isLoading: boolean;
+  /** Progress of stream fetching (only relevant on first load) */
+  progress: ZoneBreakdownProgress;
+}
+
+/**
+ * Fetches stream-based zone breakdowns for all activities within a time window.
+ * On first load this may take a while as streams are fetched from Strava.
+ * Once cached, subsequent loads are instant.
+ */
+export const useZoneBreakdowns = (weeks: number): UseZoneBreakdownsResult => {
+  const {isAuthenticated} = useStravaAuth();
+  const {settings} = useSettings();
+  const {data: activities, isLoading: activitiesLoading} = useActivities();
+
+  const [result, setResult] = useState<AggregatedZoneTotals | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
+  const [progress, setProgress] = useState<ZoneBreakdownProgress>({done: 0, total: 0});
+
+  // Track the current computation so we can abort stale ones
+  const abortRef = useRef(0);
+
+  const handleProgress = useCallback((done: number, total: number) => {
+    setProgress({done, total});
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || activitiesLoading || !activities) {
+      setIsLoading(activitiesLoading);
+      return;
+    }
+
+    const runId = ++abortRef.current;
+
+    const compute = async () => {
+      setIsLoading(true);
+      setProgress({done: 0, total: 0});
+
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - weeks * 7 * 24 * 60 * 60 * 1000);
+
+      // Filter to activities in range that have HR data
+      const filtered = activities.filter((a) => {
+        const actDate = new Date(a.date);
+        return actDate >= cutoff && a.avgHr > 0;
+      });
+
+      if (filtered.length === 0) {
+        if (abortRef.current === runId) {
+          setResult(undefined);
+          setIsLoading(false);
+          setProgress({done: 0, total: 0});
+        }
+        return;
+      }
+
+      const activityIds = filtered.map((a) => Number(a.id));
+
+      try {
+        const breakdownMap = await batchGetZoneBreakdowns(
+          activityIds,
+          settings.zones,
+          (done, total) => {
+            if (abortRef.current === runId) {
+              handleProgress(done, total);
+            }
+          },
+        );
+
+        // Only apply if this is still the current computation
+        if (abortRef.current !== runId) return;
+
+        const breakdowns = Array.from(breakdownMap.values());
+        const aggregated = aggregateZoneBreakdowns(breakdowns);
+
+        setResult(aggregated);
+      } catch {
+        // On error, clear results
+        if (abortRef.current === runId) {
+          setResult(undefined);
+        }
+      } finally {
+        if (abortRef.current === runId) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    compute();
+  }, [isAuthenticated, activitiesLoading, activities, weeks, settings.zones, handleProgress]);
+
+  return {data: result, isLoading, progress};
 };
 
 /** Hook to force-refresh activities from the API, bypassing cache freshness */

@@ -74,6 +74,17 @@ export interface CachedAthleteGear {
   fetchedAt: number;
 }
 
+export interface CachedZoneBreakdown {
+  /** Strava activity ID (primary key) */
+  activityId: number;
+  /** Hash of zone settings used for computation — invalidates on settings change */
+  settingsHash: string;
+  /** Per-zone time (seconds) and distance (km) */
+  zones: Record<number, {time: number; distance: number}>;
+  /** Unix ms timestamp of when this breakdown was computed */
+  computedAt: number;
+}
+
 // ----- Database definition -----
 
 const db = new Dexie('RunZoneAICache') as Dexie & {
@@ -83,6 +94,7 @@ const db = new Dexie('RunZoneAICache') as Dexie & {
   athleteStats: EntityTable<CachedAthleteStats, 'athleteId'>;
   athleteZones: EntityTable<CachedAthleteZones, 'key'>;
   athleteGear: EntityTable<CachedAthleteGear, 'key'>;
+  zoneBreakdowns: EntityTable<CachedZoneBreakdown, 'activityId'>;
 };
 
 db.version(1).stores({
@@ -101,6 +113,16 @@ db.version(2).stores({
   athleteStats: 'athleteId',
   athleteZones: 'key',
   athleteGear: 'key',
+});
+
+db.version(3).stores({
+  activities: 'id, date, fetchedAt',
+  activityDetails: 'id',
+  activityStreams: 'activityId',
+  athleteStats: 'athleteId',
+  athleteZones: 'key',
+  athleteGear: 'key',
+  zoneBreakdowns: 'activityId, settingsHash',
 });
 
 export {db};
@@ -135,5 +157,6 @@ export const clearAllCache = async (): Promise<void> => {
     db.athleteStats.clear(),
     db.athleteZones.clear(),
     db.athleteGear.clear(),
+    db.zoneBreakdowns.clear(),
   ]);
 };
