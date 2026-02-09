@@ -12,9 +12,6 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "RunTeam AI",
   description: "AI-powered running analytics with Strava integration",
-  icons: {
-    icon: "/favicon.ico",
-  },
 };
 
 const RootLayout = ({
