@@ -14,7 +14,7 @@ import {
 import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
 import {fetchStarredSegments, fetchSegmentDetail} from '@/lib/strava';
 import {aggregateZoneBreakdowns} from '@/lib/zoneCompute';
-import type {AggregatedZoneTotals} from '@/lib/zoneCompute';
+import type {AggregatedZoneTotals, ZoneBreakdown} from '@/lib/zoneCompute';
 import {useSettings} from '@/contexts/SettingsContext';
 import type {
   StravaDetailedActivity,
@@ -228,6 +228,102 @@ export const useZoneBreakdowns = (weeks: number): UseZoneBreakdownsResult => {
         setResult(aggregated);
       } catch {
         // On error, clear results
+        if (abortRef.current === runId) {
+          setResult(undefined);
+        }
+      } finally {
+        if (abortRef.current === runId) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    compute();
+  }, [isAuthenticated, activitiesLoading, activities, weeks, settings.zones, handleProgress]);
+
+  return {data: result, isLoading, progress};
+};
+
+// ----- Per-Activity Zone Breakdowns (for charts that need per-activity data) -----
+
+interface UsePerActivityZoneBreakdownsResult {
+  /** Map of activityId -> ZoneBreakdown (only for activities that succeeded) */
+  data: Map<string, ZoneBreakdown> | undefined;
+  isLoading: boolean;
+  progress: ZoneBreakdownProgress;
+}
+
+/**
+ * Returns per-activity zone breakdowns (not aggregated) for activities
+ * within a time window. Useful for charts that need to group by week/date.
+ */
+export const usePerActivityZoneBreakdowns = (weeks: number): UsePerActivityZoneBreakdownsResult => {
+  const {isAuthenticated} = useStravaAuth();
+  const {settings} = useSettings();
+  const {data: activities, isLoading: activitiesLoading} = useActivities();
+
+  const [result, setResult] = useState<Map<string, ZoneBreakdown> | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(true);
+  const [progress, setProgress] = useState<ZoneBreakdownProgress>({done: 0, total: 0});
+
+  const abortRef = useRef(0);
+
+  const handleProgress = useCallback((done: number, total: number) => {
+    setProgress({done, total});
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || activitiesLoading || !activities) {
+      setIsLoading(activitiesLoading);
+      return;
+    }
+
+    const runId = ++abortRef.current;
+
+    const compute = async () => {
+      setIsLoading(true);
+      setProgress({done: 0, total: 0});
+
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - weeks * 7 * 24 * 60 * 60 * 1000);
+
+      const filtered = activities.filter((a) => {
+        const actDate = new Date(a.date);
+        return actDate >= cutoff && a.avgHr > 0;
+      });
+
+      if (filtered.length === 0) {
+        if (abortRef.current === runId) {
+          setResult(new Map());
+          setIsLoading(false);
+          setProgress({done: 0, total: 0});
+        }
+        return;
+      }
+
+      const activityIds = filtered.map((a) => Number(a.id));
+
+      try {
+        const breakdownMap = await batchGetZoneBreakdowns(
+          activityIds,
+          settings.zones,
+          (done, total) => {
+            if (abortRef.current === runId) {
+              handleProgress(done, total);
+            }
+          },
+        );
+
+        if (abortRef.current !== runId) return;
+
+        // Convert numeric keys to string keys to match ActivitySummary.id
+        const stringKeyedMap = new Map<string, ZoneBreakdown>();
+        for (const [id, breakdown] of breakdownMap) {
+          stringKeyedMap.set(String(id), breakdown);
+        }
+
+        setResult(stringKeyedMap);
+      } catch {
         if (abortRef.current === runId) {
           setResult(undefined);
         }

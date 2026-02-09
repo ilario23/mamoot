@@ -11,19 +11,26 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { getZoneForHr, ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
-import { useSettings } from "@/contexts/SettingsContext";
-import { useActivities } from "@/hooks/useStrava";
+import { ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
+import { useActivities, usePerActivityZoneBreakdowns } from "@/hooks/useStrava";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import { Loader2 } from "lucide-react";
 
+const WEEKS_WINDOW = 4;
+
 const VolumeChart = () => {
-  const { settings } = useSettings();
   const { isAuthenticated } = useStravaAuth();
-  const { data: activities, isLoading } = useActivities();
+  const { data: activities, isLoading: activitiesLoading } = useActivities();
+  const {
+    data: breakdownMap,
+    isLoading: breakdownsLoading,
+    progress,
+  } = usePerActivityZoneBreakdowns(WEEKS_WINDOW);
+
+  const isLoading = activitiesLoading || breakdownsLoading;
 
   const chartData = useMemo(() => {
-    if (!activities || activities.length === 0) return [];
+    if (!activities || activities.length === 0 || !breakdownMap) return [];
 
     const weeks: Record<string, Record<string, number>> = {};
     const now = new Date();
@@ -35,14 +42,21 @@ const VolumeChart = () => {
       );
       const weekNum = Math.floor(diffDays / 7);
 
-      if (weekNum >= 4) return;
+      if (weekNum >= WEEKS_WINDOW) return;
 
-      const weekLabel = `W${4 - weekNum}`;
+      const weekLabel = `W${WEEKS_WINDOW - weekNum}`;
       if (!weeks[weekLabel])
         weeks[weekLabel] = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0, z6: 0 };
 
-      const zone = getZoneForHr(run.avgHr, settings.zones);
-      weeks[weekLabel][`z${zone}`] += run.distance;
+      const breakdown = breakdownMap.get(run.id);
+      if (breakdown) {
+        // Use stream-based per-zone distance
+        for (let z = 1; z <= 6; z++) {
+          weeks[weekLabel][`z${z}`] += breakdown.zones[z]?.distance ?? 0;
+        }
+      } else {
+        // No stream data available — skip this activity
+      }
     });
 
     return ["W1", "W2", "W3", "W4"].map((week) => ({
@@ -54,14 +68,20 @@ const VolumeChart = () => {
       z5: Number((weeks[week]?.z5 || 0).toFixed(1)),
       z6: Number((weeks[week]?.z6 || 0).toFixed(1)),
     }));
-  }, [activities, settings.zones]);
+  }, [activities, breakdownMap]);
 
   if (!isAuthenticated) return null;
 
   if (isLoading) {
+    const showProgress = progress.total > 0;
     return (
-      <div className="border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
+      <div className="border-3 border-border p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[300px] gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        {showProgress && (
+          <p className="text-sm font-bold text-muted-foreground">
+            Analyzing activities: {progress.done} / {progress.total}
+          </p>
+        )}
       </div>
     );
   }
