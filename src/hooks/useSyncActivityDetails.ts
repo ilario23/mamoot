@@ -9,13 +9,84 @@ import type {ActivitySummary} from '@/lib/mockData';
 // ----- Constants -----
 
 /** Number of parallel requests per batch */
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 25;
 
-/** Delay between batches in ms (90s → ~6.7 req/min → ~100 per 15 min) */
-const BATCH_DELAY_MS = 90_000;
+/** Strava rate limit: 100 requests per 15-minute window */
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_MAX = 100;
+/** Safety buffer — stop a few requests short of the hard cap */
+const RATE_LIMIT_BUFFER = 5;
 
-/** Cooldown when rate-limited (3 minutes) */
+/** Minimum gap between batches to avoid hammering the API */
+const MIN_BATCH_GAP_MS = 500;
+
+/** Hard cooldown when we actually receive a 429 (fallback) */
 const RATE_LIMIT_COOLDOWN_MS = 180_000;
+
+/** Activity types that carry best_efforts / segment_efforts in Strava */
+const SYNCABLE_TYPES = new Set(['Run', 'Ride']);
+
+// ----- Sliding-window rate limiter -----
+
+/**
+ * Tracks request timestamps within a rolling 15-minute window.
+ * Lets us burst at full speed and only pause when approaching the limit.
+ */
+class SlidingWindowRateLimiter {
+  private timestamps: number[] = [];
+
+  /** Record `count` requests as made right now */
+  record(count: number): void {
+    const now = Date.now();
+    for (let i = 0; i < count; i++) this.timestamps.push(now);
+  }
+
+  /** How many more requests can be made within the current window? */
+  available(): number {
+    this.prune();
+    return Math.max(0, RATE_LIMIT_MAX - RATE_LIMIT_BUFFER - this.timestamps.length);
+  }
+
+  /**
+   * Wait until `needed` slots are free.
+   * Calls `onTick` every second with estimated remaining seconds (0 = done).
+   * Respects `shouldAbort` callback to cancel early.
+   */
+  async waitForSlots(
+    needed: number,
+    shouldAbort: () => boolean,
+    onTick?: (remainingSecs: number) => void,
+  ): Promise<void> {
+    while (this.available() < needed && !shouldAbort()) {
+      this.prune();
+      if (this.available() >= needed) break;
+
+      const oldest = this.timestamps[0];
+      if (!oldest) break;
+
+      const waitMs = oldest + RATE_LIMIT_WINDOW_MS - Date.now() + 200;
+      if (waitMs <= 0) {
+        this.prune();
+        break;
+      }
+
+      onTick?.(Math.ceil(waitMs / 1000));
+      // Sleep in 1-second increments so the countdown UI stays responsive
+      await sleep(Math.min(waitMs, 1000));
+    }
+    onTick?.(0);
+  }
+
+  private prune(): void {
+    const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+    while (this.timestamps.length > 0 && this.timestamps[0] < cutoff) {
+      this.timestamps.shift();
+    }
+  }
+}
+
+/** Module-level instance so the window persists across re-renders / navigations */
+const rateLimiter = new SlidingWindowRateLimiter();
 
 // ----- Types -----
 
@@ -124,7 +195,11 @@ export const useSyncActivityDetails = (
     isSyncRunningRef.current = true;
     abortRef.current = false;
 
-    const activityIds = currentActivities.map((a) => Number(a.id));
+    // Only sync activity types that carry best_efforts / segment_efforts
+    const syncableActivities = currentActivities.filter((a) =>
+      SYNCABLE_TYPES.has(a.type),
+    );
+    const activityIds = syncableActivities.map((a) => Number(a.id));
     const total = activityIds.length;
 
     setState((prev) => ({...prev, total, isSyncing: true}));
@@ -160,13 +235,38 @@ export const useSyncActivityDetails = (
       return;
     }
 
-    // 2. Fetch uncached activities in batches
+    // 2. Fetch uncached activities in batches with sliding-window rate limiting
     let cursor = 0;
 
     while (cursor < uncachedIds.length) {
       if (abortRef.current) break;
 
-      const batchIds = uncachedIds.slice(cursor, cursor + BATCH_SIZE);
+      // Wait for rate-limit slots if the window is full
+      const slotsNeeded = Math.min(BATCH_SIZE, uncachedIds.length - cursor);
+      if (rateLimiter.available() < slotsNeeded) {
+        setState((prev) => ({...prev, isRateLimited: true}));
+        await rateLimiter.waitForSlots(
+          slotsNeeded,
+          () => abortRef.current,
+          (secs) => setState((prev) => ({...prev, cooldownSeconds: secs})),
+        );
+        setState((prev) => ({
+          ...prev,
+          isRateLimited: false,
+          cooldownSeconds: 0,
+        }));
+        if (abortRef.current) break;
+      }
+
+      // Size this batch to the available slots (may be less than BATCH_SIZE)
+      const slotsNow = rateLimiter.available();
+      const batchSize = Math.min(BATCH_SIZE, slotsNow, uncachedIds.length - cursor);
+      if (batchSize <= 0) continue;
+
+      const batchIds = uncachedIds.slice(cursor, cursor + batchSize);
+
+      // Record requests in the sliding window BEFORE firing them
+      rateLimiter.record(batchIds.length);
 
       // Fetch batch in parallel
       const results = await Promise.allSettled(
@@ -210,7 +310,7 @@ export const useSyncActivityDetails = (
         segmentEfforts: [...allSegmentEfforts],
       }));
 
-      // If rate limited, pause with countdown then retry failed items
+      // Fallback: if we hit a 429 despite the sliding window, hard-cooldown
       if (hitRateLimit && cursor < uncachedIds.length) {
         // Rewind cursor for failed requests so they're retried
         const failedCount = batchIds.length - successCount;
@@ -250,9 +350,9 @@ export const useSyncActivityDetails = (
         continue; // Retry from the adjusted cursor
       }
 
-      // Wait between batches (skip if this was the last batch)
+      // Small gap between batches to avoid hammering the API
       if (cursor < uncachedIds.length && !abortRef.current) {
-        await sleep(BATCH_DELAY_MS);
+        await sleep(MIN_BATCH_GAP_MS);
       }
     }
 
