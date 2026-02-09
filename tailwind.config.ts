@@ -65,6 +65,10 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        page: {
+          DEFAULT: "hsl(var(--page-accent))",
+          foreground: "hsl(var(--page-accent-foreground))",
+        },
         nav: {
           dashboard: {
             DEFAULT: "hsl(var(--nav-dashboard))",

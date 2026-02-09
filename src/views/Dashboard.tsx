@@ -7,7 +7,7 @@ import PaceZoneDistribution from "@/components/dashboard/PaceZoneDistribution";
 const Dashboard = () => {
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+      <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
         Dashboard
       </h1>
       <StatCards />

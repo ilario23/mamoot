@@ -48,7 +48,7 @@ const Calendar = () => {
   if (!isAuthenticated) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           Activity Calendar
         </h1>
         <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
@@ -64,7 +64,7 @@ const Calendar = () => {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           Activity Calendar
         </h1>
         <div className="flex items-center justify-center min-h-[300px]">
@@ -78,7 +78,7 @@ const Calendar = () => {
     <div className="space-y-6">
       {/* Header with year selector */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           Activity Calendar
         </h1>
         <Select

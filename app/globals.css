@@ -69,6 +69,10 @@
     --nav-ai: 265 85% 60%;
     --nav-ai-foreground: 0 0% 100%;
 
+    /* Page accent (defaults to dashboard, overridden per-route) */
+    --page-accent: 312 100% 67%;
+    --page-accent-foreground: 0 0% 0%;
+
     /* HR Zone colors */
     --zone-1: 84 78% 55%;
     --zone-2: 217 91% 60%;
@@ -163,6 +167,10 @@
     --nav-segments-foreground: 0 0% 0%;
     --nav-ai: 265 85% 63%;
     --nav-ai-foreground: 0 0% 100%;
+
+    /* Page accent (defaults to dashboard, overridden per-route) */
+    --page-accent: 312 100% 67%;
+    --page-accent-foreground: 0 0% 0%;
 
     /* HR Zone colors — keep vibrant */
     --zone-1: 84 78% 55%;

@@ -5,11 +5,18 @@ import BottomNav from '@/components/layout/BottomNav';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import LoginWall from '@/components/auth/LoginWall';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
+import usePageTheme from '@/hooks/usePageTheme';
 import {Loader2} from 'lucide-react';
 import type {ReactNode} from 'react';
 
 const AppShell = ({children}: {children: ReactNode}) => {
   const {isAuthenticated, isLoading} = useStravaAuth();
+  const pageTheme = usePageTheme();
+
+  const themeStyle = {
+    '--page-accent': `var(${pageTheme.accent})`,
+    '--page-accent-foreground': `var(${pageTheme.accentForeground})`,
+  } as React.CSSProperties;
 
   if (isLoading) {
     return (
@@ -24,7 +31,7 @@ const AppShell = ({children}: {children: ReactNode}) => {
   }
 
   return (
-    <div className='min-h-screen flex w-full bg-background'>
+    <div className='min-h-screen flex w-full bg-background' style={themeStyle}>
       {/* Desktop Sidebar */}
       <DesktopSidebar />
 
@@ -36,7 +43,7 @@ const AppShell = ({children}: {children: ReactNode}) => {
           <SidebarUserProfile compact />
         </header>
 
-        <main className='flex-1 p-4 md:p-6 overflow-auto'>{children}</main>
+        <main className='flex-1 p-4 md:p-6 overflow-auto border-t-[4px] border-page'>{children}</main>
       </div>
 
       {/* Mobile Bottom Nav */}

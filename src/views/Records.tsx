@@ -70,7 +70,7 @@ const Records = () => {
   if (!isAuthenticated) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           Records
         </h1>
         <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
@@ -89,7 +89,7 @@ const Records = () => {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           Records
         </h1>
         <div className="border-3 border-border p-8 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
@@ -103,7 +103,7 @@ const Records = () => {
   if (!activities || activities.length === 0) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           Records
         </h1>
         <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
@@ -127,7 +127,7 @@ const Records = () => {
   return (
     <div className="space-y-6">
       {/* Page title */}
-      <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+      <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
         Records
       </h1>
 
