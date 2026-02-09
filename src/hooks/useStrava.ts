@@ -6,6 +6,7 @@ import {
   cachedGetActivityStreams,
   cachedGetAthleteStats,
   cachedGetAthleteZones,
+  cachedGetAthleteGear,
   forceRefreshActivities,
 } from '@/lib/stravaCache';
 import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
@@ -16,6 +17,7 @@ import type {
   StravaAthleteZones,
   StravaStarredSegment,
   StravaSegmentDetail,
+  StravaSummaryGear,
 } from '@/lib/strava';
 
 // ----- Stale time constants -----
@@ -117,6 +119,20 @@ export const useSegmentDetail = (segmentId: number | null) => {
     enabled: isAuthenticated && segmentId !== null,
     staleTime: Infinity,
     gcTime: ONE_DAY,
+  });
+};
+
+/** Fetch athlete's gear (bikes + shoes) — refreshed hourly via IndexedDB cache */
+export const useAthleteGear = () => {
+  const {isAuthenticated} = useStravaAuth();
+
+  return useQuery<{bikes: StravaSummaryGear[]; shoes: StravaSummaryGear[]}>({
+    queryKey: ['strava', 'gear'],
+    queryFn: cachedGetAthleteGear,
+    enabled: isAuthenticated,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_DAY,
+    refetchOnWindowFocus: false,
   });
 };
 

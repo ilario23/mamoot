@@ -94,6 +94,10 @@ export default {
             DEFAULT: "hsl(var(--nav-ai))",
             foreground: "hsl(var(--nav-ai-foreground))",
           },
+          gear: {
+            DEFAULT: "hsl(var(--nav-gear))",
+            foreground: "hsl(var(--nav-gear-foreground))",
+          },
         },
         zone: {
           1: "hsl(var(--zone-1))",

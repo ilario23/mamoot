@@ -317,6 +317,33 @@ export type StravaStreamSet = Record<
   Omit<StravaStream, "type">
 >;
 
+// ----- Gear types -----
+
+/** Summary gear as returned within DetailedAthlete (bikes/shoes arrays) */
+export interface StravaSummaryGear {
+  id: string;
+  primary: boolean;
+  name: string;
+  distance: number; // meters
+  resource_state: number;
+}
+
+/** Detailed gear as returned by GET /gear/:id */
+export interface StravaDetailedGear extends StravaSummaryGear {
+  brand_name: string;
+  model_name: string;
+  frame_type?: number; // bikes only: 1=mtb, 2=cross, 3=road, 4=time trial
+  description: string;
+}
+
+/** Extended athlete profile including gear arrays returned by GET /athlete */
+export interface StravaAthleteWithGear extends StravaAthlete {
+  weight: number;
+  ftp: number | null;
+  bikes: StravaSummaryGear[];
+  shoes: StravaSummaryGear[];
+}
+
 export interface StravaAthleteZones {
   heart_rate: {
     custom_zones: boolean;
@@ -437,6 +464,14 @@ export interface StravaSegmentDetail {
 
 export const fetchSegmentDetail = (segmentId: number) =>
   stravaFetch<StravaSegmentDetail>(`/segments/${segmentId}`);
+
+/** Fetch the authenticated athlete profile including bikes and shoes arrays */
+export const fetchAthleteWithGear = () =>
+  stravaFetch<StravaAthleteWithGear>("/athlete");
+
+/** Fetch detailed gear info by ID (brand, model, description, etc.) */
+export const fetchGearDetail = (gearId: string) =>
+  stravaFetch<StravaDetailedGear>(`/gear/${gearId}`);
 
 // ----- Data transformation -----
 

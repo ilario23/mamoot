@@ -11,6 +11,7 @@ import {
   fetchActivityStreams,
   fetchAthleteStats,
   fetchAthleteZones,
+  fetchAthleteWithGear,
   transformActivity,
   transformStreams,
 } from './strava';
@@ -20,6 +21,7 @@ import type {
   StravaStream,
   StravaAthleteStats,
   StravaAthleteZones,
+  StravaSummaryGear,
 } from './strava';
 import type {ActivitySummary, StreamPoint} from './mockData';
 
@@ -36,6 +38,8 @@ const STALE = {
   athleteStats: 60 * 60 * 1000,
   /** Athlete zones: refetch after 24 hours */
   athleteZones: 24 * 60 * 60 * 1000,
+  /** Athlete gear: refetch after 1 hour */
+  athleteGear: 60 * 60 * 1000,
 } as const;
 
 const isFresh = (fetchedAt: number, maxAge: number): boolean => {
@@ -182,6 +186,38 @@ export const cachedGetAthleteZones = async (): Promise<StravaAthleteZones> => {
   });
 
   return zones;
+};
+
+// ----- Athlete Gear -----
+
+/**
+ * Returns athlete's bikes and shoes, fetched from GET /athlete.
+ * Gear rarely changes — refetch after 1 hour.
+ */
+export const cachedGetAthleteGear = async (): Promise<{
+  bikes: StravaSummaryGear[];
+  shoes: StravaSummaryGear[];
+}> => {
+  const GEAR_KEY = 'athlete-gear';
+  const cached = await db.athleteGear.get(GEAR_KEY);
+
+  if (cached && isFresh(cached.fetchedAt, STALE.athleteGear)) {
+    return {bikes: cached.bikes, shoes: cached.shoes};
+  }
+
+  // Fetch full athlete profile (includes bikes & shoes arrays)
+  const profile = await fetchAthleteWithGear();
+  const bikes = profile.bikes ?? [];
+  const shoes = profile.shoes ?? [];
+
+  await db.athleteGear.put({
+    key: GEAR_KEY,
+    bikes,
+    shoes,
+    fetchedAt: Date.now(),
+  });
+
+  return {bikes, shoes};
 };
 
 // ----- Force refresh helpers -----

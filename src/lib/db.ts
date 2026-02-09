@@ -10,6 +10,7 @@ import type {
   StravaStreamSet,
   StravaAthleteStats,
   StravaAthleteZones,
+  StravaSummaryGear,
 } from './strava';
 
 // ----- Cached record wrappers -----
@@ -63,6 +64,16 @@ export interface CachedAthleteZones {
   fetchedAt: number;
 }
 
+export interface CachedAthleteGear {
+  /** Static key — one gear record per athlete */
+  key: string;
+  /** Bikes and shoes arrays from the athlete profile */
+  bikes: StravaSummaryGear[];
+  shoes: StravaSummaryGear[];
+  /** Unix ms timestamp */
+  fetchedAt: number;
+}
+
 // ----- Database definition -----
 
 const db = new Dexie('RunZoneAICache') as Dexie & {
@@ -71,6 +82,7 @@ const db = new Dexie('RunZoneAICache') as Dexie & {
   activityStreams: EntityTable<CachedActivityStreams, 'activityId'>;
   athleteStats: EntityTable<CachedAthleteStats, 'athleteId'>;
   athleteZones: EntityTable<CachedAthleteZones, 'key'>;
+  athleteGear: EntityTable<CachedAthleteGear, 'key'>;
 };
 
 db.version(1).stores({
@@ -80,6 +92,15 @@ db.version(1).stores({
   activityStreams: 'activityId',
   athleteStats: 'athleteId',
   athleteZones: 'key',
+});
+
+db.version(2).stores({
+  activities: 'id, date, fetchedAt',
+  activityDetails: 'id',
+  activityStreams: 'activityId',
+  athleteStats: 'athleteId',
+  athleteZones: 'key',
+  athleteGear: 'key',
 });
 
 export {db};
@@ -113,5 +134,6 @@ export const clearAllCache = async (): Promise<void> => {
     db.activityStreams.clear(),
     db.athleteStats.clear(),
     db.athleteZones.clear(),
+    db.athleteGear.clear(),
   ]);
 };

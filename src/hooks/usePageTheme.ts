@@ -14,6 +14,7 @@ const ROUTE_THEME_MAP: Record<string, PageTheme> = {
   '/records': {accent: '--nav-records', accentForeground: '--nav-records-foreground', key: 'records'},
   '/segments': {accent: '--nav-segments', accentForeground: '--nav-segments-foreground', key: 'segments'},
   '/ai-chat': {accent: '--nav-ai', accentForeground: '--nav-ai-foreground', key: 'ai'},
+  '/gear': {accent: '--nav-gear', accentForeground: '--nav-gear-foreground', key: 'gear'},
   '/settings': {accent: '--nav-dashboard', accentForeground: '--nav-dashboard-foreground', key: 'dashboard'},
 };
 

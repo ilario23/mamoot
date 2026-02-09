@@ -68,6 +68,8 @@
     --nav-segments-foreground: 0 0% 0%;
     --nav-ai: 265 85% 60%;
     --nav-ai-foreground: 0 0% 100%;
+    --nav-gear: 180 75% 40%;
+    --nav-gear-foreground: 0 0% 100%;
 
     /* Page accent (defaults to dashboard, overridden per-route) */
     --page-accent: 312 100% 67%;
@@ -167,6 +169,8 @@
     --nav-segments-foreground: 0 0% 0%;
     --nav-ai: 265 85% 63%;
     --nav-ai-foreground: 0 0% 100%;
+    --nav-gear: 180 75% 45%;
+    --nav-gear-foreground: 0 0% 100%;
 
     /* Page accent (defaults to dashboard, overridden per-route) */
     --page-accent: 312 100% 67%;

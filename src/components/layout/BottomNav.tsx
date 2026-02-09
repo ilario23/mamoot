@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {LayoutDashboard, CalendarDays, List, Bot, Trophy, Mountain} from 'lucide-react';
+import {LayoutDashboard, CalendarDays, List, Bot, Trophy, Mountain, Cog} from 'lucide-react';
 
 const items = [
   {href: '/', icon: LayoutDashboard, label: 'Dashboard', activeClass: 'bg-nav-dashboard text-nav-dashboard-foreground'},
@@ -11,6 +11,7 @@ const items = [
   {href: '/records', icon: Trophy, label: 'Records', activeClass: 'bg-nav-records text-nav-records-foreground'},
   {href: '/segments', icon: Mountain, label: 'Segments', activeClass: 'bg-nav-segments text-nav-segments-foreground'},
   {href: '/ai-chat', icon: Bot, label: 'AI Team', activeClass: 'bg-nav-ai text-nav-ai-foreground'},
+  {href: '/gear', icon: Cog, label: 'Gear', activeClass: 'bg-nav-gear text-nav-gear-foreground'},
 ];
 
 const BottomNav = () => {
