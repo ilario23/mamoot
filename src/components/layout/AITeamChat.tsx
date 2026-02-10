@@ -34,6 +34,7 @@ import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/mockData';
 import type {PersonaId} from '@/lib/aiPrompts';
 import type {ShareTrainingPlanInput} from '@/lib/aiTools';
+import type {PlanSession} from '@/lib/db';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import CoachPlanList from '@/components/layout/CoachPlanList';
 
@@ -364,7 +365,7 @@ const AITeamChat = () => {
                   summary: planInput.summary ?? null,
                   goal: planInput.goal ?? null,
                   durationWeeks: planInput.durationWeeks ?? null,
-                  sessions: planInput.sessions,
+                  sessions: planInput.sessions as PlanSession[],
                   content: planInput.content,
                   sourceMessageId: msg.id,
                   sourceSessionId: sessionId,
