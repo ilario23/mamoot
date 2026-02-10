@@ -1,0 +1,1 @@
+ALTER TABLE "athlete_gear" ADD COLUMN "retired_gear_ids" jsonb DEFAULT '[]'::jsonb NOT NULL;

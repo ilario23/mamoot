@@ -1,31 +1,40 @@
 'use client';
 
-import {useState, useCallback, useMemo} from 'react';
+import {useState, useCallback, useMemo, useEffect, useRef} from 'react';
 import {Loader2, Bike, Footprints} from 'lucide-react';
+import {useQueryClient} from '@tanstack/react-query';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useAthleteGear} from '@/hooks/useStrava';
-import {getRetiredGearIds, toggleRetiredGear} from '@/lib/retiredGear';
+import {toggleRetiredGear, migrateLocalStorageRetiredGear} from '@/lib/retiredGear';
 import GearCard from '@/components/gear/GearCard';
 
 const Gear = () => {
   const {isAuthenticated} = useStravaAuth();
   const {data: gearData, isLoading} = useAthleteGear();
+  const queryClient = useQueryClient();
 
-  // Local state for retired gear IDs — initialised from localStorage
-  const [retiredIds, setRetiredIds] = useState<Set<string>>(() => getRetiredGearIds());
+  // Derive retired IDs from the DB-backed gear data
+  const retiredIds = useMemo(
+    () => new Set(gearData?.retiredGearIds ?? []),
+    [gearData?.retiredGearIds],
+  );
 
-  const handleToggleRetire = useCallback((gearId: string) => {
-    const nowRetired = toggleRetiredGear(gearId);
-    setRetiredIds((prev) => {
-      const next = new Set(prev);
-      if (nowRetired) {
-        next.add(gearId);
-      } else {
-        next.delete(gearId);
-      }
-      return next;
+  // One-time migration from localStorage to Dexie (runs once per mount)
+  const migratedRef = useRef(false);
+  useEffect(() => {
+    if (migratedRef.current || !gearData) return;
+    migratedRef.current = true;
+    migrateLocalStorageRetiredGear().then(() => {
+      // Refresh gear data after migration so retiredIds are up-to-date
+      queryClient.invalidateQueries({queryKey: ['strava', 'gear']});
     });
-  }, []);
+  }, [gearData, queryClient]);
+
+  const handleToggleRetire = useCallback(async (gearId: string) => {
+    await toggleRetiredGear(gearId);
+    // Invalidate gear query so retiredIds reflect the change
+    queryClient.invalidateQueries({queryKey: ['strava', 'gear']});
+  }, [queryClient]);
 
   // Sort: active gear first, retired gear last
   const sortedBikes = useMemo(() => {

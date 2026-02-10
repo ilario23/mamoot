@@ -36,7 +36,7 @@ const AppShell = ({children}: {children: ReactNode}) => {
       <DesktopSidebar />
 
       {/* Main Content */}
-      <div className='flex-1 flex flex-col min-h-screen pb-16 md:pb-0'>
+      <div className='flex-1 flex flex-col h-screen pb-16 md:pb-0'>
         {/* Mobile header */}
         <header className='border-b-3 border-border p-3 md:hidden flex items-center justify-between'>
           <h1 className='font-black text-xl tracking-tight'>🏃 RunTeam AI</h1>

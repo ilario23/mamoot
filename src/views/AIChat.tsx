@@ -10,7 +10,7 @@ const AIChat = () => {
   const goal = settings.goal?.trim();
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)] md:h-[calc(100vh-3rem)] max-w-3xl">
+    <div className="flex flex-col h-full w-full">
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3 mb-4">
         AI Team
       </h1>

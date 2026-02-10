@@ -56,6 +56,7 @@ export const athleteGear = pgTable('athlete_gear', {
   key: text('key').primaryKey(),
   bikes: jsonb('bikes').notNull(),
   shoes: jsonb('shoes').notNull(),
+  retiredGearIds: jsonb('retired_gear_ids').notNull().default([]),
   fetchedAt: bigint('fetched_at', {mode: 'number'}).notNull(),
 });
 

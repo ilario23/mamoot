@@ -70,6 +70,8 @@ export interface CachedAthleteGear {
   /** Bikes and shoes arrays from the athlete profile */
   bikes: StravaSummaryGear[];
   shoes: StravaSummaryGear[];
+  /** IDs of gear the user has marked as retired (not from Strava) */
+  retiredGearIds: string[];
   /** Unix ms timestamp */
   fetchedAt: number;
 }

@@ -1,39 +1,78 @@
 // ============================================================
-// Retired Gear — Local State (localStorage)
-// The Strava API has no "retired" field for gear, so we manage
-// retirement status entirely on the client side.
+// Retired Gear — Persisted to Dexie (IndexedDB) + Neon (PostgreSQL)
 // ============================================================
+//
+// The Strava API has no "retired" field for gear, so we manage
+// retirement status ourselves. Previously this lived in localStorage;
+// now it's stored alongside the gear record in both Dexie and Neon
+// so it syncs across devices and is available to the AI coach.
 
-const STORAGE_KEY = 'runteam-retired-gear';
+import {db} from './db';
+import {neonSyncAthleteGear} from './neonSync';
 
-/** Get the set of gear IDs marked as retired */
-export const getRetiredGearIds = (): Set<string> => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed) ? parsed : []);
-  } catch {
-    return new Set();
-  }
-};
+const GEAR_KEY = 'athlete-gear';
+const LEGACY_STORAGE_KEY = 'runteam-retired-gear';
 
-/** Check if a specific gear item is retired */
-export const isGearRetired = (gearId: string): boolean => {
-  return getRetiredGearIds().has(gearId);
-};
+// ----- Toggle retired status (async, writes to Dexie + Neon) -----
 
-/** Toggle the retired status of a gear item. Returns the new retired state. */
-export const toggleRetiredGear = (gearId: string): boolean => {
-  const ids = getRetiredGearIds();
+/**
+ * Toggle the retired status of a gear item.
+ * Reads the current Dexie record, updates retiredGearIds, writes back,
+ * and fire-and-forget syncs to Neon.
+ * Returns the new retired state.
+ */
+export const toggleRetiredGear = async (gearId: string): Promise<boolean> => {
+  const record = await db.athleteGear.get(GEAR_KEY);
+  if (!record) return false;
 
-  if (ids.has(gearId)) {
+  const ids = new Set(record.retiredGearIds ?? []);
+  const nowRetired = !ids.has(gearId);
+
+  if (nowRetired) {
+    ids.add(gearId);
+  } else {
     ids.delete(gearId);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]));
-    return false;
   }
 
-  ids.add(gearId);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...ids]));
-  return true;
+  record.retiredGearIds = [...ids];
+  await db.athleteGear.put(record);
+  neonSyncAthleteGear(record); // fire-and-forget
+
+  return nowRetired;
+};
+
+// ----- One-time migration from localStorage to Dexie -----
+
+/**
+ * Migrates any retired gear IDs stored in the old localStorage key
+ * into the Dexie athlete gear record. Clears localStorage after migration.
+ * Safe to call multiple times — no-ops if nothing to migrate.
+ */
+export const migrateLocalStorageRetiredGear = async (): Promise<void> => {
+  try {
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    const legacyIds: string[] = Array.isArray(parsed) ? parsed : [];
+    if (legacyIds.length === 0) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      return;
+    }
+
+    const record = await db.athleteGear.get(GEAR_KEY);
+    if (!record) return; // No gear record yet — migration will happen on next load
+
+    // Merge legacy IDs with any existing ones (deduplicated)
+    const merged = new Set([...(record.retiredGearIds ?? []), ...legacyIds]);
+    record.retiredGearIds = [...merged];
+
+    await db.athleteGear.put(record);
+    neonSyncAthleteGear(record); // fire-and-forget
+
+    // Clear the legacy key
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // Silently ignore — localStorage may be unavailable (SSR)
+  }
 };

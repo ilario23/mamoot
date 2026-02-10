@@ -242,7 +242,7 @@ const Settings = () => {
     : "Unknown";
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 w-full max-w-4xl mx-auto">
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
         Settings
       </h1>

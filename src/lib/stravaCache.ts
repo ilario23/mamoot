@@ -306,6 +306,7 @@ export const cachedGetAthleteZones = async (): Promise<StravaAthleteZones> => {
 export const cachedGetAthleteGear = async (): Promise<{
   bikes: StravaSummaryGear[];
   shoes: StravaSummaryGear[];
+  retiredGearIds: string[];
 }> => {
   const GEAR_KEY = 'athlete-gear';
 
@@ -314,27 +315,31 @@ export const cachedGetAthleteGear = async (): Promise<{
 
   if (cached && isFresh(cached.fetchedAt, STALE.athleteGear)) {
     neonSyncAthleteGear(cached); // backfill Neon (fire-and-forget)
-    return {bikes: cached.bikes, shoes: cached.shoes};
+    return {bikes: cached.bikes, shoes: cached.shoes, retiredGearIds: cached.retiredGearIds ?? []};
   }
 
   // ── Tier 2: Neon ──
   const neonData = await neonGetAthleteGear(GEAR_KEY);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.athleteGear)) {
+    // Ensure retiredGearIds is populated (backward compat with old records)
+    if (!neonData.retiredGearIds) neonData.retiredGearIds = [];
     await db.athleteGear.put(neonData);
-    return {bikes: neonData.bikes, shoes: neonData.shoes};
+    return {bikes: neonData.bikes, shoes: neonData.shoes, retiredGearIds: neonData.retiredGearIds};
   }
 
   // ── Tier 3: Strava API ──
+  // Preserve user-defined retiredGearIds from existing cache
+  const existingRetiredIds = cached?.retiredGearIds ?? neonData?.retiredGearIds ?? [];
   const profile = await fetchAthleteWithGear();
   const bikes = profile.bikes ?? [];
   const shoes = profile.shoes ?? [];
-  const record = {key: GEAR_KEY, bikes, shoes, fetchedAt: Date.now()};
+  const record = {key: GEAR_KEY, bikes, shoes, retiredGearIds: existingRetiredIds, fetchedAt: Date.now()};
 
   await db.athleteGear.put(record);
   neonSyncAthleteGear(record);
 
-  return {bikes, shoes};
+  return {bikes, shoes, retiredGearIds: existingRetiredIds};
 };
 
 // ----- Zone Breakdowns -----

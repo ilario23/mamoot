@@ -40,8 +40,8 @@ export interface AthleteSummary {
   foodPreferences: string;
   /** Current injuries for coach and physio context */
   injuries: Injury[];
-  /** Gear info (shoes with distance) */
-  gear: {name: string; distanceKm: number}[];
+  /** Gear info (shoes with distance and retired status) */
+  gear: {name: string; distanceKm: number; retired: boolean}[];
   /** Per-week summary for last 4 weeks */
   weeklyBreakdown: WeekSummary[];
   /** 4-week aggregate stats */
@@ -112,9 +112,10 @@ export const buildAthleteSummary = (params: {
   injuries: Injury[];
   activities: ActivitySummary[];
   gear: {bikes: StravaSummaryGear[]; shoes: StravaSummaryGear[]} | null;
+  retiredGearIds: string[];
   zoneBreakdowns: AggregatedZoneTotals | null;
 }): AthleteSummary => {
-  const {athleteName, settings, goal, allergies, foodPreferences, injuries, activities, gear, zoneBreakdowns} = params;
+  const {athleteName, settings, goal, allergies, foodPreferences, injuries, activities, gear, retiredGearIds, zoneBreakdowns} = params;
 
   // Zone definitions
   const zones = ([1, 2, 3, 4, 5, 6] as const).map((z) => {
@@ -123,10 +124,12 @@ export const buildAthleteSummary = (params: {
     return {zone: z, name: ZONE_NAMES[z], min, max};
   });
 
-  // Gear (shoes only, with distance in km)
+  // Gear (shoes only, with distance in km and retired status)
+  const retiredSet = new Set(retiredGearIds);
   const gearList = (gear?.shoes ?? []).map((s) => ({
     name: s.name,
     distanceKm: Math.round(s.distance / 1000),
+    retired: retiredSet.has(s.id),
   }));
 
   // Last 4 weeks activities
@@ -369,9 +372,10 @@ export const serializeAthleteSummary = (summary: AthleteSummary): string => {
   // Gear
   if (summary.gear.length > 0) {
     lines.push('');
-    lines.push('## Gear');
+    lines.push('## Gear (Shoes)');
     for (const g of summary.gear) {
-      lines.push(`- ${g.name}: ${g.distanceKm} km`);
+      const status = g.retired ? ' (RETIRED)' : ' (active)';
+      lines.push(`- ${g.name}: ${g.distanceKm} km${status}`);
     }
   }
 

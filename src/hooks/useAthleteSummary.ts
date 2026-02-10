@@ -43,6 +43,7 @@ export const useAthleteSummary = (): UseAthleteSummaryResult => {
       injuries: settings.injuries ?? [],
       activities,
       gear: gear ?? null,
+      retiredGearIds: gear?.retiredGearIds ?? [],
       zoneBreakdowns: zoneBreakdowns ?? null,
     });
   }, [athlete?.firstname, settings, activities, gear, zoneBreakdowns]);

@@ -264,6 +264,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
             set: {
               bikes: sql`excluded.bikes`,
               shoes: sql`excluded.shoes`,
+              retiredGearIds: sql`excluded.retired_gear_ids`,
               fetchedAt: sql`excluded.fetched_at`,
             },
           });

@@ -127,11 +127,11 @@ export const useSegmentDetail = (segmentId: number | null) => {
   });
 };
 
-/** Fetch athlete's gear (bikes + shoes) — refreshed hourly via IndexedDB cache */
+/** Fetch athlete's gear (bikes + shoes + retired IDs) — refreshed hourly via IndexedDB cache */
 export const useAthleteGear = () => {
   const {isAuthenticated} = useStravaAuth();
 
-  return useQuery<{bikes: StravaSummaryGear[]; shoes: StravaSummaryGear[]}>({
+  return useQuery<{bikes: StravaSummaryGear[]; shoes: StravaSummaryGear[]; retiredGearIds: string[]}>({
     queryKey: ['strava', 'gear'],
     queryFn: cachedGetAthleteGear,
     enabled: isAuthenticated,
