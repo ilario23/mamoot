@@ -7,7 +7,7 @@
 // existing Dexie/IndexedDB structure for a smooth migration path.
 // Tables can be normalized later for more powerful analytical queries.
 
-import {pgTable, bigint, text, jsonb} from 'drizzle-orm/pg-core';
+import {pgTable, bigint, integer, text, jsonb} from 'drizzle-orm/pg-core';
 
 // ----- Activities -----
 // Maps to CachedActivity (src/lib/db.ts)
@@ -66,4 +66,27 @@ export const zoneBreakdowns = pgTable('zone_breakdowns', {
   settingsHash: text('settings_hash').notNull(),
   zones: jsonb('zones').notNull(),
   computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Chat Sessions -----
+// Maps to CachedChatSession (src/lib/db.ts)
+export const chatSessions = pgTable('chat_sessions', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  persona: text('persona').notNull(),
+  title: text('title').notNull(),
+  summary: text('summary'),
+  messageCount: integer('message_count').notNull(),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Chat Messages -----
+// Maps to CachedChatMessage (src/lib/db.ts)
+export const chatMessages = pgTable('chat_messages', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  role: text('role').notNull(),
+  content: text('content').notNull(),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
 });

@@ -87,21 +87,30 @@ const PERSONA_PROMPTS: Record<PersonaId, string> = {
 
 /**
  * Builds the full system prompt for a given persona by combining the
- * persona template with the serialized athlete context and, optionally,
- * the coach's shared training plan (for nutritionist & physio only).
+ * persona template with the serialized athlete context, conversation
+ * memory, and optionally the coach's shared training plan.
  */
 export const getSystemPrompt = (
   persona: PersonaId,
   athleteContext: string | null,
   coachPlan: string | null = null,
+  memory: string | null = null,
 ): string => {
   const basePrompt = PERSONA_PROMPTS[persona];
 
-  if (!athleteContext) {
-    return `${basePrompt}\n\n---\n\nNote: No athlete data is currently available. Ask the athlete about their training to provide better advice.`;
+  // Start with the persona prompt
+  let prompt = basePrompt;
+
+  // Inject conversation memory (between persona prompt and athlete data)
+  if (memory) {
+    prompt += `\n\n---\n\n## Conversation Memory\n\nBelow is a summary of your previous conversations with this athlete. Reference this context to maintain continuity.\n\n${memory}`;
   }
 
-  let prompt = `${basePrompt}\n\n---\n\n# Athlete Data\n\nBelow is the current data for the athlete you are coaching. Reference this data when giving advice.\n\n${athleteContext}`;
+  if (!athleteContext) {
+    return `${prompt}\n\n---\n\nNote: No athlete data is currently available. Ask the athlete about their training to provide better advice.`;
+  }
+
+  prompt += `\n\n---\n\n# Athlete Data\n\nBelow is the current data for the athlete you are coaching. Reference this data when giving advice.\n\n${athleteContext}`;
 
   // Inject coach plan for nutritionist and physio only
   if (coachPlan && (persona === 'nutritionist' || persona === 'physio')) {

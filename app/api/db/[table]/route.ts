@@ -15,8 +15,10 @@ import {
   athleteZones,
   athleteGear,
   zoneBreakdowns,
+  chatSessions,
+  chatMessages,
 } from '@/db/schema';
-import {eq, sql} from 'drizzle-orm';
+import {eq, and, sql, desc} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
 
 type RouteContext = {params: Promise<{table: string}>};
@@ -101,6 +103,60 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .from(zoneBreakdowns)
           .where(eq(zoneBreakdowns.activityId, Number(pk)));
         return NextResponse.json(rows[0] ?? null);
+      }
+
+      case 'chat-sessions': {
+        // GET /api/db/chat-sessions?athleteId=123&persona=coach → sessions list
+        // GET /api/db/chat-sessions?pk=uuid → single session
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(chatSessions)
+            .where(eq(chatSessions.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const athleteId = req.nextUrl.searchParams.get('athleteId');
+        const persona = req.nextUrl.searchParams.get('persona');
+        if (!athleteId || !persona)
+          return NextResponse.json(
+            {error: 'athleteId and persona required'},
+            {status: 400},
+          );
+        const rows = await db
+          .select()
+          .from(chatSessions)
+          .where(
+            and(
+              eq(chatSessions.athleteId, Number(athleteId)),
+              eq(chatSessions.persona, persona),
+            ),
+          )
+          .orderBy(desc(chatSessions.updatedAt));
+        return NextResponse.json(rows);
+      }
+
+      case 'chat-messages': {
+        // GET /api/db/chat-messages?sessionId=uuid → all messages for session
+        // GET /api/db/chat-messages?pk=uuid → single message
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(chatMessages)
+            .where(eq(chatMessages.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const sessionId = req.nextUrl.searchParams.get('sessionId');
+        if (!sessionId)
+          return NextResponse.json(
+            {error: 'sessionId required'},
+            {status: 400},
+          );
+        const rows = await db
+          .select()
+          .from(chatMessages)
+          .where(eq(chatMessages.sessionId, sessionId))
+          .orderBy(chatMessages.createdAt);
+        return NextResponse.json(rows);
       }
 
       default:
@@ -223,6 +279,33 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
               settingsHash: sql`excluded.settings_hash`,
               zones: sql`excluded.zones`,
               computedAt: sql`excluded.computed_at`,
+            },
+          });
+        break;
+
+      case 'chat-sessions':
+        await db
+          .insert(chatSessions)
+          .values(records)
+          .onConflictDoUpdate({
+            target: chatSessions.id,
+            set: {
+              title: sql`excluded.title`,
+              summary: sql`excluded.summary`,
+              messageCount: sql`excluded.message_count`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
+      case 'chat-messages':
+        await db
+          .insert(chatMessages)
+          .values(records)
+          .onConflictDoUpdate({
+            target: chatMessages.id,
+            set: {
+              content: sql`excluded.content`,
             },
           });
         break;

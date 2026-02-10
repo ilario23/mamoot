@@ -85,6 +85,40 @@ export interface CachedZoneBreakdown {
   computedAt: number;
 }
 
+// ----- Chat persistence -----
+
+export interface CachedChatSession {
+  /** UUID primary key */
+  id: string;
+  /** Strava athlete ID */
+  athleteId: number;
+  /** Persona: "coach" | "nutritionist" | "physio" */
+  persona: string;
+  /** Auto-generated from first user message */
+  title: string;
+  /** Compressed memory of older messages */
+  summary: string | null;
+  /** Number of messages in this session */
+  messageCount: number;
+  /** Unix ms timestamp */
+  createdAt: number;
+  /** Unix ms timestamp */
+  updatedAt: number;
+}
+
+export interface CachedChatMessage {
+  /** UUID primary key (matches useChat msg.id) */
+  id: string;
+  /** FK to CachedChatSession.id */
+  sessionId: string;
+  /** "user" | "assistant" */
+  role: string;
+  /** Message text content */
+  content: string;
+  /** Unix ms timestamp */
+  createdAt: number;
+}
+
 // ----- Database definition -----
 
 const db = new Dexie('RunZoneAICache') as Dexie & {
@@ -95,6 +129,8 @@ const db = new Dexie('RunZoneAICache') as Dexie & {
   athleteZones: EntityTable<CachedAthleteZones, 'key'>;
   athleteGear: EntityTable<CachedAthleteGear, 'key'>;
   zoneBreakdowns: EntityTable<CachedZoneBreakdown, 'activityId'>;
+  chatSessions: EntityTable<CachedChatSession, 'id'>;
+  chatMessages: EntityTable<CachedChatMessage, 'id'>;
 };
 
 db.version(1).stores({
@@ -123,6 +159,18 @@ db.version(3).stores({
   athleteZones: 'key',
   athleteGear: 'key',
   zoneBreakdowns: 'activityId, settingsHash',
+});
+
+db.version(4).stores({
+  activities: 'id, date, fetchedAt',
+  activityDetails: 'id',
+  activityStreams: 'activityId',
+  athleteStats: 'athleteId',
+  athleteZones: 'key',
+  athleteGear: 'key',
+  zoneBreakdowns: 'activityId, settingsHash',
+  chatSessions: 'id, [athleteId+persona], updatedAt',
+  chatMessages: 'id, sessionId, createdAt',
 });
 
 export {db};
@@ -158,5 +206,7 @@ export const clearAllCache = async (): Promise<void> => {
     db.athleteZones.clear(),
     db.athleteGear.clear(),
     db.zoneBreakdowns.clear(),
+    db.chatSessions.clear(),
+    db.chatMessages.clear(),
   ]);
 };

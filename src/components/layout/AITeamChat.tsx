@@ -1,13 +1,32 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { Dumbbell, Apple, Stethoscope, Send, Loader2, AlertCircle, ChevronDown, Share2, Check, X, type LucideIcon } from "lucide-react";
+import {
+  Dumbbell,
+  Apple,
+  Stethoscope,
+  Send,
+  Loader2,
+  AlertCircle,
+  ChevronDown,
+  Share2,
+  Check,
+  X,
+  Plus,
+  MessageSquare,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import type { UIMessage } from "ai";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAthleteSummary } from "@/hooks/useAthleteSummary";
 import { useCoachPlan } from "@/hooks/useCoachPlan";
+import { useChatSessions } from "@/hooks/useChatSessions";
+import { useChatPersistence, MAX_MESSAGES_IN_CONTEXT } from "@/hooks/useChatPersistence";
+import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import type { PersonaId } from "@/lib/aiPrompts";
 
 // ----- Model options -----
@@ -93,9 +112,9 @@ const MarkdownContent = ({ content }: { content: string }) => (
   </ReactMarkdown>
 );
 
-// ----- Chat instance per persona -----
+// ----- Session-aware chat instance -----
 
-const usePersonaChat = (persona: PersonaId, athleteContext: string | null) => {
+const usePersistentChat = (sessionId: string | null) => {
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -105,7 +124,7 @@ const usePersonaChat = (persona: PersonaId, athleteContext: string | null) => {
   );
 
   const chat = useChat({
-    id: `ai-team-${persona}`,
+    id: sessionId ? `session-${sessionId}` : "ai-team-pending",
     transport,
   });
 
@@ -118,26 +137,64 @@ const AITeamChat = () => {
   const [activePersona, setActivePersona] = useState<PersonaId>("coach");
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [input, setInput] = useState("");
+  const [showSessions, setShowSessions] = useState(false);
+  const [memory, setMemory] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const { athlete } = useStravaAuth();
   const { serialized: athleteContext, isLoading: contextLoading } = useAthleteSummary();
   const { plan: coachPlan, sharePlan, clearPlan } = useCoachPlan();
 
-  // One chat instance per persona
-  const coachChat = usePersonaChat("coach", athleteContext);
-  const nutritionistChat = usePersonaChat("nutritionist", athleteContext);
-  const physioChat = usePersonaChat("physio", athleteContext);
+  const athleteId = athlete?.id ?? null;
 
-  const chatInstances: Record<PersonaId, ReturnType<typeof useChat>> = useMemo(
+  // Session management per persona
+  const coachSessions = useChatSessions(athleteId, "coach");
+  const nutritionistSessions = useChatSessions(athleteId, "nutritionist");
+  const physioSessions = useChatSessions(athleteId, "physio");
+
+  const sessionManagers = useMemo(
     () => ({
-      coach: coachChat,
-      nutritionist: nutritionistChat,
-      physio: physioChat,
+      coach: coachSessions,
+      nutritionist: nutritionistSessions,
+      physio: physioSessions,
     }),
-    [coachChat, nutritionistChat, physioChat],
+    [coachSessions, nutritionistSessions, physioSessions],
   );
 
-  const activeChat = chatInstances[activePersona];
+  const activeSM = sessionManagers[activePersona];
+  const activeSession = activeSM.activeSession;
   const currentPersona = personas.find((p) => p.id === activePersona) ?? personas[0];
+
+  // Persistence
+  const { loadMessages, persistMessage, getMemorySummary, maybeTriggerSummary } =
+    useChatPersistence();
+
+  // Single chat instance keyed by active session
+  const activeChat = usePersistentChat(activeSession?.id ?? null);
+
+  // Load persisted messages when session changes
+  const loadedSessionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const sid = activeSession?.id ?? null;
+    if (!sid || sid === loadedSessionRef.current) return;
+    loadedSessionRef.current = sid;
+
+    const load = async () => {
+      const messages = await loadMessages(sid);
+      if (messages.length > 0) {
+        activeChat.setMessages(messages);
+      } else {
+        activeChat.setMessages([]);
+      }
+
+      // Load memory summary
+      const summary = await getMemorySummary(sid);
+      setMemory(summary);
+    };
+
+    load();
+  }, [activeSession?.id, loadMessages, getMemorySummary, activeChat]);
 
   // Auto-scroll on new messages or streaming
   useEffect(() => {
@@ -146,8 +203,75 @@ const AITeamChat = () => {
     }
   }, [activeChat.messages.length, activeChat.status]);
 
-  const handleSend = useCallback(() => {
+  // Persist messages when they change (after streaming completes)
+  const lastPersistedCount = useRef(0);
+
+  useEffect(() => {
+    if (!activeSession?.id) return;
+    if (activeChat.status === "streaming") return;
+
+    const messages = activeChat.messages;
+    if (messages.length <= lastPersistedCount.current) return;
+
+    // Persist only the new messages
+    const newMessages = messages.slice(lastPersistedCount.current);
+    lastPersistedCount.current = messages.length;
+
+    const sessionId = activeSession.id;
+
+    (async () => {
+      for (const msg of newMessages) {
+        await persistMessage(sessionId, msg);
+      }
+
+      // Update session metadata
+      const firstUserMsg = messages.find((m) => m.role === "user");
+      const title = firstUserMsg
+        ? (firstUserMsg.parts
+            ?.filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join("")
+            .slice(0, 50) || "New conversation")
+        : "New conversation";
+
+      await activeSM.updateSession(sessionId, {
+        title,
+        messageCount: messages.length,
+      });
+
+      // Check if summary should be triggered
+      maybeTriggerSummary(sessionId, messages.length, async (summary) => {
+        setMemory(summary);
+        await activeSM.updateSession(sessionId, { summary });
+      });
+    })();
+  }, [activeChat.messages, activeChat.status, activeSession?.id, persistMessage, activeSM, maybeTriggerSummary]);
+
+  // Reset persisted count when session changes
+  useEffect(() => {
+    lastPersistedCount.current = 0;
+  }, [activeSession?.id]);
+
+  const handleSend = useCallback(async () => {
     if (!input.trim() || activeChat.status === "streaming") return;
+
+    // Auto-create a session if none exists
+    let session = activeSession;
+    if (!session) {
+      session = await activeSM.createSession();
+    }
+
+    // For long sessions, trim messages to context window
+    const messages = activeChat.messages;
+    const trimmedMessages =
+      messages.length > MAX_MESSAGES_IN_CONTEXT
+        ? messages.slice(-MAX_MESSAGES_IN_CONTEXT)
+        : messages;
+
+    // If trimming happened, set the trimmed messages first
+    if (messages.length > MAX_MESSAGES_IN_CONTEXT) {
+      activeChat.setMessages(trimmedMessages);
+    }
 
     activeChat.sendMessage(
       { text: input.trim() },
@@ -157,11 +281,12 @@ const AITeamChat = () => {
           athleteContext,
           model: selectedModel,
           coachPlan: activePersona !== "coach" ? coachPlan?.content ?? null : null,
+          memory,
         },
       },
     );
     setInput("");
-  }, [input, activeChat, activePersona, athleteContext, selectedModel, coachPlan]);
+  }, [input, activeChat, activePersona, athleteContext, selectedModel, coachPlan, memory, activeSession, activeSM]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -169,6 +294,43 @@ const AITeamChat = () => {
       handleSend();
     }
   };
+
+  const handleNewConversation = useCallback(async () => {
+    await activeSM.createSession();
+    activeChat.setMessages([]);
+    lastPersistedCount.current = 0;
+    setMemory(null);
+    setShowSessions(false);
+  }, [activeSM, activeChat]);
+
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      activeSM.selectSession(id);
+      lastPersistedCount.current = 0;
+      loadedSessionRef.current = null; // Force reload
+      setShowSessions(false);
+    },
+    [activeSM],
+  );
+
+  const handleDeleteSession = useCallback(
+    async (id: string) => {
+      await activeSM.deleteSession(id);
+      if (activeSM.sessions.length <= 1) {
+        activeChat.setMessages([]);
+        lastPersistedCount.current = 0;
+        setMemory(null);
+      }
+    },
+    [activeSM, activeChat],
+  );
+
+  const handlePersonaSwitch = useCallback((personaId: PersonaId) => {
+    setActivePersona(personaId);
+    loadedSessionRef.current = null; // Force reload on persona switch
+    lastPersistedCount.current = 0;
+    setShowSessions(false);
+  }, []);
 
   const isStreaming = activeChat.status === "streaming";
   const hasError = activeChat.error;
@@ -180,7 +342,7 @@ const AITeamChat = () => {
         {personas.map((p) => (
           <button
             key={p.id}
-            onClick={() => setActivePersona(p.id)}
+            onClick={() => handlePersonaSwitch(p.id)}
             aria-label={`Switch to ${p.label}`}
             tabIndex={0}
             className={`flex-1 flex items-center justify-center gap-2 px-2 py-2 rounded-full border-3 border-border font-bold text-xs transition-all ${
@@ -215,11 +377,92 @@ const AITeamChat = () => {
         </div>
       </div>
 
+      {/* Session header */}
+      <div className="px-3 py-2 border-b-3 border-border flex items-center gap-2 bg-background">
+        <button
+          onClick={() => setShowSessions(!showSessions)}
+          aria-label="Toggle session list"
+          tabIndex={0}
+          className="flex-1 flex items-center gap-1.5 text-xs font-bold truncate text-left hover:text-primary transition-colors"
+        >
+          <MessageSquare className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            {activeSM.isLoading
+              ? "Loading..."
+              : activeSession?.title ?? "No conversation"}
+          </span>
+          <ChevronDown
+            className={`h-3 w-3 shrink-0 transition-transform ${showSessions ? "rotate-180" : ""}`}
+          />
+        </button>
+        <button
+          onClick={handleNewConversation}
+          aria-label="New conversation"
+          tabIndex={0}
+          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background hover:bg-muted transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          <span className="hidden sm:inline">New</span>
+        </button>
+      </div>
+
+      {/* Session list dropdown */}
+      {showSessions && (
+        <div className="border-b-3 border-border bg-muted/30 max-h-48 overflow-y-auto">
+          {activeSM.sessions.length === 0 && (
+            <div className="px-3 py-3 text-xs text-muted-foreground text-center">
+              No conversations yet
+            </div>
+          )}
+          {activeSM.sessions.map((session) => (
+            <div
+              key={session.id}
+              className={`flex items-center gap-2 px-3 py-2 text-xs border-b border-border/50 last:border-b-0 cursor-pointer transition-colors ${
+                session.id === activeSession?.id
+                  ? "bg-primary/10 font-black"
+                  : "hover:bg-muted font-medium"
+              }`}
+            >
+              <button
+                onClick={() => handleSelectSession(session.id)}
+                aria-label={`Select conversation: ${session.title}`}
+                tabIndex={0}
+                className="flex-1 text-left truncate"
+              >
+                <span className="block truncate">{session.title}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {new Date(session.updatedAt).toLocaleDateString()} &middot; {session.messageCount} msgs
+                </span>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteSession(session.id);
+                }}
+                aria-label={`Delete conversation: ${session.title}`}
+                tabIndex={0}
+                className="shrink-0 p-1 text-muted-foreground hover:text-destructive transition-colors"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Context loading indicator */}
       {contextLoading && (
         <div className="px-3 py-2 bg-muted/50 border-b-3 border-border flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           Loading your training data...
+        </div>
+      )}
+
+      {/* Memory indicator */}
+      {memory && (
+        <div className="px-3 py-1.5 bg-secondary/10 border-b-3 border-border flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
+          <MessageSquare className="h-3 w-3 shrink-0" />
+          Memory active — past conversations remembered
         </div>
       )}
 

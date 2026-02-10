@@ -47,12 +47,14 @@ export async function POST(req: Request) {
     persona,
     athleteContext,
     coachPlan,
+    memory,
     model: clientModel,
   }: {
     messages: UIMessage[];
     persona: string;
     athleteContext: string | null;
     coachPlan?: string | null;
+    memory?: string | null;
     model?: string;
   } = body;
 
@@ -72,8 +74,8 @@ export async function POST(req: Request) {
     );
   }
 
-  // Build system prompt with athlete context (and coach plan for nutritionist/physio)
-  const system = getSystemPrompt(persona, athleteContext ?? null, coachPlan ?? null);
+  // Build system prompt with athlete context, coach plan, and conversation memory
+  const system = getSystemPrompt(persona, athleteContext ?? null, coachPlan ?? null, memory ?? null);
 
   const result = streamText({
     model: getModel(clientModel),
