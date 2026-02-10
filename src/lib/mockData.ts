@@ -53,6 +53,8 @@ export interface UserSettings {
     z5: [number, number];
     z6: [number, number];
   };
+  /** Free-text training goal (e.g., "Sub-50 10K in May", "First marathon in October") */
+  goal?: string;
 }
 
 export interface AIMessage {
@@ -75,6 +77,7 @@ export const defaultSettings: UserSettings = {
     z5: [168, 181],
     z6: [182, 190],
   },
+  goal: '',
 };
 
 // ----- Utility functions -----

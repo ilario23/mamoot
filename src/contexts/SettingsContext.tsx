@@ -8,13 +8,17 @@ interface SettingsContextType {
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
 
-/** Migrate saved settings that only have 5 zones to the 6-zone model */
+/** Migrate saved settings: 5→6 zones, add goal field if missing */
 const migrateSettings = (parsed: unknown): UserSettings => {
   const s = parsed as UserSettings;
   if (!s.zones?.z6) {
     const z5Max = s.zones.z5[1];
     s.zones.z5 = [s.zones.z5[0], Math.round((z5Max + s.maxHr) / 2)];
     s.zones.z6 = [s.zones.z5[1] + 1, s.maxHr];
+  }
+  // Add goal field if missing (pre-AI coach users)
+  if (s.goal === undefined) {
+    s.goal = '';
   }
   return s;
 };

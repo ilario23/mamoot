@@ -289,6 +289,26 @@ const Settings = () => {
         )}
       </div>
 
+      {/* Training Goal */}
+      <div className="border-3 border-border p-5 bg-background shadow-neo">
+        <h3 className="font-black text-lg uppercase tracking-wider mb-4">
+          Training Goal
+        </h3>
+        <p className="text-xs font-bold text-muted-foreground mb-3">
+          Set your current training goal so the AI coaching team can give you personalized advice.
+        </p>
+        <input
+          type="text"
+          value={formState.goal ?? ""}
+          onChange={(e) =>
+            setFormState((prev) => ({ ...prev, goal: e.target.value }))
+          }
+          placeholder="e.g., Sub-50 10K in May, First marathon in October, Build aerobic base..."
+          aria-label="Training goal"
+          className="w-full px-4 py-3 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/50"
+        />
+      </div>
+
       {/* Max HR & Resting HR */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="border-3 border-border p-5 bg-background shadow-neo">
