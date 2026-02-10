@@ -17,6 +17,7 @@ import TimePeriodSelector from "@/components/records/TimePeriodSelector";
 import ActivityTypeFilter from "@/components/records/ActivityTypeFilter";
 import PaceProgressionChart from "@/components/records/PaceProgressionChart";
 import SyncProgress from "@/components/records/SyncProgress";
+import CollapsibleSection from "@/components/ui/collapsible-section";
 import { Loader2 } from "lucide-react";
 
 const Records = () => {
@@ -125,7 +126,7 @@ const Records = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Page title */}
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
         Records
@@ -134,18 +135,20 @@ const Records = () => {
       {/* Sync progress (shown while syncing or when rate limited) */}
       <SyncProgress state={syncState} />
 
-      {/* Filters row */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <ActivityTypeFilter
-          availableTypes={availableTypes}
-          value={selectedType}
-          onChange={handleTypeChange}
-        />
-        <TimePeriodSelector value={period} onChange={handlePeriodChange} />
+      {/* Filters row — sticky on mobile */}
+      <div className="sticky top-0 z-10 bg-background py-2 -mx-3 px-3 md:static md:mx-0 md:px-0 md:py-0">
+        <div className="flex flex-row items-center gap-3 md:gap-4 flex-wrap md:justify-between">
+          <ActivityTypeFilter
+            availableTypes={availableTypes}
+            value={selectedType}
+            onChange={handleTypeChange}
+          />
+          <TimePeriodSelector value={period} onChange={handlePeriodChange} />
+        </div>
       </div>
 
-      {/* Record cards grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Record cards grid — always 2 cols on mobile */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
         {records.map((record, idx) => (
           <RecordCard
             key={buckets[idx].key}
@@ -156,11 +159,19 @@ const Records = () => {
         ))}
       </div>
 
-      {/* Pace progression chart */}
-      <PaceProgressionChart
-        progressions={progressions}
-        activityType={selectedType}
-      />
+      {/* Pace progression chart — collapsible on mobile */}
+      <CollapsibleSection
+        title="Pace Progression"
+        subtitle="Historical pace trends by distance"
+        defaultOpenMobile={false}
+        defaultOpenDesktop={true}
+      >
+        <PaceProgressionChart
+          progressions={progressions}
+          activityType={selectedType}
+          embedded
+        />
+      </CollapsibleSection>
     </div>
   );
 };

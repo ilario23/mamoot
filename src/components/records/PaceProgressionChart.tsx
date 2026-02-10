@@ -28,11 +28,13 @@ const LINE_COLORS = [
 interface PaceProgressionChartProps {
   progressions: Record<string, ProgressionPoint[]>;
   activityType: ActivityType;
+  embedded?: boolean;
 }
 
 const PaceProgressionChart = ({
   progressions,
   activityType,
+  embedded = false,
 }: PaceProgressionChartProps) => {
   const bucketKeys = Object.keys(progressions);
   const buckets = BUCKETS_BY_TYPE[activityType];
@@ -74,11 +76,13 @@ const PaceProgressionChart = ({
   if (bucketKeys.length === 0) return null;
 
   return (
-    <div className="border-3 border-border p-5 bg-background shadow-neo">
-      <h3 className="font-black text-lg mb-4 uppercase tracking-wider">
-        Pace Progression
-      </h3>
-      <ResponsiveContainer width="100%" height={300}>
+    <div className={embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'}>
+      {!embedded && (
+        <h3 className="font-black text-lg mb-4 uppercase tracking-wider">
+          Pace Progression
+        </h3>
+      )}
+      <ResponsiveContainer width="100%" height={embedded ? 260 : 300}>
         <LineChart data={chartData}>
           <CartesianGrid
             strokeDasharray="0"

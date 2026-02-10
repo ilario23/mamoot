@@ -60,38 +60,38 @@ const ActivitySummaryCards = ({activities}: ActivitySummaryCardsProps) => {
   }
 
   return (
-    <div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
       {stats.map((s) => {
         const config = ACTIVITY_TYPE_CONFIG[s.type];
         const Icon = ICON_MAP[s.type];
         return (
           <div
             key={s.type}
-            className='border-3 border-border p-4 bg-background shadow-neo'
+            className="border-3 border-border p-3 md:p-4 bg-background shadow-neo"
           >
-            <div className='flex items-center gap-2 mb-3'>
-              <Icon className='h-5 w-5' />
-              <p className='text-xs font-black uppercase tracking-wider'>
+            <div className="flex items-center gap-1.5 md:gap-2 mb-2 md:mb-3">
+              <Icon className="h-4 w-4 md:h-5 md:w-5" aria-hidden="true" />
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider">
                 {config.label}
               </p>
             </div>
-            <p className='text-3xl font-black leading-tight'>{s.count}</p>
-            <p className='text-xs font-bold text-muted-foreground mt-0.5'>
+            <p className="text-2xl md:text-3xl font-black leading-tight">{s.count}</p>
+            <p className="text-[10px] md:text-xs font-bold text-muted-foreground mt-0.5">
               {s.count === 1 ? 'activity' : 'activities'}
             </p>
-            <div className='flex gap-4 mt-3 pt-3 border-t border-muted'>
+            <div className="flex gap-3 md:gap-4 mt-2 md:mt-3 pt-2 md:pt-3 border-t border-muted">
               <div>
-                <p className='text-sm font-black'>{s.totalKm.toFixed(1)}</p>
-                <p className='text-xs text-muted-foreground font-bold'>km</p>
+                <p className="text-xs md:text-sm font-black">{s.totalKm.toFixed(1)}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground font-bold">km</p>
               </div>
               <div>
-                <p className='text-sm font-black'>{s.totalHours.toFixed(1)}</p>
-                <p className='text-xs text-muted-foreground font-bold'>hrs</p>
+                <p className="text-xs md:text-sm font-black">{s.totalHours.toFixed(1)}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground font-bold">hrs</p>
               </div>
             </div>
             {/* Accent bar in activity color */}
             <div
-              className='h-2 w-12 mt-3'
+              className="h-1.5 md:h-2 w-10 md:w-12 mt-2 md:mt-3"
               style={{backgroundColor: config.colors[3]}}
             />
           </div>

@@ -75,7 +75,7 @@ const VolumeChart = () => {
   if (isLoading) {
     const showProgress = progress.total > 0;
     return (
-      <div className="border-3 border-border p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[300px] gap-3">
+      <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[220px] md:min-h-[300px] gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         {showProgress && (
           <p className="text-sm font-bold text-muted-foreground">
@@ -89,11 +89,12 @@ const VolumeChart = () => {
   if (chartData.length === 0) return null;
 
   return (
-    <div className="border-3 border-border p-5 bg-background shadow-neo">
-      <h3 className="font-black text-lg mb-4 uppercase tracking-wider">
+    <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo">
+      <h3 className="font-black text-base md:text-lg mb-3 md:mb-4 uppercase tracking-wider">
         4-Week Volume by Zone
       </h3>
-      <ResponsiveContainer width="100%" height={300}>
+      <ResponsiveContainer width="100%" height={240}>
+
         <BarChart data={chartData}>
           <CartesianGrid
             strokeDasharray="0"

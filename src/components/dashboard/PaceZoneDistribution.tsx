@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import {
   formatDuration,
@@ -30,6 +31,7 @@ const ZONE_KEYS = [1, 2, 3, 4, 5, 6] as const;
 
 const PaceZoneDistribution = () => {
   const { isAuthenticated } = useStravaAuth();
+  const isMobile = useIsMobile();
   const [metric, setMetric] = useState<MetricMode>("time");
   const [weeks, setWeeks] = useState(4);
 
@@ -99,7 +101,7 @@ const PaceZoneDistribution = () => {
   const hasData = allZoneData.length > 0;
 
   return (
-    <div className="border-3 border-border p-5 bg-background shadow-neo">
+    <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo">
       {/* Header + controls */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <h3 className="font-black text-lg uppercase tracking-wider">
@@ -170,7 +172,7 @@ const PaceZoneDistribution = () => {
         <div className="flex flex-col md:flex-row items-center gap-4">
           {/* Donut chart */}
           <div className="w-full md:w-[280px] flex-shrink-0">
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={isMobile ? 200 : 260}>
               <PieChart>
                 <Pie
                   data={pieData}
@@ -178,8 +180,8 @@ const PaceZoneDistribution = () => {
                   nameKey="name"
                   cx="50%"
                   cy="50%"
-                  outerRadius={100}
-                  innerRadius={55}
+                  outerRadius={isMobile ? 75 : 100}
+                  innerRadius={isMobile ? 40 : 55}
                   strokeWidth={3}
                   stroke="var(--border)"
                   paddingAngle={1}

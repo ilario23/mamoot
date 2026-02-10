@@ -26,7 +26,7 @@ const SegmentList = ({
   };
 
   return (
-    <div className="border-3 border-border bg-background shadow-neo overflow-hidden">
+    <div className="border-3 border-border bg-background shadow-neo overflow-hidden max-w-full">
       {/* Header + search */}
       <div className="p-4 border-b-3 border-border space-y-3">
         <h3 className="font-black text-lg uppercase tracking-wider">

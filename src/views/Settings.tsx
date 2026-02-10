@@ -388,7 +388,8 @@ const Settings = () => {
                   maxHr: parseInt(e.target.value) || 0,
                 }))
               }
-              className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label="Maximum heart rate"
+              className="w-full px-3 md:px-4 py-2 md:py-3 border-3 border-border font-black text-xl md:text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
           </div>
@@ -405,7 +406,8 @@ const Settings = () => {
                   restingHr: parseInt(e.target.value) || 0,
                 }))
               }
-              className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label="Resting heart rate"
+              className="w-full px-3 md:px-4 py-2 md:py-3 border-3 border-border font-black text-xl md:text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
           </div>
@@ -420,31 +422,33 @@ const Settings = () => {
             {zoneKeys.map((zone, i) => {
               const zoneNum = i + 1;
               return (
-                <div key={zone} className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                <div key={zone} className="flex items-center gap-2 md:gap-3 flex-wrap sm:flex-nowrap">
                   <div
-                    className="w-3 h-10 shrink-0"
+                    className="w-2.5 md:w-3 h-8 md:h-10 shrink-0"
                     style={{
                       backgroundColor:
                         ZONE_COLORS[zoneNum as keyof typeof ZONE_COLORS],
                     }}
                   />
-                  <span className="font-black text-sm w-28 shrink-0">
+                  <span className="font-black text-xs md:text-sm w-20 md:w-28 shrink-0">
                     Z{zoneNum} {ZONE_NAMES[zoneNum as keyof typeof ZONE_NAMES]}
                   </span>
                   <input
                     type="number"
                     value={formState.zones[zone][0]}
                     onChange={(e) => handleZoneChange(zone, 0, e.target.value)}
-                    className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                    className="w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                    aria-label={`Zone ${zoneNum} lower bound`}
                   />
-                  <span className="font-black">—</span>
+                  <span className="font-black text-sm">—</span>
                   <input
                     type="number"
                     value={formState.zones[zone][1]}
                     onChange={(e) => handleZoneChange(zone, 1, e.target.value)}
-                    className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                    className="w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                    aria-label={`Zone ${zoneNum} upper bound`}
                   />
-                  <span className="font-bold text-xs text-muted-foreground">
+                  <span className="font-bold text-[10px] md:text-xs text-muted-foreground">
                     bpm
                   </span>
                 </div>
@@ -661,10 +665,12 @@ const Settings = () => {
         </button>
       </div>
 
-      {/* Save button */}
+      {/* Save button — full width on mobile */}
       <button
         onClick={handleSave}
-        className="px-8 py-4 rounded-full bg-primary text-primary-foreground font-black text-lg border-3 border-border shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px]"
+        className="w-full md:w-auto px-8 py-3 md:py-4 rounded-full bg-primary text-primary-foreground font-black text-base md:text-lg border-3 border-border shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px]"
+        aria-label="Save configuration"
+        tabIndex={0}
       >
         Save Configuration
       </button>

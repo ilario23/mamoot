@@ -143,7 +143,7 @@ const Segments = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6 overflow-hidden">
       {/* Page title */}
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
         Segments
@@ -189,26 +189,26 @@ const Segments = () => {
           </button>
 
           {/* Segment header */}
-          <div>
-            <h2 className="text-2xl md:text-3xl font-black uppercase tracking-tight">
+          <div className="min-w-0">
+            <h2 className="text-xl md:text-3xl font-black uppercase tracking-tight break-words">
               {selectedSegment.name}
             </h2>
-            <div className="flex flex-wrap items-center gap-4 mt-2">
+            <div className="flex flex-wrap items-center gap-2 md:gap-4 mt-1 md:mt-2">
               {selectedSegment.city && (
-                <span className="text-sm font-bold text-muted-foreground">
+                <span className="text-xs md:text-sm font-bold text-muted-foreground">
                   {selectedSegment.city}
                   {selectedSegment.state
                     ? `, ${selectedSegment.state}`
                     : ""}
                 </span>
               )}
-              <span className="text-sm font-bold text-muted-foreground">
+              <span className="text-xs md:text-sm font-bold text-muted-foreground">
                 {(selectedSegment.distance / 1000).toFixed(2)} km
               </span>
-              <span className="text-sm font-bold text-muted-foreground">
+              <span className="text-xs md:text-sm font-bold text-muted-foreground">
                 {selectedSegment.averageGrade.toFixed(1)}% avg grade
               </span>
-              <span className="text-sm font-bold text-muted-foreground">
+              <span className="text-xs md:text-sm font-bold text-muted-foreground">
                 {selectedSegment.effortCount} effort
                 {selectedSegment.effortCount !== 1 ? "s" : ""}
               </span>
@@ -216,28 +216,28 @@ const Segments = () => {
           </div>
 
           {/* Stats cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
-              <p className="text-xs font-black uppercase tracking-wider text-muted-foreground">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
+            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
                 Best Time
               </p>
-              <p className="text-xl md:text-2xl font-black mt-1">
+              <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
                 {formatDuration(selectedSegment.bestEffort.elapsed_time)}
               </p>
             </div>
-            <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
-              <p className="text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
                 Last Time
               </p>
-              <p className="text-xl md:text-2xl font-black mt-1">
+              <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
                 {formatDuration(selectedSegment.lastEffort.elapsed_time)}
               </p>
             </div>
-            <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
-              <p className="text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
                 Elevation
               </p>
-              <p className="text-xl md:text-2xl font-black mt-1">
+              <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
                 {Math.round(
                   selectedSegment.elevationHigh -
                     selectedSegment.elevationLow,
@@ -245,11 +245,11 @@ const Segments = () => {
                 m
               </p>
             </div>
-            <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
-              <p className="text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
                 Max Grade
               </p>
-              <p className="text-xl md:text-2xl font-black mt-1">
+              <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
                 {selectedSegment.maximumGrade.toFixed(1)}%
               </p>
             </div>
@@ -257,7 +257,7 @@ const Segments = () => {
 
           {/* Segment map */}
           {segmentDetailLoading ? (
-            <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[300px] md:min-h-[400px]">
+            <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[250px] md:min-h-[400px]">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : segmentDetail?.map?.polyline ? (

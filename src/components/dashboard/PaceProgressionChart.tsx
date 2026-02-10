@@ -15,6 +15,7 @@ import {
 import {formatPace} from '@/lib/mockData';
 import {useActivities} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
+import {useIsMobile} from '@/hooks/use-mobile';
 import {Loader2} from 'lucide-react';
 
 const PERIOD_OPTIONS = [
@@ -64,9 +65,10 @@ const linearRegression = (
   return {slope, intercept};
 };
 
-const PaceProgressionChart = () => {
+const PaceProgressionChart = ({embedded = false}: {embedded?: boolean}) => {
   const {isAuthenticated} = useStravaAuth();
   const {data: activities, isLoading} = useActivities();
+  const isMobile = useIsMobile();
   const [daysBack, setDaysBack] = useState(180);
 
   const {scatterData, trendData, yDomain} = useMemo(() => {
@@ -136,7 +138,7 @@ const PaceProgressionChart = () => {
 
   if (isLoading) {
     return (
-      <div className='border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[300px]'>
+      <div className={`${embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'} flex items-center justify-center min-h-[220px] md:min-h-[300px]`}>
         <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
       </div>
     );
@@ -156,22 +158,24 @@ const PaceProgressionChart = () => {
   const formatYTick = (pace: number) => formatPace(pace);
 
   return (
-    <div className='border-3 border-border p-5 bg-background shadow-neo'>
+    <div className={embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'}>
       {/* Header */}
-      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4'>
-        <div>
-          <h3 className='font-black text-lg uppercase tracking-wider'>
-            Pace Progression
-          </h3>
-          <p className='text-xs font-bold text-muted-foreground mt-0.5'>
-            Average pace per run with trend line
-          </p>
-        </div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        {!embedded && (
+          <div>
+            <h3 className="font-black text-lg uppercase tracking-wider">
+              Pace Progression
+            </h3>
+            <p className="text-xs font-bold text-muted-foreground mt-0.5">
+              Average pace per run with trend line
+            </p>
+          </div>
+        )}
         <select
           value={daysBack}
           onChange={handlePeriodChange}
-          className='px-3 py-1.5 border-3 border-border font-bold text-xs uppercase tracking-wider bg-background focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer'
-          aria-label='Select time period'
+          className="px-3 py-1.5 border-3 border-border font-bold text-xs uppercase tracking-wider bg-background focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+          aria-label="Select time period"
         >
           {PERIOD_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -182,7 +186,7 @@ const PaceProgressionChart = () => {
       </div>
 
       {/* Chart */}
-      <ResponsiveContainer width='100%' height={300}>
+      <ResponsiveContainer width="100%" height={embedded ? (isMobile ? 220 : 260) : (isMobile ? 250 : 300)}>
         <ComposedChart data={scatterData}>
           <CartesianGrid
             strokeDasharray='0'

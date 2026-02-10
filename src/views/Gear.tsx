@@ -125,7 +125,7 @@ const Gear = () => {
               ({sortedBikes.length})
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
             {sortedBikes.map((bike) => (
               <GearCard
                 key={bike.id}
@@ -153,7 +153,7 @@ const Gear = () => {
               ({sortedShoes.length})
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
             {sortedShoes.map((shoe) => (
               <GearCard
                 key={shoe.id}

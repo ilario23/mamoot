@@ -336,7 +336,7 @@ const AITeamChat = () => {
   const hasError = activeChat.error;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-w-0 overflow-hidden">
       {/* Persona selector */}
       <div className="p-3 border-b-3 border-border flex gap-2">
         {personas.map((p) => (
@@ -524,8 +524,8 @@ const AITeamChat = () => {
                 <PersonaAvatar persona={currentPersona} size="md" />
               )}
               <div
-                className={`flex-1 p-3 border-3 border-border text-sm font-medium ${
-                  isUser ? "bg-muted ml-10" : "bg-accent/20 mr-10"
+                className={`flex-1 p-3 border-3 border-border text-sm font-medium overflow-hidden break-words ${
+                  isUser ? "bg-muted ml-4 md:ml-10" : "bg-accent/20 mr-4 md:mr-10"
                 } ${isSharedPlan ? "ring-2 ring-primary" : ""}`}
               >
                 <span className="font-black text-xs uppercase mb-1 block">
@@ -534,7 +534,7 @@ const AITeamChat = () => {
                 {isUser ? (
                   textContent
                 ) : (
-                  <div className="prose-sm">
+                  <div className="prose-sm overflow-hidden">
                     <MarkdownContent content={textContent} />
                   </div>
                 )}
@@ -568,7 +568,7 @@ const AITeamChat = () => {
         {isStreaming && activeChat.messages.length > 0 && activeChat.messages[activeChat.messages.length - 1]?.role === "user" && (
           <div className="flex gap-2 flex-row">
             <PersonaAvatar persona={currentPersona} size="md" />
-            <div className="p-3 border-3 border-border text-sm font-medium bg-accent/20 mr-10">
+            <div className="p-3 border-3 border-border text-sm font-medium bg-accent/20 mr-4 md:mr-10">
               <span className="font-black text-xs uppercase mb-1 block">{currentPersona.label}</span>
               <div className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -599,7 +599,7 @@ const AITeamChat = () => {
           placeholder={isStreaming ? "Waiting for response..." : "Ask your AI team..."}
           disabled={isStreaming}
           aria-label="Message input"
-          className="flex-1 px-3 py-2 border-3 border-border font-medium text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+          className="flex-1 min-w-0 px-3 py-2 border-3 border-border font-medium text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
         />
         <button
           onClick={handleSend}

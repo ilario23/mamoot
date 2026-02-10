@@ -126,7 +126,7 @@ const Activities = () => {
   return (
     <div className='flex flex-col gap-6 h-full'>
       {/* Fixed header sections */}
-      <div className='shrink-0 space-y-6'>
+      <div className='shrink-0 space-y-4 md:space-y-6'>
         {/* Page title */}
         <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
           Activities

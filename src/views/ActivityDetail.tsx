@@ -19,7 +19,7 @@ const ActivityMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[300px] md:min-h-[400px]">
+      <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[250px] md:min-h-[400px]">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     ),
@@ -107,22 +107,24 @@ const ActivityDetail = () => {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/* Back */}
       <button
         onClick={() => router.push("/")}
         className="flex items-center gap-2 font-black text-sm hover:text-primary transition-colors"
+        aria-label="Back to Dashboard"
+        tabIndex={0}
       >
-        <ArrowLeft className="h-4 w-4" />
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         Back to Dashboard
       </button>
 
       {/* Header */}
       <div>
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
+        <h1 className="text-2xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           {activity.name}
         </h1>
-        <p className="font-bold text-muted-foreground mt-1">
+        <p className="text-sm md:text-base font-bold text-muted-foreground mt-1 pl-3 md:pl-0">
           {new Date(activity.date).toLocaleDateString("en-GB", {
             weekday: "long",
             day: "numeric",
@@ -133,16 +135,16 @@ const ActivityDetail = () => {
       </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 md:gap-3">
         {stats.map((stat, i) => (
           <div
             key={i}
-            className="border-3 border-border p-4 bg-background shadow-neo-sm"
+            className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm"
           >
-            <p className="text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
               {stat.label}
             </p>
-            <p className="text-xl md:text-2xl font-black mt-1">{stat.value}</p>
+            <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">{stat.value}</p>
           </div>
         ))}
       </div>

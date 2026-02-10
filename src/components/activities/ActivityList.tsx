@@ -118,42 +118,42 @@ const ActivityList = ({activities}: ActivityListProps) => {
                 <div className={`w-2 shrink-0 ${accentClass}`} />
 
                 {/* Card content */}
-                <div className='flex-1 p-4 min-w-0'>
+                <div className="flex-1 p-3 md:p-4 min-w-0">
                   {/* Top row: name, date, icon */}
-                  <div className='flex items-center gap-3'>
-                    <div className='flex items-center gap-2 flex-1 min-w-0'>
+                  <div className="flex items-center gap-2 md:gap-3">
+                    <div className="flex items-center gap-1.5 md:gap-2 flex-1 min-w-0">
                       <Icon
-                        className='h-4 w-4 shrink-0 text-muted-foreground'
-                        aria-hidden='true'
+                        className="h-4 w-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
                       />
-                      <p className='font-black text-sm truncate'>{activity.name}</p>
+                      <p className="font-black text-xs md:text-sm truncate">{activity.name}</p>
                     </div>
-                    <span className='text-xs font-bold text-muted-foreground uppercase tracking-wider shrink-0'>
+                    <span className="text-[10px] md:text-xs font-bold text-muted-foreground uppercase tracking-wider shrink-0">
                       {dateStr}
                     </span>
                   </div>
 
                   {/* Stats row */}
-                  <div className='flex items-center flex-wrap gap-x-3 gap-y-1 mt-2'>
-                    <span className='text-sm font-black'>
+                  <div className="flex items-center flex-wrap gap-x-2 md:gap-x-3 gap-y-1 mt-1.5 md:mt-2">
+                    <span className="text-xs md:text-sm font-black">
                       {activity.distance.toFixed(1)} km
                     </span>
                     <span
-                      className='text-muted-foreground text-xs select-none'
-                      aria-hidden='true'
+                      className="text-muted-foreground text-[10px] md:text-xs select-none"
+                      aria-hidden="true"
                     >
                       /
                     </span>
-                    <span className='text-sm font-bold text-muted-foreground'>
+                    <span className="text-xs md:text-sm font-bold text-muted-foreground">
                       {formatDuration(activity.duration)}
                     </span>
                     <span
-                      className='text-muted-foreground text-xs select-none'
-                      aria-hidden='true'
+                      className="text-muted-foreground text-[10px] md:text-xs select-none"
+                      aria-hidden="true"
                     >
                       /
                     </span>
-                    <span className='text-sm font-bold text-muted-foreground'>
+                    <span className="text-xs md:text-sm font-bold text-muted-foreground">
                       {activity.avgPace > 0
                         ? `${formatPace(activity.avgPace)}/km`
                         : '—'}
@@ -161,12 +161,12 @@ const ActivityList = ({activities}: ActivityListProps) => {
                     {activity.avgHr > 0 && (
                       <>
                         <span
-                          className='text-muted-foreground text-xs select-none'
-                          aria-hidden='true'
+                          className="text-muted-foreground text-[10px] md:text-xs select-none hidden sm:inline"
+                          aria-hidden="true"
                         >
                           /
                         </span>
-                        <span className='text-sm font-bold text-muted-foreground'>
+                        <span className="text-xs md:text-sm font-bold text-muted-foreground hidden sm:inline">
                           {activity.avgHr} bpm
                         </span>
                       </>
@@ -174,12 +174,12 @@ const ActivityList = ({activities}: ActivityListProps) => {
                     {activity.elevationGain > 0 && (
                       <>
                         <span
-                          className='text-muted-foreground text-xs select-none'
-                          aria-hidden='true'
+                          className="text-muted-foreground text-[10px] md:text-xs select-none hidden sm:inline"
+                          aria-hidden="true"
                         >
                           /
                         </span>
-                        <span className='text-sm font-bold text-muted-foreground'>
+                        <span className="text-xs md:text-sm font-bold text-muted-foreground hidden sm:inline">
                           {Math.round(activity.elevationGain)} m elev
                         </span>
                       </>
@@ -187,9 +187,9 @@ const ActivityList = ({activities}: ActivityListProps) => {
                   </div>
                 </div>
 
-                {/* Route polyline preview */}
+                {/* Route polyline preview — hidden on mobile */}
                 {activity.polyline && (
-                  <div className='shrink-0 border-l-3 border-border bg-muted/40 flex items-center justify-center px-2'>
+                  <div className="shrink-0 border-l-3 border-border bg-muted/40 hidden sm:flex items-center justify-center px-2">
                     <RoutePreview
                       polyline={activity.polyline}
                       color={ACCENT_COLOR[activity.type] ?? 'hsl(312, 100%, 67%)'}

@@ -44,26 +44,26 @@ const SegmentEffortHistory = ({ segment }: SegmentEffortHistoryProps) => {
           {segment.name}
         </p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-hidden">
         <table className="w-full">
           <thead>
             <tr className="border-b-3 border-border bg-muted">
-              <th className="text-left p-3 font-black text-xs uppercase">
+              <th className="text-left p-2 md:p-3 font-black text-[10px] md:text-xs uppercase">
                 Date
               </th>
-              <th className="text-left p-3 font-black text-xs uppercase">
+              <th className="text-left p-2 md:p-3 font-black text-[10px] md:text-xs uppercase hidden md:table-cell">
                 Activity
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase">
                 Time
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase hidden sm:table-cell">
                 Pace
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase hidden md:table-cell">
                 Avg HR
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase">
                 PR
               </th>
             </tr>
@@ -80,7 +80,7 @@ const SegmentEffortHistory = ({ segment }: SegmentEffortHistoryProps) => {
               ).toLocaleDateString("en-US", {
                 month: "short",
                 day: "numeric",
-                year: "numeric",
+                year: "2-digit",
               });
 
               return (
@@ -88,10 +88,10 @@ const SegmentEffortHistory = ({ segment }: SegmentEffortHistoryProps) => {
                   key={effort.id}
                   className="border-b-3 border-border last:border-b-0"
                 >
-                  <td className="p-3 font-bold text-sm whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-xs md:text-sm whitespace-nowrap">
                     {dateStr}
                   </td>
-                  <td className="p-3 font-bold text-sm max-w-[200px] truncate">
+                  <td className="p-2 md:p-3 font-bold text-sm max-w-[200px] truncate hidden md:table-cell">
                     <Link
                       href={`/activity/${effort.activityId}`}
                       className="hover:text-primary transition-colors underline-offset-2 hover:underline"
@@ -100,22 +100,22 @@ const SegmentEffortHistory = ({ segment }: SegmentEffortHistoryProps) => {
                       {effort.activityName}
                     </Link>
                   </td>
-                  <td className="p-3 font-black text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-black text-xs md:text-sm text-right whitespace-nowrap">
                     {formatDuration(effort.elapsed_time)}
                   </td>
-                  <td className="p-3 font-bold text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-sm text-right whitespace-nowrap hidden sm:table-cell">
                     {pace > 0 ? `${formatPace(pace)}/km` : "—"}
                   </td>
-                  <td className="p-3 font-bold text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-sm text-right whitespace-nowrap hidden md:table-cell">
                     {effort.average_heartrate
                       ? `${Math.round(effort.average_heartrate)} bpm`
                       : "—"}
                   </td>
-                  <td className="p-3 text-right">
+                  <td className="p-2 md:p-3 text-right">
                     {effort.pr_rank && effort.pr_rank <= 3 ? (
                       <PrBadge rank={effort.pr_rank} />
                     ) : (
-                      <span className="text-sm text-muted-foreground">—</span>
+                      <span className="text-xs md:text-sm text-muted-foreground">—</span>
                     )}
                   </td>
                 </tr>

@@ -5,8 +5,9 @@ import {useActivities, useAthleteStats} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {calcStreak} from '@/utils/trainingLoad';
-import {Loader2} from 'lucide-react';
-import {useMemo} from 'react';
+import {Loader2, ChevronDown} from 'lucide-react';
+import {useMemo, useState} from 'react';
+import {useIsMobile} from '@/hooks/use-mobile';
 
 interface StatCard {
   label: string;
@@ -133,7 +134,7 @@ const StatCards = () => {
     return (
       <div className='space-y-4'>
         <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[1, 2, 3].map((i) => (
+          {[1, 2, 3, 4].map((i) => (
             <div
               key={i}
               className='border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]'
@@ -143,7 +144,7 @@ const StatCards = () => {
           ))}
         </div>
         <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[4, 5, 6].map((i) => (
+          {[5, 6].map((i) => (
             <div
               key={i}
               className='border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]'
@@ -158,49 +159,73 @@ const StatCards = () => {
 
   if (cards.length === 0) return null;
 
-  const topRow = cards.slice(0, 3);
-  const bottomRow = cards.slice(3);
+  const isMobile = useIsMobile();
+  const [showAll, setShowAll] = useState(false);
+
+  const topRow = cards.slice(0, 4);
+  const bottomRow = cards.slice(4);
+  const showBottomRow = !isMobile || showAll;
+
+  const handleToggleShowAll = () => {
+    setShowAll((prev) => !prev);
+  };
 
   return (
-    <div className='space-y-4'>
-      <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
+    <div className="space-y-3 md:space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
         {topRow.map((card, i) => (
           <div
             key={i}
-            className='border-3 border-border p-5 bg-background shadow-neo'
+            className="border-3 border-border p-3 md:p-5 bg-background shadow-neo"
           >
-            <p className='text-xs font-black uppercase tracking-wider mb-2'>
+            <p className="text-[10px] md:text-xs font-black uppercase tracking-wider mb-1.5 md:mb-2">
               {card.label}
             </p>
-            <p className='text-3xl lg:text-2xl xl:text-3xl font-black leading-tight'>
+            <p className="text-2xl md:text-3xl lg:text-2xl xl:text-3xl font-black leading-tight">
               {card.value}
             </p>
-            <p className='text-sm font-bold text-muted-foreground mt-1'>
+            <p className="text-xs md:text-sm font-bold text-muted-foreground mt-1">
               {card.sub}
             </p>
-            <div className={`h-2 w-16 mt-3 ${card.accentClass}`} />
+            <div className={`h-1.5 md:h-2 w-12 md:w-16 mt-2 md:mt-3 ${card.accentClass}`} />
           </div>
         ))}
       </div>
-      <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-        {bottomRow.map((card, i) => (
-          <div
-            key={i + 3}
-            className='border-3 border-border p-5 bg-background shadow-neo'
-          >
-            <p className='text-xs font-black uppercase tracking-wider mb-2'>
-              {card.label}
-            </p>
-            <p className='text-3xl lg:text-2xl xl:text-3xl font-black leading-tight'>
-              {card.value}
-            </p>
-            <p className='text-sm font-bold text-muted-foreground mt-1'>
-              {card.sub}
-            </p>
-            <div className={`h-2 w-16 mt-3 ${card.accentClass}`} />
-          </div>
-        ))}
-      </div>
+      {showBottomRow && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+          {bottomRow.map((card, i) => (
+            <div
+              key={i + 4}
+              className="border-3 border-border p-3 md:p-5 bg-background shadow-neo"
+            >
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider mb-1.5 md:mb-2">
+                {card.label}
+              </p>
+              <p className="text-2xl md:text-3xl lg:text-2xl xl:text-3xl font-black leading-tight">
+                {card.value}
+              </p>
+              <p className="text-xs md:text-sm font-bold text-muted-foreground mt-1">
+                {card.sub}
+              </p>
+              <div className={`h-1.5 md:h-2 w-12 md:w-16 mt-2 md:mt-3 ${card.accentClass}`} />
+            </div>
+          ))}
+        </div>
+      )}
+      {isMobile && (
+        <button
+          onClick={handleToggleShowAll}
+          className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-black uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={showAll ? 'Show fewer stats' : 'Show all stats'}
+          tabIndex={0}
+        >
+          {showAll ? 'Show less' : 'Show all stats'}
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform duration-200 ${showAll ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+          />
+        </button>
+      )}
     </div>
   );
 };

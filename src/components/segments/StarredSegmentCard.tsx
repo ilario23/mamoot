@@ -41,7 +41,7 @@ const StarredSegmentCard = ({ segment, onSelect }: StarredSegmentCardProps) => {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       aria-label={`View segment ${segment.name}`}
-      className="border-3 border-border bg-background p-5 shadow-neo hover:shadow-neo-lg transition-shadow cursor-pointer"
+      className="border-3 border-border bg-background p-3 md:p-5 shadow-neo hover:shadow-neo-lg transition-shadow cursor-pointer overflow-hidden"
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -63,45 +63,45 @@ const StarredSegmentCard = ({ segment, onSelect }: StarredSegmentCardProps) => {
       </div>
 
       {/* Best time — hero value */}
-      <p className="text-3xl font-black leading-tight">
+      <p className="text-2xl md:text-3xl font-black leading-tight">
         {formatDuration(segment.bestEffort.elapsed_time)}
       </p>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4">
-        <div className="flex items-center gap-1.5">
+      <div className="grid grid-cols-2 gap-x-3 md:gap-x-4 gap-y-1.5 md:gap-y-2 mt-3 md:mt-4">
+        <div className="flex items-center gap-1.5 min-w-0">
           <Ruler
-            className="h-3.5 w-3.5 text-muted-foreground shrink-0"
+            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
             aria-hidden="true"
           />
-          <span className="text-sm font-bold">
+          <span className="text-xs md:text-sm font-bold truncate">
             {distKm >= 1 ? `${distKm.toFixed(2)} km` : `${Math.round(segment.distance)}m`}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <Mountain
-            className="h-3.5 w-3.5 text-muted-foreground shrink-0"
+            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
             aria-hidden="true"
           />
-          <span className="text-sm font-bold">
+          <span className="text-xs md:text-sm font-bold">
             {segment.averageGrade.toFixed(1)}%
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <Clock
-            className="h-3.5 w-3.5 text-muted-foreground shrink-0"
+            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
             aria-hidden="true"
           />
-          <span className="text-sm font-bold">
+          <span className="text-xs md:text-sm font-bold truncate">
             {bestPace > 0 ? `${formatPace(bestPace)}/km` : "—"}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <Hash
-            className="h-3.5 w-3.5 text-muted-foreground shrink-0"
+            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
             aria-hidden="true"
           />
-          <span className="text-sm font-bold">
+          <span className="text-xs md:text-sm font-bold truncate">
             {segment.effortCount} effort{segment.effortCount !== 1 ? "s" : ""}
           </span>
         </div>

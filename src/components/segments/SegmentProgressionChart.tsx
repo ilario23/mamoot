@@ -48,12 +48,12 @@ const SegmentProgressionChart = ({
   }));
 
   return (
-    <div className="border-3 border-border p-5 bg-background shadow-neo">
-      <h3 className="font-black text-lg mb-4 uppercase tracking-wider">
+    <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo overflow-hidden">
+      <h3 className="font-black text-base md:text-lg mb-3 md:mb-4 uppercase tracking-wider">
         Progression
       </h3>
-      <ResponsiveContainer width="100%" height={280}>
-        <LineChart data={chartData}>
+      <ResponsiveContainer width="100%" height={240}>
+        <LineChart data={chartData} margin={{ left: -10, right: 5 }}>
           <CartesianGrid
             strokeDasharray="0"
             stroke="#000"
@@ -62,22 +62,17 @@ const SegmentProgressionChart = ({
           />
           <XAxis
             dataKey="dateLabel"
-            tick={{ fontWeight: 700, fontSize: 12 }}
+            tick={{ fontWeight: 700, fontSize: 10 }}
             stroke="#000"
             strokeWidth={2}
           />
           <YAxis
             reversed
-            tick={{ fontWeight: 700, fontSize: 12 }}
+            tick={{ fontWeight: 700, fontSize: 10 }}
             stroke="#000"
             strokeWidth={2}
             tickFormatter={(val: number) => formatPace(val)}
-            label={{
-              value: "min/km",
-              angle: -90,
-              position: "insideLeft",
-              style: { fontWeight: 700 },
-            }}
+            width={45}
           />
           <Tooltip
             contentStyle={{

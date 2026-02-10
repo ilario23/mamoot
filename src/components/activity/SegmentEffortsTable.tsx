@@ -32,8 +32,8 @@ const SegmentEffortsTable = ({ efforts }: Props) => {
 
   return (
     <div className="border-3 border-border bg-background shadow-neo overflow-hidden">
-      <div className="p-4 border-b-3 border-border">
-        <h3 className="font-black text-lg uppercase tracking-wider">
+      <div className="p-3 md:p-4 border-b-3 border-border">
+        <h3 className="font-black text-base md:text-lg uppercase tracking-wider">
           Segment Efforts
         </h3>
       </div>
@@ -41,25 +41,25 @@ const SegmentEffortsTable = ({ efforts }: Props) => {
         <table className="w-full">
           <thead>
             <tr className="border-b-3 border-border bg-muted">
-              <th className="text-left p-3 font-black text-xs uppercase">
+              <th className="text-left p-2 md:p-3 font-black text-[10px] md:text-xs uppercase">
                 Segment
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase hidden md:table-cell">
                 Dist
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase">
                 Time
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase">
                 Pace
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase hidden md:table-cell">
                 Avg HR
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase hidden md:table-cell">
                 Grade
               </th>
-              <th className="text-right p-3 font-black text-xs uppercase">
+              <th className="text-right p-2 md:p-3 font-black text-[10px] md:text-xs uppercase">
                 PR
               </th>
             </tr>
@@ -77,7 +77,7 @@ const SegmentEffortsTable = ({ efforts }: Props) => {
                   key={effort.id}
                   className="border-b-3 border-border last:border-b-0"
                 >
-                  <td className="p-3 font-black text-sm">
+                  <td className="p-2 md:p-3 font-black text-xs md:text-sm max-w-[120px] md:max-w-none truncate">
                     <Link
                       href={`/segments?id=${effort.segment.id}`}
                       className="hover:text-primary transition-colors underline-offset-2 hover:underline"
@@ -86,28 +86,28 @@ const SegmentEffortsTable = ({ efforts }: Props) => {
                       {effort.segment.name}
                     </Link>
                   </td>
-                  <td className="p-3 font-bold text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-xs md:text-sm text-right whitespace-nowrap hidden md:table-cell">
                     {distKm >= 1 ? `${distKm.toFixed(2)} km` : `${Math.round(effort.distance)}m`}
                   </td>
-                  <td className="p-3 font-bold text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-xs md:text-sm text-right whitespace-nowrap">
                     {formatDuration(effort.elapsed_time)}
                   </td>
-                  <td className="p-3 font-bold text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-xs md:text-sm text-right whitespace-nowrap">
                     {pace > 0 ? `${formatPace(pace)}/km` : "—"}
                   </td>
-                  <td className="p-3 font-bold text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-xs md:text-sm text-right whitespace-nowrap hidden md:table-cell">
                     {effort.average_heartrate
                       ? `${Math.round(effort.average_heartrate)} bpm`
                       : "—"}
                   </td>
-                  <td className="p-3 font-bold text-sm text-right whitespace-nowrap">
+                  <td className="p-2 md:p-3 font-bold text-xs md:text-sm text-right whitespace-nowrap hidden md:table-cell">
                     {effort.segment.average_grade.toFixed(1)}%
                   </td>
-                  <td className="p-3 text-right">
+                  <td className="p-2 md:p-3 text-right">
                     {effort.pr_rank && effort.pr_rank <= 3 ? (
                       <PrBadge rank={effort.pr_rank} />
                     ) : (
-                      <span className="text-sm text-muted-foreground">—</span>
+                      <span className="text-xs md:text-sm text-muted-foreground">—</span>
                     )}
                   </td>
                 </tr>

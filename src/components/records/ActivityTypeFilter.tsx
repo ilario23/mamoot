@@ -3,6 +3,14 @@
 import type { ActivityType } from "@/lib/mockData";
 import { ACTIVITY_TYPE_CONFIG } from "@/lib/mockData";
 import { Footprints, Bike, Mountain, Waves } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const ICON_MAP: Record<ActivityType, React.ComponentType<{ className?: string }>> = {
   Run: Footprints,
@@ -29,8 +37,39 @@ const ActivityTypeFilter = ({
   value,
   onChange,
 }: ActivityTypeFilterProps) => {
+  const isMobile = useIsMobile();
+
   if (availableTypes.length === 0) return null;
 
+  const handleDropdownChange = (val: string) => {
+    onChange(val as ActivityType);
+  };
+
+  // Mobile: dropdown
+  if (isMobile) {
+    return (
+      <Select value={value} onValueChange={handleDropdownChange}>
+        <SelectTrigger
+          className="w-[120px] border-3 border-border font-black shadow-neo-sm text-xs"
+          aria-label="Activity type"
+        >
+          <SelectValue placeholder="Type" />
+        </SelectTrigger>
+        <SelectContent className="border-3 border-border shadow-neo-sm">
+          {availableTypes.map((type) => {
+            const config = ACTIVITY_TYPE_CONFIG[type];
+            return (
+              <SelectItem key={type} value={type} className="font-bold">
+                {config.label}
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  // Desktop: buttons
   return (
     <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Activity type">
       {availableTypes.map((type) => {
