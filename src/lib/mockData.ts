@@ -42,6 +42,11 @@ export interface Split {
   elevationLoss: number;
 }
 
+export interface Injury {
+  name: string;
+  notes?: string;
+}
+
 export interface UserSettings {
   maxHr: number;
   restingHr: number;
@@ -55,6 +60,12 @@ export interface UserSettings {
   };
   /** Free-text training goal (e.g., "Sub-50 10K in May", "First marathon in October") */
   goal?: string;
+  /** Allergies the nutritionist should avoid (e.g., ["gluten", "dairy", "nuts"]) */
+  allergies?: string[];
+  /** Free-text dietary preferences (e.g., "vegetarian, no red meat, prefer whole foods") */
+  foodPreferences?: string;
+  /** Current injuries for coach and physio context */
+  injuries?: Injury[];
 }
 
 export interface AIMessage {
@@ -78,6 +89,9 @@ export const defaultSettings: UserSettings = {
     z6: [182, 190],
   },
   goal: '',
+  allergies: [],
+  foodPreferences: '',
+  injuries: [],
 };
 
 // ----- Utility functions -----

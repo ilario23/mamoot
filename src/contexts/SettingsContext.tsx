@@ -20,6 +20,16 @@ const migrateSettings = (parsed: unknown): UserSettings => {
   if (s.goal === undefined) {
     s.goal = '';
   }
+  // Add nutrition & injury fields if missing
+  if (s.allergies === undefined) {
+    s.allergies = [];
+  }
+  if (s.foodPreferences === undefined) {
+    s.foodPreferences = '';
+  }
+  if (s.injuries === undefined) {
+    s.injuries = [];
+  }
   return s;
 };
 

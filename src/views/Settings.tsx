@@ -6,11 +6,13 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useSettings } from "@/contexts/SettingsContext";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import { useForceRefreshActivities } from "@/hooks/useStrava";
-import { UserSettings, ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
+import { UserSettings, ZONE_COLORS, ZONE_NAMES, type Injury } from "@/lib/mockData";
 import { getCacheStats, clearAllCache } from "@/lib/db";
 import { toast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
-import { Sun, Moon, Link2, Link2Off, Loader2, Database, Trash2, RefreshCw } from "lucide-react";
+import { Sun, Moon, Link2, Link2Off, Loader2, Database, Trash2, RefreshCw, X, Plus } from "lucide-react";
+
+const COMMON_ALLERGIES = ["Gluten", "Dairy", "Nuts", "Shellfish", "Soy", "Eggs"];
 
 const Settings = () => {
   const { settings, updateSettings } = useSettings();
@@ -30,7 +32,63 @@ const Settings = () => {
   } | null>(null);
   const [isCacheLoading, setIsCacheLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [allergyInput, setAllergyInput] = useState("");
   const forceRefreshActivities = useForceRefreshActivities();
+
+  const handleAddAllergy = (allergy: string) => {
+    const trimmed = allergy.trim();
+    if (!trimmed) return;
+    const exists = (formState.allergies ?? []).some(
+      (a) => a.toLowerCase() === trimmed.toLowerCase()
+    );
+    if (exists) return;
+    setFormState((prev) => ({
+      ...prev,
+      allergies: [...(prev.allergies ?? []), trimmed],
+    }));
+    setAllergyInput("");
+  };
+
+  const handleRemoveAllergy = (index: number) => {
+    setFormState((prev) => ({
+      ...prev,
+      allergies: (prev.allergies ?? []).filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleAllergyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleAddAllergy(allergyInput);
+    }
+  };
+
+  const handleAddInjury = () => {
+    setFormState((prev) => ({
+      ...prev,
+      injuries: [...(prev.injuries ?? []), { name: "", notes: "" }],
+    }));
+  };
+
+  const handleUpdateInjury = (
+    index: number,
+    field: keyof Injury,
+    value: string
+  ) => {
+    setFormState((prev) => ({
+      ...prev,
+      injuries: (prev.injuries ?? []).map((injury, i) =>
+        i === index ? { ...injury, [field]: value } : injury
+      ),
+    }));
+  };
+
+  const handleRemoveInjury = (index: number) => {
+    setFormState((prev) => ({
+      ...prev,
+      injuries: (prev.injuries ?? []).filter((_, i) => i !== index),
+    }));
+  };
 
   const loadCacheStats = useCallback(async () => {
     try {
@@ -148,7 +206,7 @@ const Settings = () => {
     updateSettings(formState);
     toast({
       title: "Settings Saved",
-      description: "Your HR zones have been updated successfully.",
+      description: "Your personal information has been updated successfully.",
     });
   };
 
@@ -289,132 +347,318 @@ const Settings = () => {
         )}
       </div>
 
-      {/* Training Goal */}
-      <div className="border-3 border-border p-5 bg-background shadow-neo">
-        <h3 className="font-black text-lg uppercase tracking-wider mb-4">
-          Training Goal
+      {/* ── Personal Information ── */}
+      <div className="border-3 border-border p-5 bg-background shadow-neo space-y-6">
+        <h3 className="font-black text-lg uppercase tracking-wider">
+          Personal Information
         </h3>
-        <p className="text-xs font-bold text-muted-foreground mb-3">
-          Set your current training goal so the AI coaching team can give you personalized advice.
-        </p>
-        <input
-          type="text"
-          value={formState.goal ?? ""}
-          onChange={(e) =>
-            setFormState((prev) => ({ ...prev, goal: e.target.value }))
-          }
-          placeholder="e.g., Sub-50 10K in May, First marathon in October, Build aerobic base..."
-          aria-label="Training goal"
-          className="w-full px-4 py-3 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/50"
-        />
-      </div>
 
-      {/* Max HR & Resting HR */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="border-3 border-border p-5 bg-background shadow-neo">
+        {/* Training Goal */}
+        <div>
           <label className="font-black text-xs uppercase tracking-wider block mb-2">
-            Maximum Heart Rate
+            Training Goal
           </label>
+          <p className="text-xs font-bold text-muted-foreground mb-3">
+            Set your current training goal so the AI coaching team can give you personalized advice.
+          </p>
           <input
-            type="number"
-            value={formState.maxHr}
+            type="text"
+            value={formState.goal ?? ""}
             onChange={(e) =>
-              setFormState((prev) => ({
-                ...prev,
-                maxHr: parseInt(e.target.value) || 0,
-              }))
+              setFormState((prev) => ({ ...prev, goal: e.target.value }))
             }
-            className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="e.g., Sub-50 10K in May, First marathon in October, Build aerobic base..."
+            aria-label="Training goal"
+            className="w-full px-4 py-3 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/50"
           />
-          <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
         </div>
-        <div className="border-3 border-border p-5 bg-background shadow-neo">
-          <label className="font-black text-xs uppercase tracking-wider block mb-2">
-            Resting Heart Rate
-          </label>
-          <input
-            type="number"
-            value={formState.restingHr}
-            onChange={(e) =>
-              setFormState((prev) => ({
-                ...prev,
-                restingHr: parseInt(e.target.value) || 0,
-              }))
-            }
-            className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
-          />
-          <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
-        </div>
-      </div>
 
-      {/* HR Zone Editors */}
-      <div className="border-3 border-border p-5 bg-background shadow-neo">
-        <h3 className="font-black text-lg uppercase tracking-wider mb-4">
-          Heart Rate Zones
-        </h3>
-        <div className="space-y-4">
-          {zoneKeys.map((zone, i) => {
-            const zoneNum = i + 1;
-            return (
-              <div key={zone} className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+        {/* Max HR & Resting HR */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="font-black text-xs uppercase tracking-wider block mb-2">
+              Maximum Heart Rate
+            </label>
+            <input
+              type="number"
+              value={formState.maxHr}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  maxHr: parseInt(e.target.value) || 0,
+                }))
+              }
+              className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
+          </div>
+          <div>
+            <label className="font-black text-xs uppercase tracking-wider block mb-2">
+              Resting Heart Rate
+            </label>
+            <input
+              type="number"
+              value={formState.restingHr}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  restingHr: parseInt(e.target.value) || 0,
+                }))
+              }
+              className="w-full px-4 py-3 border-3 border-border font-black text-2xl bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <p className="text-xs font-bold text-muted-foreground mt-2">bpm</p>
+          </div>
+        </div>
+
+        {/* HR Zone Editors */}
+        <div>
+          <label className="font-black text-xs uppercase tracking-wider block mb-4">
+            Heart Rate Zones
+          </label>
+          <div className="space-y-4">
+            {zoneKeys.map((zone, i) => {
+              const zoneNum = i + 1;
+              return (
+                <div key={zone} className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                  <div
+                    className="w-3 h-10 shrink-0"
+                    style={{
+                      backgroundColor:
+                        ZONE_COLORS[zoneNum as keyof typeof ZONE_COLORS],
+                    }}
+                  />
+                  <span className="font-black text-sm w-28 shrink-0">
+                    Z{zoneNum} {ZONE_NAMES[zoneNum as keyof typeof ZONE_NAMES]}
+                  </span>
+                  <input
+                    type="number"
+                    value={formState.zones[zone][0]}
+                    onChange={(e) => handleZoneChange(zone, 0, e.target.value)}
+                    className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                  />
+                  <span className="font-black">—</span>
+                  <input
+                    type="number"
+                    value={formState.zones[zone][1]}
+                    onChange={(e) => handleZoneChange(zone, 1, e.target.value)}
+                    className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
+                  />
+                  <span className="font-bold text-xs text-muted-foreground">
+                    bpm
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Visual zone bar */}
+        <div className="border-3 border-border p-4 bg-background">
+          <p className="font-black text-xs uppercase tracking-wider mb-3">
+            Zone Distribution
+          </p>
+          <div className="flex h-8 border-3 border-border overflow-hidden">
+            {zoneKeys.map((zone, i) => {
+              const zoneNum = i + 1;
+              const range = formState.zones[zone][1] - formState.zones[zone][0];
+              const totalRange = formState.maxHr - formState.restingHr;
+              const width = totalRange > 0 ? (range / totalRange) * 100 : 20;
+              return (
                 <div
-                  className="w-3 h-10 shrink-0"
+                  key={zone}
+                  className="flex items-center justify-center font-black text-xs"
                   style={{
+                    width: `${width}%`,
                     backgroundColor:
                       ZONE_COLORS[zoneNum as keyof typeof ZONE_COLORS],
                   }}
-                />
-                <span className="font-black text-sm w-28 shrink-0">
-                  Z{zoneNum} {ZONE_NAMES[zoneNum as keyof typeof ZONE_NAMES]}
-                </span>
-                <input
-                  type="number"
-                  value={formState.zones[zone][0]}
-                  onChange={(e) => handleZoneChange(zone, 0, e.target.value)}
-                  className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
-                />
-                <span className="font-black">—</span>
-                <input
-                  type="number"
-                  value={formState.zones[zone][1]}
-                  onChange={(e) => handleZoneChange(zone, 1, e.target.value)}
-                  className="w-20 px-3 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center"
-                />
-                <span className="font-bold text-xs text-muted-foreground">
-                  bpm
-                </span>
-              </div>
-            );
-          })}
+                >
+                  Z{zoneNum}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Visual zone bar */}
-      <div className="border-3 border-border p-4 bg-background shadow-neo-sm">
-        <p className="font-black text-xs uppercase tracking-wider mb-3">
-          Zone Distribution
-        </p>
-        <div className="flex h-8 border-3 border-border overflow-hidden">
-          {zoneKeys.map((zone, i) => {
-            const zoneNum = i + 1;
-            const range = formState.zones[zone][1] - formState.zones[zone][0];
-            const totalRange = formState.maxHr - formState.restingHr;
-            const width = totalRange > 0 ? (range / totalRange) * 100 : 20;
-            return (
-              <div
-                key={zone}
-                className="flex items-center justify-center font-black text-xs"
-                style={{
-                  width: `${width}%`,
-                  backgroundColor:
-                    ZONE_COLORS[zoneNum as keyof typeof ZONE_COLORS],
-                }}
-              >
-                Z{zoneNum}
-              </div>
-            );
-          })}
+      {/* ── Nutrition Profile ── */}
+      <div className="border-3 border-border p-5 bg-background shadow-neo space-y-6">
+        <div>
+          <h3 className="font-black text-lg uppercase tracking-wider">
+            Nutrition Profile
+          </h3>
+          <p className="text-xs font-bold text-muted-foreground mt-1">
+            This information is shared with the Nutritionist to personalize dietary advice.
+          </p>
         </div>
+
+        {/* Allergies */}
+        <div>
+          <label className="font-black text-xs uppercase tracking-wider block mb-2">
+            Allergies
+          </label>
+
+          {/* Current allergy tags */}
+          {(formState.allergies ?? []).length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {(formState.allergies ?? []).map((allergy, index) => (
+                <span
+                  key={index}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-destructive/10 text-destructive font-bold text-xs border-3 border-destructive/30"
+                >
+                  {allergy}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAllergy(index)}
+                    className="hover:text-destructive/80 transition-colors"
+                    aria-label={`Remove ${allergy} allergy`}
+                    tabIndex={0}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Input for adding custom allergy */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={allergyInput}
+              onChange={(e) => setAllergyInput(e.target.value)}
+              onKeyDown={handleAllergyKeyDown}
+              placeholder="Type an allergy and press Enter..."
+              aria-label="Add allergy"
+              className="flex-1 px-4 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/50"
+            />
+            <button
+              type="button"
+              onClick={() => handleAddAllergy(allergyInput)}
+              className="px-4 py-2 bg-primary text-primary-foreground font-black text-sm border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
+              aria-label="Add allergy"
+              tabIndex={0}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Quick-add common allergies */}
+          <div className="mt-3">
+            <p className="text-xs font-bold text-muted-foreground mb-2">
+              Common allergies:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {COMMON_ALLERGIES.filter(
+                (a) =>
+                  !(formState.allergies ?? []).some(
+                    (existing) => existing.toLowerCase() === a.toLowerCase()
+                  )
+              ).map((allergy) => (
+                <button
+                  key={allergy}
+                  type="button"
+                  onClick={() => handleAddAllergy(allergy)}
+                  className="px-3 py-1 border-3 border-border font-bold text-xs bg-muted hover:bg-muted/80 transition-colors shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
+                  aria-label={`Add ${allergy} allergy`}
+                  tabIndex={0}
+                >
+                  + {allergy}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Food Preferences */}
+        <div>
+          <label className="font-black text-xs uppercase tracking-wider block mb-2">
+            Food Preferences
+          </label>
+          <p className="text-xs font-bold text-muted-foreground mb-3">
+            Describe your dietary preferences, restrictions, or eating style.
+          </p>
+          <textarea
+            value={formState.foodPreferences ?? ""}
+            onChange={(e) =>
+              setFormState((prev) => ({ ...prev, foodPreferences: e.target.value }))
+            }
+            placeholder="e.g., Vegetarian, high-protein diet, Mediterranean style, no red meat, prefer whole foods..."
+            aria-label="Food preferences"
+            rows={3}
+            className="w-full px-4 py-3 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/50 resize-y"
+          />
+        </div>
+      </div>
+
+      {/* ── Injuries ── */}
+      <div className="border-3 border-border p-5 bg-background shadow-neo space-y-6">
+        <div>
+          <h3 className="font-black text-lg uppercase tracking-wider">
+            Injuries
+          </h3>
+          <p className="text-xs font-bold text-muted-foreground mt-1">
+            This information is shared with Coach and Physio to adapt training and recovery recommendations.
+          </p>
+        </div>
+
+        {/* Injury list */}
+        {(formState.injuries ?? []).length > 0 && (
+          <div className="space-y-4">
+            {(formState.injuries ?? []).map((injury, index) => (
+              <div
+                key={index}
+                className="border-3 border-border p-4 bg-muted/30 space-y-3"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 space-y-3">
+                    <input
+                      type="text"
+                      value={injury.name}
+                      onChange={(e) =>
+                        handleUpdateInjury(index, "name", e.target.value)
+                      }
+                      placeholder="Injury name (e.g., Left knee pain, Achilles tightness)"
+                      aria-label={`Injury ${index + 1} name`}
+                      className="w-full px-4 py-2 border-3 border-border font-bold text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/50"
+                    />
+                    <textarea
+                      value={injury.notes ?? ""}
+                      onChange={(e) =>
+                        handleUpdateInjury(index, "notes", e.target.value)
+                      }
+                      placeholder="Optional notes (e.g., Since January, worse on downhills, improving with stretching)"
+                      aria-label={`Injury ${index + 1} notes`}
+                      rows={2}
+                      className="w-full px-4 py-2 border-3 border-border font-bold text-xs bg-background focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/50 resize-y"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveInjury(index)}
+                    className="p-2 bg-destructive text-destructive-foreground border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] shrink-0"
+                    aria-label={`Remove injury ${index + 1}`}
+                    tabIndex={0}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleAddInjury}
+          className="flex items-center gap-2 px-5 py-2.5 bg-muted font-black text-sm border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
+          aria-label="Add injury"
+          tabIndex={0}
+        >
+          <Plus className="h-4 w-4" />
+          Add Injury
+        </button>
       </div>
 
       {/* Save button */}

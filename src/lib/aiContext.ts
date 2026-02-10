@@ -6,7 +6,7 @@
 // This is sent to the chat API route as structured context
 // so the LLM can give personalized coaching advice.
 
-import type {ActivitySummary, UserSettings} from './mockData';
+import type {ActivitySummary, UserSettings, Injury} from './mockData';
 import {formatPace, formatDuration, ZONE_NAMES} from './mockData';
 import type {AggregatedZoneTotals} from './zoneCompute';
 import type {FitnessDataPoint, ACWRDataPoint} from '@/utils/trainingLoad';
@@ -34,6 +34,12 @@ export interface AthleteSummary {
   zones: {zone: number; name: string; min: number; max: number}[];
   /** Training goal (free-text, user-defined) */
   goal: string;
+  /** Allergies the nutritionist should avoid */
+  allergies: string[];
+  /** Dietary preferences (free-text) */
+  foodPreferences: string;
+  /** Current injuries for coach and physio context */
+  injuries: Injury[];
   /** Gear info (shoes with distance) */
   gear: {name: string; distanceKm: number}[];
   /** Per-week summary for last 4 weeks */
@@ -101,11 +107,14 @@ export const buildAthleteSummary = (params: {
   athleteName: string;
   settings: UserSettings;
   goal: string;
+  allergies: string[];
+  foodPreferences: string;
+  injuries: Injury[];
   activities: ActivitySummary[];
   gear: {bikes: StravaSummaryGear[]; shoes: StravaSummaryGear[]} | null;
   zoneBreakdowns: AggregatedZoneTotals | null;
 }): AthleteSummary => {
-  const {athleteName, settings, goal, activities, gear, zoneBreakdowns} = params;
+  const {athleteName, settings, goal, allergies, foodPreferences, injuries, activities, gear, zoneBreakdowns} = params;
 
   // Zone definitions
   const zones = ([1, 2, 3, 4, 5, 6] as const).map((z) => {
@@ -247,6 +256,9 @@ export const buildAthleteSummary = (params: {
     restingHr: settings.restingHr,
     zones,
     goal,
+    allergies,
+    foodPreferences,
+    injuries,
     gear: gearList,
     weeklyBreakdown,
     fourWeekTotals,
@@ -280,6 +292,31 @@ export const serializeAthleteSummary = (summary: AthleteSummary): string => {
     lines.push('');
     lines.push('## Training Goal');
     lines.push(`- ${summary.goal}`);
+  }
+
+  // Allergies & Dietary Preferences
+  if (summary.allergies.length > 0 || summary.foodPreferences) {
+    lines.push('');
+    lines.push('## Allergies & Dietary Preferences');
+    if (summary.allergies.length > 0) {
+      lines.push(`- Allergies: ${summary.allergies.join(', ')}`);
+    }
+    if (summary.foodPreferences) {
+      lines.push(`- Preferences: ${summary.foodPreferences}`);
+    }
+  }
+
+  // Current Injuries
+  if (summary.injuries.length > 0) {
+    lines.push('');
+    lines.push('## Current Injuries');
+    for (const injury of summary.injuries) {
+      if (injury.notes) {
+        lines.push(`- ${injury.name}: ${injury.notes}`);
+      } else {
+        lines.push(`- ${injury.name}`);
+      }
+    }
   }
 
   // 4-week training summary
