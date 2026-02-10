@@ -6,7 +6,7 @@
 // for chat sessions and messages. Follows the same pattern as
 // neonSync.ts: reads are awaitable, writes are fire-and-forget.
 
-import type {CachedChatSession, CachedChatMessage} from './db';
+import type {CachedChatSession, CachedChatMessage, CachedCoachPlan} from './db';
 
 const API = '/api/db';
 
@@ -65,4 +65,26 @@ export const neonSyncChatMessages = (
   records: CachedChatMessage | CachedChatMessage[],
 ): void => {
   postToNeon('chat-messages', records);
+};
+
+// ---- Coach Plans ----
+
+export const neonGetCoachPlan = async (
+  athleteId: number,
+): Promise<CachedCoachPlan | null> =>
+  getFromNeon<CachedCoachPlan>(
+    `${API}/coach-plans?athleteId=${athleteId}`,
+  );
+
+export const neonSyncCoachPlan = (record: CachedCoachPlan): void => {
+  postToNeon('coach-plans', record);
+};
+
+/** Fire-and-forget DELETE to Neon. Never throws, never blocks. */
+export const neonDeleteCoachPlan = (athleteId: number): void => {
+  fetch(`${API}/coach-plans?athleteId=${athleteId}`, {
+    method: 'DELETE',
+  }).catch(() => {
+    // Silently ignore — Neon sync is best-effort
+  });
 };

@@ -15,6 +15,13 @@
       "when": 1770732576577,
       "tag": "0001_lyrical_jetstream",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770758468631,
+      "tag": "0002_lumpy_deadpool",
+      "breakpoints": true
     }
   ]
 }

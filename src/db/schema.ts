@@ -91,3 +91,12 @@ export const chatMessages = pgTable('chat_messages', {
   content: text('content').notNull(),
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
 });
+
+// ----- Coach Plans -----
+// Maps to CachedCoachPlan (src/lib/db.ts)
+// One active plan per athlete — upserted on share, deleted on clear.
+export const coachPlans = pgTable('coach_plans', {
+  athleteId: bigint('athlete_id', {mode: 'number'}).primaryKey(),
+  content: text('content').notNull(),
+  sharedAt: bigint('shared_at', {mode: 'number'}).notNull(),
+});

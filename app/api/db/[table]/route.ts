@@ -17,6 +17,7 @@ import {
   zoneBreakdowns,
   chatSessions,
   chatMessages,
+  coachPlans,
 } from '@/db/schema';
 import {eq, and, sql, desc} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
@@ -157,6 +158,21 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .where(eq(chatMessages.sessionId, sessionId))
           .orderBy(chatMessages.createdAt);
         return NextResponse.json(rows);
+      }
+
+      case 'coach-plans': {
+        // GET /api/db/coach-plans?athleteId=123 → plan for athlete
+        const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
+        if (!athleteIdParam)
+          return NextResponse.json(
+            {error: 'athleteId required'},
+            {status: 400},
+          );
+        const rows = await db
+          .select()
+          .from(coachPlans)
+          .where(eq(coachPlans.athleteId, Number(athleteIdParam)));
+        return NextResponse.json(rows[0] ?? null);
       }
 
       default:
@@ -311,6 +327,19 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
+      case 'coach-plans':
+        await db
+          .insert(coachPlans)
+          .values(records)
+          .onConflictDoUpdate({
+            target: coachPlans.athleteId,
+            set: {
+              content: sql`excluded.content`,
+              sharedAt: sql`excluded.shared_at`,
+            },
+          });
+        break;
+
       default:
         return NextResponse.json({error: 'Unknown table'}, {status: 404});
     }
@@ -318,6 +347,35 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
     return NextResponse.json({success: true, count: records.length});
   } catch (error) {
     console.error(`[DB POST /${table}]`, error);
+    return NextResponse.json({error: 'Database error'}, {status: 500});
+  }
+};
+
+// ---- DELETE — Remove records from Neon ----
+
+export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
+  const {table} = await params;
+
+  try {
+    switch (table) {
+      case 'coach-plans': {
+        const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
+        if (!athleteIdParam)
+          return NextResponse.json(
+            {error: 'athleteId required'},
+            {status: 400},
+          );
+        await db
+          .delete(coachPlans)
+          .where(eq(coachPlans.athleteId, Number(athleteIdParam)));
+        return NextResponse.json({success: true});
+      }
+
+      default:
+        return NextResponse.json({error: 'Unknown table'}, {status: 404});
+    }
+  } catch (error) {
+    console.error(`[DB DELETE /${table}]`, error);
     return NextResponse.json({error: 'Database error'}, {status: 500});
   }
 };

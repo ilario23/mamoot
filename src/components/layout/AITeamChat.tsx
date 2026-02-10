@@ -143,9 +143,8 @@ const AITeamChat = () => {
 
   const { athlete } = useStravaAuth();
   const { serialized: athleteContext, isLoading: contextLoading } = useAthleteSummary();
-  const { plan: coachPlan, sharePlan, clearPlan } = useCoachPlan();
-
   const athleteId = athlete?.id ?? null;
+  const { plan: coachPlan, sharePlan, clearPlan } = useCoachPlan(athleteId);
 
   // Session management per persona
   const coachSessions = useChatSessions(athleteId, "coach");

@@ -121,6 +121,17 @@ export interface CachedChatMessage {
   createdAt: number;
 }
 
+// ----- Coach plan persistence -----
+
+export interface CachedCoachPlan {
+  /** Strava athlete ID (primary key — one plan per athlete) */
+  athleteId: number;
+  /** Markdown plan content */
+  content: string;
+  /** Unix ms timestamp when the plan was shared */
+  sharedAt: number;
+}
+
 // ----- Database definition -----
 
 const db = new Dexie('RunZoneAICache') as Dexie & {
@@ -133,6 +144,7 @@ const db = new Dexie('RunZoneAICache') as Dexie & {
   zoneBreakdowns: EntityTable<CachedZoneBreakdown, 'activityId'>;
   chatSessions: EntityTable<CachedChatSession, 'id'>;
   chatMessages: EntityTable<CachedChatMessage, 'id'>;
+  coachPlans: EntityTable<CachedCoachPlan, 'athleteId'>;
 };
 
 db.version(1).stores({
@@ -175,6 +187,19 @@ db.version(4).stores({
   chatMessages: 'id, sessionId, createdAt',
 });
 
+db.version(5).stores({
+  activities: 'id, date, fetchedAt',
+  activityDetails: 'id',
+  activityStreams: 'activityId',
+  athleteStats: 'athleteId',
+  athleteZones: 'key',
+  athleteGear: 'key',
+  zoneBreakdowns: 'activityId, settingsHash',
+  chatSessions: 'id, [athleteId+persona], updatedAt',
+  chatMessages: 'id, sessionId, createdAt',
+  coachPlans: 'athleteId',
+});
+
 export {db};
 
 // ----- Cache size helper -----
@@ -210,5 +235,6 @@ export const clearAllCache = async (): Promise<void> => {
     db.zoneBreakdowns.clear(),
     db.chatSessions.clear(),
     db.chatMessages.clear(),
+    db.coachPlans.clear(),
   ]);
 };
