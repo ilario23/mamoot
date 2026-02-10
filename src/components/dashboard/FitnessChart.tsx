@@ -37,8 +37,9 @@ const FitnessChart = () => {
       settings.restingHr,
       settings.maxHr,
       daysBack,
+      settings.zones,
     );
-  }, [activities, settings.restingHr, settings.maxHr, daysBack]);
+  }, [activities, settings.restingHr, settings.maxHr, settings.zones, daysBack]);
 
   if (!isAuthenticated) return null;
 
@@ -71,10 +72,10 @@ const FitnessChart = () => {
       <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4'>
         <div>
           <h3 className='font-black text-lg uppercase tracking-wider'>
-            Fitness & Freshness
+            Training Metrics
           </h3>
           <p className='text-xs font-bold text-muted-foreground mt-0.5'>
-            CTL (Fitness) / ATL (Fatigue) / TSB (Form)
+            BF (Base Fitness) / LI (Load Impact) / IT (Intensity Trend)
           </p>
         </div>
         <select
@@ -95,7 +96,7 @@ const FitnessChart = () => {
       <ResponsiveContainer width='100%' height={350}>
         <AreaChart data={chartData}>
           <defs>
-            <linearGradient id='ctlGradient' x1='0' y1='0' x2='0' y2='1'>
+            <linearGradient id='bfGradient' x1='0' y1='0' x2='0' y2='1'>
               <stop
                 offset='0%'
                 stopColor='hsl(217 91% 60%)'
@@ -107,7 +108,7 @@ const FitnessChart = () => {
                 stopOpacity={0.05}
               />
             </linearGradient>
-            <linearGradient id='atlGradient' x1='0' y1='0' x2='0' y2='1'>
+            <linearGradient id='liGradient' x1='0' y1='0' x2='0' y2='1'>
               <stop offset='0%' stopColor='hsl(0 84% 60%)' stopOpacity={0.3} />
               <stop
                 offset='100%'
@@ -115,7 +116,7 @@ const FitnessChart = () => {
                 stopOpacity={0.05}
               />
             </linearGradient>
-            <linearGradient id='tsbGradientPos' x1='0' y1='0' x2='0' y2='1'>
+            <linearGradient id='itGradientPos' x1='0' y1='0' x2='0' y2='1'>
               <stop offset='0%' stopColor='hsl(84 78% 55%)' stopOpacity={0.4} />
               <stop
                 offset='100%'
@@ -160,9 +161,9 @@ const FitnessChart = () => {
             }}
             formatter={(value: number, name: string) => {
               const labels: Record<string, string> = {
-                ctl: 'Fitness (CTL)',
-                atl: 'Fatigue (ATL)',
-                tsb: 'Form (TSB)',
+                bf: 'Base Fitness (BF)',
+                li: 'Load Impact (LI)',
+                it: 'Intensity Trend (IT)',
               };
               return [value.toFixed(1), labels[name] ?? name];
             }}
@@ -170,9 +171,9 @@ const FitnessChart = () => {
           <Legend
             formatter={(value: string) => {
               const labels: Record<string, string> = {
-                ctl: 'Fitness (CTL)',
-                atl: 'Fatigue (ATL)',
-                tsb: 'Form (TSB)',
+                bf: 'Base Fitness (BF)',
+                li: 'Load Impact (LI)',
+                it: 'Intensity Trend (IT)',
               };
               return labels[value] ?? value;
             }}
@@ -185,28 +186,28 @@ const FitnessChart = () => {
           />
           <Area
             type='monotone'
-            dataKey='ctl'
+            dataKey='bf'
             stroke='hsl(217 91% 60%)'
             strokeWidth={2.5}
-            fill='url(#ctlGradient)'
+            fill='url(#bfGradient)'
             dot={false}
             activeDot={{r: 4, strokeWidth: 2, stroke: '#000'}}
           />
           <Area
             type='monotone'
-            dataKey='atl'
+            dataKey='li'
             stroke='hsl(0 84% 60%)'
             strokeWidth={2.5}
-            fill='url(#atlGradient)'
+            fill='url(#liGradient)'
             dot={false}
             activeDot={{r: 4, strokeWidth: 2, stroke: '#000'}}
           />
           <Area
             type='monotone'
-            dataKey='tsb'
+            dataKey='it'
             stroke='hsl(84 78% 55%)'
             strokeWidth={2}
-            fill='url(#tsbGradientPos)'
+            fill='url(#itGradientPos)'
             dot={false}
             activeDot={{r: 4, strokeWidth: 2, stroke: '#000'}}
           />
@@ -220,14 +221,14 @@ const FitnessChart = () => {
             className='inline-block w-3 h-3 mr-1'
             style={{backgroundColor: 'hsl(84 78% 55%)'}}
           />
-          TSB &gt; 0 = Fresh
+          IT &gt; 0 = Stimulus
         </span>
         <span>
           <span
             className='inline-block w-3 h-3 mr-1'
             style={{backgroundColor: 'hsl(0 84% 60%)'}}
           />
-          TSB &lt; 0 = Fatigued
+          IT &lt; 0 = Recovery
         </span>
       </div>
     </div>

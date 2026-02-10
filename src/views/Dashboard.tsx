@@ -17,7 +17,7 @@ const Dashboard = () => {
       {/* Row 1: Stat Cards (6 cards) */}
       <StatCards />
 
-      {/* Row 2: Fitness & Freshness (full width) */}
+      {/* Row 2: Training Metrics — BF / LI / IT (full width) */}
       <FitnessChart />
 
       {/* Row 3: Volume Chart + Pace Progression (side by side) */}

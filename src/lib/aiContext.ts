@@ -50,13 +50,13 @@ export interface AthleteSummary {
   };
   /** Zone distribution as percentages (4 weeks) */
   zoneDistribution: {zone: number; name: string; timePct: number}[] | null;
-  /** Current fitness & freshness metrics */
+  /** Current training metrics (COROS EvoLab–style) */
   fitness: {
-    ctl: number;
-    atl: number;
-    tsb: number;
+    bf: number; // Base Fitness
+    li: number; // Load Impact
+    it: number; // Intensity Trend
     acwr: number;
-    ctlTrend: 'up' | 'down' | 'stable';
+    bfTrend: 'up' | 'down' | 'stable';
   } | null;
   /** Recent activity list (last 10) */
   recentActivities: {
@@ -189,13 +189,14 @@ export const buildAthleteSummary = (params: {
     });
   }
 
-  // Fitness & freshness (CTL, ATL, TSB, ACWR)
+  // Training metrics — COROS EvoLab–style (BF, LI, IT, ACWR)
   let fitness: AthleteSummary['fitness'] = null;
   const fitnessData = calcFitnessData(
     activities,
     settings.restingHr,
     settings.maxHr,
     42, // 6 weeks for trend calculation
+    settings.zones,
   );
 
   if (fitnessData.length > 0) {
@@ -205,24 +206,25 @@ export const buildAthleteSummary = (params: {
       settings.restingHr,
       settings.maxHr,
       42,
+      settings.zones,
     );
     const latestAcwr = acwrData.length > 0 ? acwrData[acwrData.length - 1].acwr : 0;
 
-    // Determine CTL trend: compare last 7 days of CTL
-    const recentCtl = fitnessData.slice(-7);
-    let ctlTrend: 'up' | 'down' | 'stable' = 'stable';
-    if (recentCtl.length >= 2) {
-      const diff = recentCtl[recentCtl.length - 1].ctl - recentCtl[0].ctl;
-      if (diff > 1) ctlTrend = 'up';
-      else if (diff < -1) ctlTrend = 'down';
+    // Determine BF trend: compare last 7 days of Base Fitness
+    const recentBf = fitnessData.slice(-7);
+    let bfTrend: 'up' | 'down' | 'stable' = 'stable';
+    if (recentBf.length >= 2) {
+      const diff = recentBf[recentBf.length - 1].bf - recentBf[0].bf;
+      if (diff > 1) bfTrend = 'up';
+      else if (diff < -1) bfTrend = 'down';
     }
 
     fitness = {
-      ctl: Number(latest.ctl.toFixed(1)),
-      atl: Number(latest.atl.toFixed(1)),
-      tsb: Number(latest.tsb.toFixed(1)),
+      bf: Number(latest.bf.toFixed(1)),
+      li: Number(latest.li.toFixed(1)),
+      it: Number(latest.it.toFixed(1)),
       acwr: Number(latestAcwr.toFixed(2)),
-      ctlTrend,
+      bfTrend,
     };
   }
 
@@ -313,15 +315,17 @@ export const serializeAthleteSummary = (summary: AthleteSummary): string => {
     }
   }
 
-  // Fitness & freshness
+  // Training metrics (COROS EvoLab–style)
   if (summary.fitness) {
     lines.push('');
-    lines.push('## Fitness & Freshness');
+    lines.push('## Training Metrics (EvoLab)');
     lines.push(
-      `- CTL (Fitness): ${summary.fitness.ctl} (trending ${summary.fitness.ctlTrend})`,
+      `- Base Fitness (BF): ${summary.fitness.bf} (trending ${summary.fitness.bfTrend})`,
     );
-    lines.push(`- ATL (Fatigue): ${summary.fitness.atl}`);
-    lines.push(`- TSB (Form): ${summary.fitness.tsb}`);
+    lines.push(`- Load Impact (LI): ${summary.fitness.li}`);
+    lines.push(
+      `- Intensity Trend (IT): ${summary.fitness.it} (${summary.fitness.it > 0 ? 'stimulus' : summary.fitness.it < 0 ? 'recovery' : 'balanced'})`,
+    );
     lines.push(`- ACWR (Injury Risk): ${summary.fitness.acwr}`);
   }
 

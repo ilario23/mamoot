@@ -37,8 +37,9 @@ const ACWRChart = () => {
       settings.restingHr,
       settings.maxHr,
       daysBack,
+      settings.zones,
     );
-  }, [activities, settings.restingHr, settings.maxHr, daysBack]);
+  }, [activities, settings.restingHr, settings.maxHr, settings.zones, daysBack]);
 
   if (!isAuthenticated) return null;
 

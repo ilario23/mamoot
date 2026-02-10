@@ -1,81 +1,116 @@
 // ============================================================
-// Training Load Calculations — TRIMP, CTL, ATL, TSB, ACWR
+// COROS EvoLab–style Training Metrics
+// TL (Training Load), BF (Base Fitness), LI (Load Impact),
+// IT (Intensity Trend), ACWR
 // Derived from activity summary data (no extra API calls needed)
 // ============================================================
 
-import type {ActivitySummary} from '@/lib/mockData';
+import type {ActivitySummary, UserSettings} from '@/lib/mockData';
+import {getZoneForHr} from '@/lib/mockData';
 
 // ----- Types -----
 
 export interface DailyLoad {
   date: string; // YYYY-MM-DD
-  trimp: number;
+  tl: number; // Training Load for the day
 }
 
 export interface FitnessDataPoint {
   date: string; // YYYY-MM-DD
-  ctl: number; // Chronic Training Load (Fitness)
-  atl: number; // Acute Training Load (Fatigue)
-  tsb: number; // Training Stress Balance (Form)
-  trimp: number; // Raw daily TRIMP
+  bf: number; // Base Fitness (~42-day EWMA of TL)
+  li: number; // Load Impact (~7-day EWMA of TL)
+  it: number; // Intensity Trend (LI - BF)
+  tl: number; // Raw daily Training Load
 }
 
 export interface ACWRDataPoint {
   date: string;
   acwr: number; // Acute:Chronic Workload Ratio
-  ctl: number;
-  atl: number;
+  bf: number;
+  li: number;
 }
 
 // ----- Constants -----
 
-const CTL_DAYS = 42; // Chronic window
-const ATL_DAYS = 7; // Acute window
+const BF_DAYS = 42; // Base Fitness window (chronic / ~6 weeks)
+const LI_DAYS = 7; // Load Impact window (acute / 1 week)
+
+/**
+ * Zone intensity weights used in the COROS-style Training Load formula.
+ * TL = Σ (minutes in zone × weight)
+ *
+ * Weights approximate the non-linear physiological cost of each zone.
+ */
+const ZONE_WEIGHTS: Record<number, number> = {
+  1: 1, // Recovery
+  2: 2, // Aerobic Base
+  3: 3, // Tempo
+  4: 5, // Threshold
+  5: 7, // VO2max
+  6: 10, // Anaerobic
+};
 
 // ----- Core Calculations -----
 
 /**
- * Calculate TRIMP (Training Impulse) for a single activity.
- * Formula: duration (min) * (avgHR - restHR) / (maxHR - restHR)
- * Uses activity-level average HR — a simplified but effective proxy.
+ * Calculate zone-weighted Training Load (TL) for a single activity.
+ *
+ * COROS-style formula:
+ *   TL = Σ (minutes in zone × zone intensity weight)
+ *
+ * When zone settings are provided we estimate per-zone time from
+ * the activity's average HR. Without zones, we fall back to a
+ * simplified HR-reserve formula (similar to TRIMP).
  */
-export const calcTRIMP = (
+export const calcTrainingLoad = (
   durationSeconds: number,
   avgHR: number,
   restHR: number,
   maxHR: number,
+  zones?: UserSettings['zones'],
 ): number => {
   if (maxHR <= restHR || avgHR <= restHR || durationSeconds <= 0) return 0;
+
+  // If we have zone boundaries, use zone-weighted TL
+  if (zones) {
+    const durationMin = durationSeconds / 60;
+    const zone = getZoneForHr(avgHR, zones);
+    const weight = ZONE_WEIGHTS[zone] ?? 1;
+    return durationMin * weight;
+  }
+
+  // Fallback: simplified HR-reserve formula (backward compat)
   const durationMin = durationSeconds / 60;
   const hrReserveRatio = (avgHR - restHR) / (maxHR - restHR);
   return durationMin * hrReserveRatio;
 };
 
 /**
- * Aggregate activities into daily TRIMP totals.
+ * Aggregate activities into daily Training Load totals.
  * Multiple activities on the same day are summed.
  */
 export const buildDailyLoads = (
   activities: ActivitySummary[],
   restHR: number,
   maxHR: number,
+  zones?: UserSettings['zones'],
 ): DailyLoad[] => {
   const dailyMap = new Map<string, number>();
 
   for (const a of activities) {
     if (!a.avgHr || a.avgHr <= 0) continue;
-    const trimp = calcTRIMP(a.duration, a.avgHr, restHR, maxHR);
+    const tl = calcTrainingLoad(a.duration, a.avgHr, restHR, maxHR, zones);
     const existing = dailyMap.get(a.date) ?? 0;
-    dailyMap.set(a.date, existing + trimp);
+    dailyMap.set(a.date, existing + tl);
   }
 
   return Array.from(dailyMap.entries())
-    .map(([date, trimp]) => ({date, trimp}))
+    .map(([date, tl]) => ({date, tl}))
     .sort((a, b) => a.date.localeCompare(b.date));
 };
 
 /**
- * Fill gaps in daily load data so every day has an entry (TRIMP = 0 for rest days).
+ * Fill gaps in daily load data so every day has an entry (TL = 0 for rest days).
  * This is critical for correct EWMA calculation.
  */
 const fillDailyGaps = (
@@ -83,7 +118,7 @@ const fillDailyGaps = (
   startDate: string,
   endDate: string,
 ): DailyLoad[] => {
-  const loadMap = new Map(loads.map((l) => [l.date, l.trimp]));
+  const loadMap = new Map(loads.map((l) => [l.date, l.tl]));
   const filled: DailyLoad[] = [];
 
   const current = new Date(startDate + 'T00:00:00');
@@ -91,7 +126,7 @@ const fillDailyGaps = (
 
   while (current <= end) {
     const dateStr = current.toISOString().slice(0, 10);
-    filled.push({date: dateStr, trimp: loadMap.get(dateStr) ?? 0});
+    filled.push({date: dateStr, tl: loadMap.get(dateStr) ?? 0});
     current.setDate(current.getDate() + 1);
   }
 
@@ -99,26 +134,29 @@ const fillDailyGaps = (
 };
 
 /**
- * Calculate Fitness & Freshness time series (CTL, ATL, TSB).
- * Uses exponentially weighted moving average (EWMA).
+ * Calculate COROS EvoLab–style fitness time series:
+ *   BF (Base Fitness)   — ~42-day EWMA of daily TL
+ *   LI (Load Impact)    — ~7-day  EWMA of daily TL
+ *   IT (Intensity Trend) — LI - BF
  *
- * CTL decay = 1 - e^(-1/42) ≈ 0.0235
- * ATL decay = 1 - e^(-1/7) ≈ 0.1331
+ * IT > 0  → training above your fitness (stimulus / overreaching)
+ * IT < 0  → training below your fitness (recovery / detraining)
  */
 export const calcFitnessData = (
   activities: ActivitySummary[],
   restHR: number,
   maxHR: number,
   daysBack = 180,
+  zones?: UserSettings['zones'],
 ): FitnessDataPoint[] => {
-  const rawLoads = buildDailyLoads(activities, restHR, maxHR);
+  const rawLoads = buildDailyLoads(activities, restHR, maxHR, zones);
   if (rawLoads.length === 0) return [];
 
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
 
   // Go back further than daysBack to warm up the EWMA
-  const warmupDays = CTL_DAYS * 2;
+  const warmupDays = BF_DAYS * 2;
   const earliest = rawLoads[0]?.date ?? todayStr;
 
   const startDate = new Date(today);
@@ -130,11 +168,11 @@ export const calcFitnessData = (
 
   const dailyLoads = fillDailyGaps(rawLoads, startStr, todayStr);
 
-  const ctlDecay = 1 - Math.exp(-1 / CTL_DAYS);
-  const atlDecay = 1 - Math.exp(-1 / ATL_DAYS);
+  const bfDecay = 1 - Math.exp(-1 / BF_DAYS);
+  const liDecay = 1 - Math.exp(-1 / LI_DAYS);
 
-  let ctl = 0;
-  let atl = 0;
+  let bf = 0;
+  let li = 0;
   const result: FitnessDataPoint[] = [];
 
   const cutoffDate = new Date(today);
@@ -142,18 +180,18 @@ export const calcFitnessData = (
   const cutoffStr = cutoffDate.toISOString().slice(0, 10);
 
   for (const day of dailyLoads) {
-    ctl = ctl + ctlDecay * (day.trimp - ctl);
-    atl = atl + atlDecay * (day.trimp - atl);
-    const tsb = ctl - atl;
+    bf = bf + bfDecay * (day.tl - bf);
+    li = li + liDecay * (day.tl - li);
+    const it = li - bf;
 
     // Only output points within the requested window
     if (day.date >= cutoffStr) {
       result.push({
         date: day.date,
-        ctl: Number(ctl.toFixed(1)),
-        atl: Number(atl.toFixed(1)),
-        tsb: Number(tsb.toFixed(1)),
-        trimp: Number(day.trimp.toFixed(1)),
+        bf: Number(bf.toFixed(1)),
+        li: Number(li.toFixed(1)),
+        it: Number(it.toFixed(1)),
+        tl: Number(day.tl.toFixed(1)),
       });
     }
   }
@@ -163,7 +201,7 @@ export const calcFitnessData = (
 
 /**
  * Calculate Acute:Chronic Workload Ratio time series.
- * ACWR = ATL / CTL — a common injury risk metric.
+ * ACWR = LI / BF — a common injury risk metric.
  *
  * Risk zones:
  *   < 0.8  = under-trained / detraining
@@ -176,14 +214,15 @@ export const calcACWRData = (
   restHR: number,
   maxHR: number,
   daysBack = 90,
+  zones?: UserSettings['zones'],
 ): ACWRDataPoint[] => {
-  const fitnessData = calcFitnessData(activities, restHR, maxHR, daysBack);
+  const fitnessData = calcFitnessData(activities, restHR, maxHR, daysBack, zones);
 
   return fitnessData.map((d) => ({
     date: d.date,
-    acwr: d.ctl > 0 ? Number((d.atl / d.ctl).toFixed(2)) : 0,
-    ctl: d.ctl,
-    atl: d.atl,
+    acwr: d.bf > 0 ? Number((d.li / d.bf).toFixed(2)) : 0,
+    bf: d.bf,
+    li: d.li,
   }));
 };
 
