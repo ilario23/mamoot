@@ -2,9 +2,10 @@
 // Dynamic Database API Route — /api/db/[table]
 // ============================================================
 //
-// Handles read (GET) and upsert (POST) operations for all Neon
-// tables via a single dynamic route. Keeps DB credentials
-// server-side while the client uses fetch() to sync.
+// Handles read (GET), upsert (POST), update (PATCH), and delete
+// (DELETE) operations for all Neon tables via a single dynamic
+// route. Keeps DB credentials server-side while the client uses
+// fetch() to sync.
 
 import {db} from '@/db';
 import {
@@ -161,18 +162,37 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'coach-plans': {
-        // GET /api/db/coach-plans?athleteId=123 → plan for athlete
+        // GET /api/db/coach-plans?athleteId=123          → all plans for athlete
+        // GET /api/db/coach-plans?athleteId=123&active=true → active plan only
+        // GET /api/db/coach-plans?pk=uuid                → single plan by ID
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(coachPlans)
+            .where(eq(coachPlans.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
         const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
         if (!athleteIdParam)
           return NextResponse.json(
             {error: 'athleteId required'},
             {status: 400},
           );
-        const rows = await db
+        const activeOnly = req.nextUrl.searchParams.get('active') === 'true';
+        const conditions = [eq(coachPlans.athleteId, Number(athleteIdParam))];
+        if (activeOnly) {
+          conditions.push(eq(coachPlans.isActive, true));
+        }
+        const planRows = await db
           .select()
           .from(coachPlans)
-          .where(eq(coachPlans.athleteId, Number(athleteIdParam)));
-        return NextResponse.json(rows[0] ?? null);
+          .where(and(...conditions))
+          .orderBy(desc(coachPlans.sharedAt));
+        // If requesting active only, return single object or null
+        if (activeOnly) {
+          return NextResponse.json(planRows[0] ?? null);
+        }
+        return NextResponse.json(planRows);
       }
 
       default:
@@ -332,9 +352,17 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .insert(coachPlans)
           .values(records)
           .onConflictDoUpdate({
-            target: coachPlans.athleteId,
+            target: coachPlans.id,
             set: {
+              title: sql`excluded.title`,
+              summary: sql`excluded.summary`,
+              goal: sql`excluded.goal`,
+              durationWeeks: sql`excluded.duration_weeks`,
+              sessions: sql`excluded.sessions`,
               content: sql`excluded.content`,
+              isActive: sql`excluded.is_active`,
+              sourceMessageId: sql`excluded.source_message_id`,
+              sourceSessionId: sql`excluded.source_session_id`,
               sharedAt: sql`excluded.shared_at`,
             },
           });
@@ -351,6 +379,47 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
   }
 };
 
+// ---- PATCH — Partial updates ----
+
+export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
+  const {table} = await params;
+
+  try {
+    switch (table) {
+      case 'coach-plans': {
+        // PATCH /api/db/coach-plans?id=uuid&athleteId=123 → activate this plan (deactivate others)
+        const planId = req.nextUrl.searchParams.get('id');
+        const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
+        if (!planId || !athleteIdParam)
+          return NextResponse.json(
+            {error: 'id and athleteId required'},
+            {status: 400},
+          );
+
+        // Deactivate all plans for this athlete
+        await db
+          .update(coachPlans)
+          .set({isActive: false})
+          .where(eq(coachPlans.athleteId, Number(athleteIdParam)));
+
+        // Activate the selected plan
+        await db
+          .update(coachPlans)
+          .set({isActive: true})
+          .where(eq(coachPlans.id, planId));
+
+        return NextResponse.json({success: true});
+      }
+
+      default:
+        return NextResponse.json({error: 'Unknown table'}, {status: 404});
+    }
+  } catch (error) {
+    console.error(`[DB PATCH /${table}]`, error);
+    return NextResponse.json({error: 'Database error'}, {status: 500});
+  }
+};
+
 // ---- DELETE — Remove records from Neon ----
 
 export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
@@ -359,15 +428,14 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
   try {
     switch (table) {
       case 'coach-plans': {
-        const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
-        if (!athleteIdParam)
+        // DELETE /api/db/coach-plans?id=uuid → delete a specific plan
+        const planId = req.nextUrl.searchParams.get('id');
+        if (!planId)
           return NextResponse.json(
-            {error: 'athleteId required'},
+            {error: 'id required'},
             {status: 400},
           );
-        await db
-          .delete(coachPlans)
-          .where(eq(coachPlans.athleteId, Number(athleteIdParam)));
+        await db.delete(coachPlans).where(eq(coachPlans.id, planId));
         return NextResponse.json({success: true});
       }
 

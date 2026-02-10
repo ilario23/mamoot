@@ -47,6 +47,45 @@ export interface Injury {
   notes?: string;
 }
 
+export interface ModelOption {
+  id: string;
+  label: string;
+  provider: string;
+  tier: string;
+}
+
+export const MODEL_OPTIONS: ModelOption[] = [
+  {
+    id: 'gpt-4.1-nano',
+    label: 'GPT-4.1 Nano',
+    provider: 'OpenAI',
+    tier: 'Cheapest',
+  },
+  {id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'OpenAI', tier: 'Budget'},
+  {
+    id: 'gpt-4.1-mini',
+    label: 'GPT-4.1 Mini',
+    provider: 'OpenAI',
+    tier: 'Balanced',
+  },
+  {id: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI', tier: 'Smart'},
+  {id: 'gpt-4.1', label: 'GPT-4.1', provider: 'OpenAI', tier: 'Smartest'},
+  {
+    id: 'claude-haiku-3-5',
+    label: 'Claude 3.5 Haiku',
+    provider: 'Anthropic',
+    tier: 'Budget',
+  },
+  {
+    id: 'claude-sonnet-4-5',
+    label: 'Claude Sonnet 4.5',
+    provider: 'Anthropic',
+    tier: 'Smart',
+  },
+];
+
+export const DEFAULT_MODEL = 'gpt-4o-mini';
+
 export interface UserSettings {
   maxHr: number;
   restingHr: number;
@@ -66,6 +105,8 @@ export interface UserSettings {
   foodPreferences?: string;
   /** Current injuries for coach and physio context */
   injuries?: Injury[];
+  /** Selected AI model for all chat personas */
+  aiModel?: string;
 }
 
 export interface AIMessage {
@@ -92,6 +133,7 @@ export const defaultSettings: UserSettings = {
   allergies: [],
   foodPreferences: '',
   injuries: [],
+  aiModel: DEFAULT_MODEL,
 };
 
 // ----- Utility functions -----

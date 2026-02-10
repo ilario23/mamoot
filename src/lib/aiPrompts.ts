@@ -31,7 +31,8 @@ const COACH_PROMPT = `You are an expert running coach within the RunTeam AI coac
 - Keep responses concise and actionable — max 2-3 short paragraphs unless the athlete asks for a detailed plan
 - You may use markdown formatting (bold, lists, tables) for workout plans
 - Never prescribe medication or diagnose injuries — refer to the Physio persona for that
-- Be encouraging but honest; don't sugarcoat if the data shows problems`;
+- Be encouraging but honest; don't sugarcoat if the data shows problems
+- When creating or updating a training plan, ALWAYS use the shareTrainingPlan tool to share it with the team. Structure the plan with individual sessions (day, type, description, pace/zone targets). Also include a full markdown rendering in the content field. This ensures the Nutritionist and Physio can see the plan and align their advice accordingly.`;
 
 const NUTRITIONIST_PROMPT = `You are a sports nutrition expert within the RunTeam AI coaching team. Your name is Nutritionist.
 
@@ -95,10 +96,47 @@ const PERSONA_PROMPTS: Record<PersonaId, string> = {
  * persona template with the serialized athlete context, conversation
  * memory, and optionally the coach's shared training plan.
  */
+/** Structured coach plan data for prompt injection. */
+export interface CoachPlanContext {
+  title: string;
+  goal?: string | null;
+  durationWeeks?: number | null;
+  sessions: Array<{
+    day: string;
+    type: string;
+    description: string;
+    duration?: string;
+    targetPace?: string;
+    targetZone?: string;
+  }>;
+  content: string;
+}
+
+/**
+ * Serializes a structured coach plan into a readable prompt section.
+ */
+const serializeCoachPlan = (plan: CoachPlanContext): string => {
+  let out = `**${plan.title}**`;
+  if (plan.goal) out += ` — Goal: ${plan.goal}`;
+  if (plan.durationWeeks) out += ` (${plan.durationWeeks} weeks)`;
+  out += '\n\n';
+
+  // Structured session table for easy parsing by Nutritionist/Physio
+  out += '| Day | Type | Workout | Pace/Zone |\n';
+  out += '|-----|------|---------|-----------|\n';
+  for (const s of plan.sessions) {
+    const paceZone = [s.targetPace, s.targetZone].filter(Boolean).join(' / ') || '—';
+    out += `| ${s.day} | ${s.type} | ${s.description} | ${paceZone} |\n`;
+  }
+
+  out += '\n\n### Full Plan Details\n\n' + plan.content;
+  return out;
+};
+
 export const getSystemPrompt = (
   persona: PersonaId,
   athleteContext: string | null,
-  coachPlan: string | null = null,
+  coachPlan: string | CoachPlanContext | null = null,
   memory: string | null = null,
 ): string => {
   const basePrompt = PERSONA_PROMPTS[persona];
@@ -119,7 +157,11 @@ export const getSystemPrompt = (
 
   // Inject coach plan for nutritionist and physio only
   if (coachPlan && (persona === 'nutritionist' || persona === 'physio')) {
-    prompt += `\n\n## Coach's Training Plan (shared by athlete)\n\nThe running coach has shared the following training plan. Use this to align your recommendations with the planned training sessions.\n\n${coachPlan}`;
+    const planText =
+      typeof coachPlan === 'string'
+        ? coachPlan
+        : serializeCoachPlan(coachPlan);
+    prompt += `\n\n## Coach's Training Plan (shared by athlete)\n\nThe running coach has shared the following training plan. Use this to align your recommendations with the planned training sessions.\n\n${planText}`;
   }
 
   return prompt;

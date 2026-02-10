@@ -16,17 +16,19 @@ import {UserCircle, Settings, LogOut, ChevronsUpDown} from 'lucide-react';
 
 interface SidebarUserProfileProps {
   compact?: boolean;
+  collapsed?: boolean;
 }
 
-const SidebarUserProfile = ({compact = false}: SidebarUserProfileProps) => {
+const SidebarUserProfile = ({compact = false, collapsed = false}: SidebarUserProfileProps) => {
+  const isCompact = compact || collapsed;
   const {isAuthenticated, isLoading, athlete, login, logout} = useStravaAuth();
 
   if (isLoading) {
-    return <UserProfileSkeleton compact={compact} />;
+    return <UserProfileSkeleton compact={isCompact} />;
   }
 
   if (!isAuthenticated || !athlete) {
-    return <GuestProfile compact={compact} onConnect={login} />;
+    return <GuestProfile compact={isCompact} onConnect={login} />;
   }
 
   const fullName = `${athlete.firstname} ${athlete.lastname}`.trim();
@@ -41,7 +43,7 @@ const SidebarUserProfile = ({compact = false}: SidebarUserProfileProps) => {
           type='button'
           aria-label='User menu'
           className={`flex items-center gap-3 w-full text-left transition-all hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-            compact ? 'p-1' : 'p-3 border-t-3 border-border'
+            isCompact ? 'p-1 justify-center' : 'p-3 border-t-3 border-border'
           }`}
         >
           <Avatar className='h-9 w-9 shrink-0 border-3 border-border shadow-neo-sm'>
@@ -51,7 +53,7 @@ const SidebarUserProfile = ({compact = false}: SidebarUserProfileProps) => {
             </AvatarFallback>
           </Avatar>
 
-          {!compact && (
+          {!isCompact && (
             <>
               <div className='flex-1 min-w-0'>
                 <p className='font-bold text-sm truncate'>{fullName}</p>
@@ -68,7 +70,7 @@ const SidebarUserProfile = ({compact = false}: SidebarUserProfileProps) => {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent
-        side={compact ? 'bottom' : 'top'}
+        side={isCompact ? 'bottom' : 'top'}
         align='start'
         className='w-56 border-3 border-border shadow-neo bg-background'
       >

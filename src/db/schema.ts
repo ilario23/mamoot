@@ -7,7 +7,7 @@
 // existing Dexie/IndexedDB structure for a smooth migration path.
 // Tables can be normalized later for more powerful analytical queries.
 
-import {pgTable, bigint, integer, text, jsonb} from 'drizzle-orm/pg-core';
+import {pgTable, bigint, integer, text, jsonb, boolean} from 'drizzle-orm/pg-core';
 
 // ----- Activities -----
 // Maps to CachedActivity (src/lib/db.ts)
@@ -94,9 +94,18 @@ export const chatMessages = pgTable('chat_messages', {
 
 // ----- Coach Plans -----
 // Maps to CachedCoachPlan (src/lib/db.ts)
-// One active plan per athlete — upserted on share, deleted on clear.
+// Multiple plans per athlete with an active flag for plan history.
 export const coachPlans = pgTable('coach_plans', {
-  athleteId: bigint('athlete_id', {mode: 'number'}).primaryKey(),
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  title: text('title').notNull(),
+  summary: text('summary'),
+  goal: text('goal'),
+  durationWeeks: integer('duration_weeks'),
+  sessions: jsonb('sessions').notNull(),
   content: text('content').notNull(),
+  isActive: boolean('is_active').notNull().default(true),
+  sourceMessageId: text('source_message_id'),
+  sourceSessionId: text('source_session_id'),
   sharedAt: bigint('shared_at', {mode: 'number'}).notNull(),
 });

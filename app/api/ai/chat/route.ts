@@ -2,6 +2,10 @@ import {streamText, convertToModelMessages, type UIMessage} from 'ai';
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
 import {getSystemPrompt, isValidPersona} from '@/lib/aiPrompts';
+import {shareTrainingPlanSchema} from '@/lib/aiTools';
+import {db} from '@/db';
+import {coachPlans} from '@/db/schema';
+import {eq, and} from 'drizzle-orm';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -49,6 +53,8 @@ export async function POST(req: Request) {
     coachPlan,
     memory,
     model: clientModel,
+    athleteId,
+    sessionId,
   }: {
     messages: UIMessage[];
     persona: string;
@@ -56,6 +62,8 @@ export async function POST(req: Request) {
     coachPlan?: string | null;
     memory?: string | null;
     model?: string;
+    athleteId?: number | null;
+    sessionId?: string | null;
   } = body;
 
   // Validate persona
@@ -77,10 +85,78 @@ export async function POST(req: Request) {
   // Build system prompt with athlete context, coach plan, and conversation memory
   const system = getSystemPrompt(persona, athleteContext ?? null, coachPlan ?? null, memory ?? null);
 
+  // Build tools — Coach persona gets the shareTrainingPlan tool
+  const tools = persona === 'coach'
+    ? {
+        shareTrainingPlan: {
+          description:
+            'Share a structured training plan with the athlete and the rest of the coaching team (Nutritionist, Physio). Call this tool whenever you create or update a training plan.',
+          inputSchema: shareTrainingPlanSchema,
+          execute: async (plan: {
+            title: string;
+            summary?: string;
+            goal?: string;
+            durationWeeks?: number;
+            sessions: Array<{
+              day: string;
+              type: string;
+              description: string;
+              duration?: string;
+              targetPace?: string;
+              targetZone?: string;
+              notes?: string;
+            }>;
+            content: string;
+          }) => {
+            const planId = crypto.randomUUID();
+            const now = Date.now();
+
+            // If we know the athlete, persist to Neon
+            if (athleteId) {
+              try {
+                // Deactivate previous active plans for this athlete
+                await db
+                  .update(coachPlans)
+                  .set({isActive: false})
+                  .where(
+                    and(
+                      eq(coachPlans.athleteId, athleteId),
+                      eq(coachPlans.isActive, true),
+                    ),
+                  );
+
+                // Insert the new plan
+                await db.insert(coachPlans).values({
+                  id: planId,
+                  athleteId,
+                  title: plan.title,
+                  summary: plan.summary ?? null,
+                  goal: plan.goal ?? null,
+                  durationWeeks: plan.durationWeeks ?? null,
+                  sessions: plan.sessions,
+                  content: plan.content,
+                  isActive: true,
+                  sourceMessageId: null,
+                  sourceSessionId: sessionId ?? null,
+                  sharedAt: now,
+                });
+              } catch (error) {
+                console.error('[shareTrainingPlan] Failed to save plan:', error);
+                // Non-blocking — the client will also save to Dexie
+              }
+            }
+
+            return {planId, title: plan.title, sharedAt: now};
+          },
+        },
+      }
+    : undefined;
+
   const result = streamText({
     model: getModel(clientModel),
     system,
     messages: await convertToModelMessages(messages),
+    tools,
   });
 
   return result.toUIMessageStreamResponse();

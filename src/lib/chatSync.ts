@@ -3,8 +3,9 @@
 // ============================================================
 //
 // Provides typed read/write functions that call /api/db/[table]
-// for chat sessions and messages. Follows the same pattern as
-// neonSync.ts: reads are awaitable, writes are fire-and-forget.
+// for chat sessions, messages, and coach plans. Follows the same
+// pattern as neonSync.ts: reads are awaitable, writes are
+// fire-and-forget.
 
 import type {CachedChatSession, CachedChatMessage, CachedCoachPlan} from './db';
 
@@ -69,21 +70,43 @@ export const neonSyncChatMessages = (
 
 // ---- Coach Plans ----
 
-export const neonGetCoachPlan = async (
+/** Get all plans for an athlete (ordered by sharedAt desc). */
+export const neonGetCoachPlans = async (
   athleteId: number,
-): Promise<CachedCoachPlan | null> =>
-  getFromNeon<CachedCoachPlan>(
+): Promise<CachedCoachPlan[] | null> =>
+  getFromNeon<CachedCoachPlan[]>(
     `${API}/coach-plans?athleteId=${athleteId}`,
   );
 
+/** Get only the active plan for an athlete. */
+export const neonGetActiveCoachPlan = async (
+  athleteId: number,
+): Promise<CachedCoachPlan | null> =>
+  getFromNeon<CachedCoachPlan>(
+    `${API}/coach-plans?athleteId=${athleteId}&active=true`,
+  );
+
+/** Fire-and-forget upsert of a coach plan. */
 export const neonSyncCoachPlan = (record: CachedCoachPlan): void => {
   postToNeon('coach-plans', record);
 };
 
-/** Fire-and-forget DELETE to Neon. Never throws, never blocks. */
-export const neonDeleteCoachPlan = (athleteId: number): void => {
-  fetch(`${API}/coach-plans?athleteId=${athleteId}`, {
+/** Fire-and-forget delete of a coach plan by ID. */
+export const neonDeleteCoachPlan = (planId: string): void => {
+  fetch(`${API}/coach-plans?id=${planId}`, {
     method: 'DELETE',
+  }).catch(() => {
+    // Silently ignore — Neon sync is best-effort
+  });
+};
+
+/** Fire-and-forget activate a plan (deactivates all others for the athlete). */
+export const neonActivateCoachPlan = (
+  planId: string,
+  athleteId: number,
+): void => {
+  fetch(`${API}/coach-plans?id=${planId}&athleteId=${athleteId}`, {
+    method: 'PATCH',
   }).catch(() => {
     // Silently ignore — Neon sync is best-effort
   });

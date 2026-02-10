@@ -123,11 +123,39 @@ export interface CachedChatMessage {
 
 // ----- Coach plan persistence -----
 
+export interface PlanSession {
+  day: string;
+  type: string;
+  description: string;
+  duration?: string;
+  targetPace?: string;
+  targetZone?: string;
+  notes?: string;
+}
+
 export interface CachedCoachPlan {
-  /** Strava athlete ID (primary key — one plan per athlete) */
+  /** UUID primary key */
+  id: string;
+  /** Strava athlete ID */
   athleteId: number;
-  /** Markdown plan content */
+  /** Short title for the plan */
+  title: string;
+  /** Brief overview */
+  summary: string | null;
+  /** Target race/goal */
+  goal: string | null;
+  /** How many weeks the plan spans */
+  durationWeeks: number | null;
+  /** Structured array of workout sessions */
+  sessions: PlanSession[];
+  /** Full markdown rendering for display */
   content: string;
+  /** Whether this is the currently active plan */
+  isActive: boolean;
+  /** FK to chat_messages.id that produced this plan */
+  sourceMessageId: string | null;
+  /** FK to chat_sessions.id where the plan was created */
+  sourceSessionId: string | null;
   /** Unix ms timestamp when the plan was shared */
   sharedAt: number;
 }
@@ -144,7 +172,7 @@ const db = new Dexie('RunZoneAICache') as Dexie & {
   zoneBreakdowns: EntityTable<CachedZoneBreakdown, 'activityId'>;
   chatSessions: EntityTable<CachedChatSession, 'id'>;
   chatMessages: EntityTable<CachedChatMessage, 'id'>;
-  coachPlans: EntityTable<CachedCoachPlan, 'athleteId'>;
+  coachPlans: EntityTable<CachedCoachPlan, 'id'>;
 };
 
 db.version(1).stores({
@@ -197,7 +225,7 @@ db.version(5).stores({
   zoneBreakdowns: 'activityId, settingsHash',
   chatSessions: 'id, [athleteId+persona], updatedAt',
   chatMessages: 'id, sessionId, createdAt',
-  coachPlans: 'athleteId',
+  coachPlans: 'id, athleteId, isActive, sharedAt',
 });
 
 export {db};

@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import {useState, useRef, useEffect, useMemo, useCallback} from 'react';
 import {
   Dumbbell,
   Apple,
@@ -8,45 +8,36 @@ import {
   Send,
   Loader2,
   AlertCircle,
-  ChevronDown,
-  Share2,
   Check,
   X,
   Plus,
   MessageSquare,
   Trash2,
+  Menu,
+  ClipboardList,
+  Calendar,
   type LucideIcon,
-} from "lucide-react";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
-import type { UIMessage } from "ai";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { useAthleteSummary } from "@/hooks/useAthleteSummary";
-import { useCoachPlan } from "@/hooks/useCoachPlan";
-import { useChatSessions } from "@/hooks/useChatSessions";
-import { useChatPersistence, MAX_MESSAGES_IN_CONTEXT } from "@/hooks/useChatPersistence";
-import { useStravaAuth } from "@/contexts/StravaAuthContext";
-import type { PersonaId } from "@/lib/aiPrompts";
+} from 'lucide-react';
+import {useChat} from '@ai-sdk/react';
+import {DefaultChatTransport} from 'ai';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {useAthleteSummary} from '@/hooks/useAthleteSummary';
+import {useCoachPlan} from '@/hooks/useCoachPlan';
+import {useChatSessions} from '@/hooks/useChatSessions';
+import {
+  useChatPersistence,
+  MAX_MESSAGES_IN_CONTEXT,
+} from '@/hooks/useChatPersistence';
+import {useStravaAuth} from '@/contexts/StravaAuthContext';
+import {useSettings} from '@/contexts/SettingsContext';
+import {DEFAULT_MODEL} from '@/lib/mockData';
+import type {PersonaId} from '@/lib/aiPrompts';
+import type {ShareTrainingPlanInput} from '@/lib/aiTools';
+import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
+import CoachPlanList from '@/components/layout/CoachPlanList';
 
-// ----- Model options -----
-
-interface ModelOption {
-  id: string;
-  label: string;
-  provider: string;
-  tier: string;
-}
-
-const MODEL_OPTIONS: ModelOption[] = [
-  { id: "gpt-4.1-nano", label: "GPT-4.1 Nano", provider: "OpenAI", tier: "Cheapest" },
-  { id: "gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI", tier: "Budget" },
-  { id: "gpt-4.1-mini", label: "GPT-4.1 Mini", provider: "OpenAI", tier: "Balanced" },
-  { id: "gpt-4o", label: "GPT-4o", provider: "OpenAI", tier: "Smart" },
-  { id: "gpt-4.1", label: "GPT-4.1", provider: "OpenAI", tier: "Smartest" },
-  { id: "claude-haiku-3-5", label: "Claude 3.5 Haiku", provider: "Anthropic", tier: "Budget" },
-  { id: "claude-sonnet-4-5", label: "Claude Sonnet 4.5", provider: "Anthropic", tier: "Smart" },
-];
+// ----- Personas -----
 
 interface Persona {
   id: PersonaId;
@@ -56,14 +47,20 @@ interface Persona {
 }
 
 const personas: Persona[] = [
-  { id: "coach", label: "Coach", icon: Dumbbell, color: "bg-secondary" },
-  { id: "nutritionist", label: "Nutrition", icon: Apple, color: "bg-zone-1" },
-  { id: "physio", label: "Physio", icon: Stethoscope, color: "bg-destructive" },
+  {id: 'coach', label: 'Coach', icon: Dumbbell, color: 'bg-secondary'},
+  {id: 'nutritionist', label: 'Nutrition', icon: Apple, color: 'bg-zone-1'},
+  {id: 'physio', label: 'Physio', icon: Stethoscope, color: 'bg-destructive'},
 ];
 
-const PersonaAvatar = ({ persona, size = "sm" }: { persona: Persona; size?: "sm" | "md" }) => {
-  const sizeClasses = size === "md" ? "w-9 h-9" : "w-7 h-7";
-  const iconSize = size === "md" ? "h-4 w-4" : "h-3.5 w-3.5";
+const PersonaAvatar = ({
+  persona,
+  size = 'sm',
+}: {
+  persona: Persona;
+  size?: 'sm' | 'md';
+}) => {
+  const sizeClasses = size === 'md' ? 'w-9 h-9' : 'w-7 h-7';
+  const iconSize = size === 'md' ? 'h-4 w-4' : 'h-3.5 w-3.5';
 
   return (
     <div
@@ -76,40 +73,149 @@ const PersonaAvatar = ({ persona, size = "sm" }: { persona: Persona; size?: "sm"
 
 // ----- Markdown renderer for AI messages -----
 
-const MarkdownContent = ({ content }: { content: string }) => (
+const MarkdownContent = ({content}: {content: string}) => (
   <ReactMarkdown
     remarkPlugins={[remarkGfm]}
     components={{
-      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-      ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
-      ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
-      li: ({ children }) => <li className="mb-0.5">{children}</li>,
-      strong: ({ children }) => <strong className="font-black">{children}</strong>,
-      h1: ({ children }) => <h1 className="font-black text-base mb-1">{children}</h1>,
-      h2: ({ children }) => <h2 className="font-black text-sm mb-1">{children}</h2>,
-      h3: ({ children }) => <h3 className="font-bold text-sm mb-1">{children}</h3>,
-      code: ({ children, className }) => {
+      p: ({children}) => <p className='mb-2 last:mb-0'>{children}</p>,
+      ul: ({children}) => <ul className='list-disc ml-4 mb-2'>{children}</ul>,
+      ol: ({children}) => (
+        <ol className='list-decimal ml-4 mb-2'>{children}</ol>
+      ),
+      li: ({children}) => <li className='mb-0.5'>{children}</li>,
+      strong: ({children}) => (
+        <strong className='font-black'>{children}</strong>
+      ),
+      h1: ({children}) => (
+        <h1 className='font-black text-base mb-1'>{children}</h1>
+      ),
+      h2: ({children}) => (
+        <h2 className='font-black text-sm mb-1'>{children}</h2>
+      ),
+      h3: ({children}) => (
+        <h3 className='font-bold text-sm mb-1'>{children}</h3>
+      ),
+      code: ({children, className}) => {
         const isInline = !className;
         if (isInline) {
-          return <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{children}</code>;
+          return (
+            <code className='bg-muted px-1 py-0.5 rounded text-xs font-mono'>
+              {children}
+            </code>
+          );
         }
         return (
-          <pre className="bg-muted border-2 border-border p-2 rounded text-xs font-mono overflow-x-auto mb-2">
+          <pre className='bg-muted border-2 border-border p-2 rounded text-xs font-mono overflow-x-auto mb-2'>
             <code>{children}</code>
           </pre>
         );
       },
-      table: ({ children }) => (
-        <div className="overflow-x-auto mb-2">
-          <table className="w-full text-xs border-3 border-border">{children}</table>
+      table: ({children}) => (
+        <div className='overflow-x-auto mb-2'>
+          <table className='w-full text-xs border-3 border-border'>
+            {children}
+          </table>
         </div>
       ),
-      th: ({ children }) => <th className="border-2 border-border px-2 py-1 bg-muted font-black text-left">{children}</th>,
-      td: ({ children }) => <td className="border-2 border-border px-2 py-1">{children}</td>,
+      th: ({children}) => (
+        <th className='border-2 border-border px-2 py-1 bg-muted font-black text-left'>
+          {children}
+        </th>
+      ),
+      td: ({children}) => (
+        <td className='border-2 border-border px-2 py-1'>{children}</td>
+      ),
     }}
   >
     {content}
   </ReactMarkdown>
+);
+
+// ----- Plan card displayed inline when the AI calls shareTrainingPlan -----
+
+const SESSION_TYPE_COLORS: Record<string, string> = {
+  easy: 'bg-zone-1/20 text-zone-1',
+  intervals: 'bg-zone-4/20 text-zone-4',
+  tempo: 'bg-zone-3/20 text-zone-3',
+  long: 'bg-zone-2/20 text-zone-2',
+  rest: 'bg-muted text-muted-foreground',
+  strength: 'bg-secondary/20 text-secondary',
+  recovery: 'bg-zone-1/20 text-zone-1',
+};
+
+const PlanCard = ({
+  plan,
+  isSaved,
+}: {
+  plan: ShareTrainingPlanInput;
+  isSaved: boolean;
+}) => (
+  <div className='mt-2 border-3 border-primary bg-primary/5 p-3 space-y-2'>
+    <div className='flex items-start justify-between gap-2'>
+      <div>
+        <span className='font-black text-xs uppercase tracking-wider text-primary flex items-center gap-1'>
+          <ClipboardList className='h-3 w-3' />
+          Training Plan
+        </span>
+        <h4 className='font-black text-sm mt-0.5'>{plan.title}</h4>
+        {plan.summary && (
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            {plan.summary}
+          </p>
+        )}
+      </div>
+      {isSaved && (
+        <span className='inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-primary shrink-0'>
+          <Check className='h-3 w-3' />
+          Saved
+        </span>
+      )}
+    </div>
+
+    {(plan.goal || plan.durationWeeks) && (
+      <div className='flex flex-wrap gap-2 text-[10px] font-bold'>
+        {plan.goal && (
+          <span className='px-1.5 py-0.5 border-2 border-border bg-muted'>
+            {plan.goal}
+          </span>
+        )}
+        {plan.durationWeeks && (
+          <span className='px-1.5 py-0.5 border-2 border-border bg-muted flex items-center gap-1'>
+            <Calendar className='h-2.5 w-2.5' />
+            {plan.durationWeeks}w
+          </span>
+        )}
+      </div>
+    )}
+
+    {plan.sessions.length > 0 && (
+      <div className='space-y-1'>
+        {plan.sessions.map((session, i) => (
+          <div
+            key={i}
+            className='flex items-center gap-2 text-[11px] font-medium'
+          >
+            <span className='w-16 shrink-0 font-bold text-muted-foreground truncate'>
+              {session.day}
+            </span>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${SESSION_TYPE_COLORS[session.type] ?? 'bg-muted text-foreground'}`}
+            >
+              {session.type}
+            </span>
+            <span className='truncate'>{session.description}</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+const PlanSaving = () => (
+  <div className='mt-2 border-3 border-border bg-muted/50 p-3 flex items-center gap-2 text-xs font-medium text-muted-foreground'>
+    <Loader2 className='h-3 w-3 animate-spin' />
+    Saving training plan...
+  </div>
 );
 
 // ----- Session-aware chat instance -----
@@ -118,13 +224,13 @@ const usePersistentChat = (sessionId: string | null) => {
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
-        api: "/api/ai/chat",
+        api: '/api/ai/chat',
       }),
     [],
   );
 
   const chat = useChat({
-    id: sessionId ? `session-${sessionId}` : "ai-team-pending",
+    id: sessionId ? `session-${sessionId}` : 'ai-team-pending',
     transport,
   });
 
@@ -134,22 +240,26 @@ const usePersistentChat = (sessionId: string | null) => {
 // ----- Main component -----
 
 const AITeamChat = () => {
-  const [activePersona, setActivePersona] = useState<PersonaId>("coach");
-  const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
-  const [input, setInput] = useState("");
-  const [showSessions, setShowSessions] = useState(false);
+  const [activePersona, setActivePersona] = useState<PersonaId>('coach');
+  const [input, setInput] = useState('');
   const [memory, setMemory] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [planListOpen, setPlanListOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { athlete } = useStravaAuth();
-  const { serialized: athleteContext, isLoading: contextLoading } = useAthleteSummary();
+  const {athlete} = useStravaAuth();
+  const {settings} = useSettings();
+  const selectedModel = settings.aiModel ?? DEFAULT_MODEL;
+  const {serialized: athleteContext, isLoading: contextLoading} =
+    useAthleteSummary();
   const athleteId = athlete?.id ?? null;
-  const { plan: coachPlan, sharePlan, clearPlan } = useCoachPlan(athleteId);
+  const {plans, activePlan, savePlan, activatePlan, deletePlan} =
+    useCoachPlan(athleteId);
 
   // Session management per persona
-  const coachSessions = useChatSessions(athleteId, "coach");
-  const nutritionistSessions = useChatSessions(athleteId, "nutritionist");
-  const physioSessions = useChatSessions(athleteId, "physio");
+  const coachSessions = useChatSessions(athleteId, 'coach');
+  const nutritionistSessions = useChatSessions(athleteId, 'nutritionist');
+  const physioSessions = useChatSessions(athleteId, 'physio');
 
   const sessionManagers = useMemo(
     () => ({
@@ -162,10 +272,11 @@ const AITeamChat = () => {
 
   const activeSM = sessionManagers[activePersona];
   const activeSession = activeSM.activeSession;
-  const currentPersona = personas.find((p) => p.id === activePersona) ?? personas[0];
+  const currentPersona =
+    personas.find((p) => p.id === activePersona) ?? personas[0];
 
   // Persistence
-  const { loadMessages, persistMessage, getMemorySummary, maybeTriggerSummary } =
+  const {loadMessages, persistMessage, getMemorySummary, maybeTriggerSummary} =
     useChatPersistence();
 
   // Single chat instance keyed by active session
@@ -205,9 +316,12 @@ const AITeamChat = () => {
   // Persist messages when they change (after streaming completes)
   const lastPersistedCount = useRef(0);
 
+  // Track which tool plan IDs we've already saved to Dexie
+  const savedPlanIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!activeSession?.id) return;
-    if (activeChat.status === "streaming") return;
+    if (activeChat.status === 'streaming') return;
 
     const messages = activeChat.messages;
     if (messages.length <= lastPersistedCount.current) return;
@@ -221,17 +335,58 @@ const AITeamChat = () => {
     (async () => {
       for (const msg of newMessages) {
         await persistMessage(sessionId, msg);
+
+        // Detect tool results from shareTrainingPlan and save to Dexie
+        if (msg.role === 'assistant' && msg.parts) {
+          for (const part of msg.parts) {
+            if (
+              part.type === 'tool-shareTrainingPlan' &&
+              'state' in part &&
+              part.state === 'output-available' &&
+              'output' in part &&
+              part.output &&
+              typeof part.output === 'object' &&
+              'planId' in part.output &&
+              'input' in part &&
+              part.input &&
+              typeof part.input === 'object'
+            ) {
+              const output = part.output as {planId: string; title: string; sharedAt: number};
+              const planInput = part.input as ShareTrainingPlanInput;
+
+              // Only save once
+              if (!savedPlanIds.current.has(output.planId)) {
+                savedPlanIds.current.add(output.planId);
+                savePlan({
+                  id: output.planId,
+                  athleteId: athleteId ?? 0,
+                  title: planInput.title,
+                  summary: planInput.summary ?? null,
+                  goal: planInput.goal ?? null,
+                  durationWeeks: planInput.durationWeeks ?? null,
+                  sessions: planInput.sessions,
+                  content: planInput.content,
+                  sourceMessageId: msg.id,
+                  sourceSessionId: sessionId,
+                  sharedAt: output.sharedAt,
+                });
+              }
+            }
+          }
+        }
       }
 
       // Update session metadata
-      const firstUserMsg = messages.find((m) => m.role === "user");
+      const firstUserMsg = messages.find((m) => m.role === 'user');
       const title = firstUserMsg
-        ? (firstUserMsg.parts
-            ?.filter((p): p is { type: "text"; text: string } => p.type === "text")
+        ? firstUserMsg.parts
+            ?.filter(
+              (p): p is {type: 'text'; text: string} => p.type === 'text',
+            )
             .map((p) => p.text)
-            .join("")
-            .slice(0, 50) || "New conversation")
-        : "New conversation";
+            .join('')
+            .slice(0, 50) || 'New conversation'
+        : 'New conversation';
 
       await activeSM.updateSession(sessionId, {
         title,
@@ -241,10 +396,19 @@ const AITeamChat = () => {
       // Check if summary should be triggered
       maybeTriggerSummary(sessionId, messages.length, async (summary) => {
         setMemory(summary);
-        await activeSM.updateSession(sessionId, { summary });
+        await activeSM.updateSession(sessionId, {summary});
       });
     })();
-  }, [activeChat.messages, activeChat.status, activeSession?.id, persistMessage, activeSM, maybeTriggerSummary]);
+  }, [
+    activeChat.messages,
+    activeChat.status,
+    activeSession?.id,
+    persistMessage,
+    activeSM,
+    maybeTriggerSummary,
+    savePlan,
+    athleteId,
+  ]);
 
   // Reset persisted count when session changes
   useEffect(() => {
@@ -252,7 +416,7 @@ const AITeamChat = () => {
   }, [activeSession?.id]);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || activeChat.status === "streaming") return;
+    if (!input.trim() || activeChat.status === 'streaming') return;
 
     // Auto-create a session if none exists
     let session = activeSession;
@@ -273,22 +437,44 @@ const AITeamChat = () => {
     }
 
     activeChat.sendMessage(
-      { text: input.trim() },
+      {text: input.trim()},
       {
         body: {
           persona: activePersona,
           athleteContext,
           model: selectedModel,
-          coachPlan: activePersona !== "coach" ? coachPlan?.content ?? null : null,
+          coachPlan:
+            activePersona !== 'coach' && activePlan
+              ? {
+                  title: activePlan.title,
+                  goal: activePlan.goal,
+                  durationWeeks: activePlan.durationWeeks,
+                  sessions: activePlan.sessions,
+                  content: activePlan.content,
+                }
+              : null,
           memory,
+          athleteId,
+          sessionId: session?.id ?? null,
         },
       },
     );
-    setInput("");
-  }, [input, activeChat, activePersona, athleteContext, selectedModel, coachPlan, memory, activeSession, activeSM]);
+    setInput('');
+  }, [
+    input,
+    activeChat,
+    activePersona,
+    athleteContext,
+    selectedModel,
+    activePlan,
+    memory,
+    activeSession,
+    activeSM,
+    athleteId,
+  ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -299,7 +485,6 @@ const AITeamChat = () => {
     activeChat.setMessages([]);
     lastPersistedCount.current = 0;
     setMemory(null);
-    setShowSessions(false);
   }, [activeSM, activeChat]);
 
   const handleSelectSession = useCallback(
@@ -307,7 +492,6 @@ const AITeamChat = () => {
       activeSM.selectSession(id);
       lastPersistedCount.current = 0;
       loadedSessionRef.current = null; // Force reload
-      setShowSessions(false);
     },
     [activeSM],
   );
@@ -328,293 +512,427 @@ const AITeamChat = () => {
     setActivePersona(personaId);
     loadedSessionRef.current = null; // Force reload on persona switch
     lastPersistedCount.current = 0;
-    setShowSessions(false);
   }, []);
 
-  const isStreaming = activeChat.status === "streaming";
+  const isStreaming = activeChat.status === 'streaming';
   const hasError = activeChat.error;
 
-  return (
-    <div className="flex flex-col h-full min-w-0 overflow-hidden">
-      {/* Persona selector */}
-      <div className="p-3 border-b-3 border-border flex gap-2">
-        {personas.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => handlePersonaSwitch(p.id)}
-            aria-label={`Switch to ${p.label}`}
-            tabIndex={0}
-            className={`flex-1 flex items-center justify-center gap-2 px-2 py-2 rounded-full border-3 border-border font-bold text-xs transition-all ${
-              activePersona === p.id
-                ? "bg-primary text-primary-foreground shadow-neo-sm"
-                : "bg-background hover:bg-muted"
+  // ----- Sidebar content (shared between desktop and mobile drawer) -----
+
+  const sidebarContent = (
+    <div className='flex flex-col h-full'>
+      {/* History header */}
+      <div className='px-3 py-2 border-b-3 border-border flex items-center justify-between'>
+        <span className='font-black text-xs uppercase tracking-wider'>
+          History
+        </span>
+        <button
+          onClick={() => {
+            handleNewConversation();
+            setSidebarOpen(false);
+          }}
+          aria-label='New conversation'
+          tabIndex={0}
+          className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-foreground text-background hover:bg-primary hover:text-primary-foreground transition-colors shrink-0'
+        >
+          <Plus className='h-3 w-3' />
+          New
+        </button>
+      </div>
+
+      {/* Session list */}
+      <div className='flex-1 overflow-y-auto'>
+        {activeSM.isLoading && (
+          <div className='px-3 py-6 text-xs text-muted-foreground text-center'>
+            <Loader2 className='h-4 w-4 animate-spin mx-auto mb-1' />
+            Loading...
+          </div>
+        )}
+        {!activeSM.isLoading && activeSM.sessions.length === 0 && (
+          <div className='px-3 py-6 text-xs text-muted-foreground text-center'>
+            <MessageSquare className='h-5 w-5 mx-auto mb-1.5 opacity-40' />
+            No conversations yet
+          </div>
+        )}
+        {activeSM.sessions.map((session) => (
+          <div
+            key={session.id}
+            className={`group flex items-center gap-2 px-3 py-2.5 text-xs border-b border-border/50 cursor-pointer transition-colors ${
+              session.id === activeSession?.id
+                ? 'bg-primary/10 font-black'
+                : 'hover:bg-muted font-medium'
             }`}
           >
-            <PersonaAvatar persona={p} size="sm" />
-            <span className="hidden sm:inline">{p.label}</span>
-          </button>
+            <button
+              onClick={() => {
+                handleSelectSession(session.id);
+                setSidebarOpen(false);
+              }}
+              aria-label={`Select conversation: ${session.title}`}
+              tabIndex={0}
+              className='flex-1 text-left truncate min-w-0'
+            >
+              <span className='flex items-center gap-1.5'>
+                <MessageSquare className='h-3 w-3 shrink-0 text-muted-foreground' />
+                <span className='block truncate'>{session.title}</span>
+              </span>
+              <span className='text-[10px] text-muted-foreground ml-[18px] block'>
+                {new Date(session.updatedAt).toLocaleDateString()} &middot;{' '}
+                {session.messageCount} msgs
+              </span>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteSession(session.id);
+              }}
+              aria-label={`Delete conversation: ${session.title}`}
+              tabIndex={0}
+              className='shrink-0 p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-all'
+            >
+              <Trash2 className='h-3 w-3' />
+            </button>
+          </div>
         ))}
       </div>
 
-      {/* Model selector */}
-      <div className="px-3 py-2 border-b-3 border-border flex items-center gap-2 bg-muted/30">
-        <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground shrink-0">Model</span>
-        <div className="relative flex-1">
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            aria-label="Select AI model"
-            className="w-full appearance-none px-2 py-1 pr-7 border-2 border-border bg-background font-bold text-xs focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-          >
-            {MODEL_OPTIONS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} — {m.tier}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
-        </div>
-      </div>
-
-      {/* Session header */}
-      <div className="px-3 py-2 border-b-3 border-border flex items-center gap-2 bg-background">
-        <button
-          onClick={() => setShowSessions(!showSessions)}
-          aria-label="Toggle session list"
-          tabIndex={0}
-          className="flex-1 flex items-center gap-1.5 text-xs font-bold truncate text-left hover:text-primary transition-colors"
-        >
-          <MessageSquare className="h-3 w-3 shrink-0" />
-          <span className="truncate">
-            {activeSM.isLoading
-              ? "Loading..."
-              : activeSession?.title ?? "No conversation"}
-          </span>
-          <ChevronDown
-            className={`h-3 w-3 shrink-0 transition-transform ${showSessions ? "rotate-180" : ""}`}
-          />
-        </button>
-        <button
-          onClick={handleNewConversation}
-          aria-label="New conversation"
-          tabIndex={0}
-          className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background hover:bg-muted transition-colors"
-        >
-          <Plus className="h-3 w-3" />
-          <span className="hidden sm:inline">New</span>
-        </button>
-      </div>
-
-      {/* Session list dropdown */}
-      {showSessions && (
-        <div className="border-b-3 border-border bg-muted/30 max-h-48 overflow-y-auto">
-          {activeSM.sessions.length === 0 && (
-            <div className="px-3 py-3 text-xs text-muted-foreground text-center">
-              No conversations yet
-            </div>
-          )}
-          {activeSM.sessions.map((session) => (
-            <div
-              key={session.id}
-              className={`flex items-center gap-2 px-3 py-2 text-xs border-b border-border/50 last:border-b-0 cursor-pointer transition-colors ${
-                session.id === activeSession?.id
-                  ? "bg-primary/10 font-black"
-                  : "hover:bg-muted font-medium"
+      {/* Persona switcher */}
+      <div className='border-t-3 border-border bg-background shrink-0'>
+        {personas.map((p) => {
+          const isActive = activePersona === p.id;
+          return (
+            <button
+              key={p.id}
+              onClick={() => {
+                handlePersonaSwitch(p.id);
+                setSidebarOpen(false);
+              }}
+              aria-label={`Switch to ${p.label}`}
+              tabIndex={0}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs transition-all ${
+                isActive
+                  ? 'font-black text-foreground bg-primary/10'
+                  : 'font-medium text-muted-foreground/40 hover:text-muted-foreground/70 hover:bg-muted/50'
               }`}
             >
-              <button
-                onClick={() => handleSelectSession(session.id)}
-                aria-label={`Select conversation: ${session.title}`}
-                tabIndex={0}
-                className="flex-1 text-left truncate"
-              >
-                <span className="block truncate">{session.title}</span>
-                <span className="text-[10px] text-muted-foreground">
-                  {new Date(session.updatedAt).toLocaleDateString()} &middot; {session.messageCount} msgs
-                </span>
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDeleteSession(session.id);
-                }}
-                aria-label={`Delete conversation: ${session.title}`}
-                tabIndex={0}
-                className="shrink-0 p-1 text-muted-foreground hover:text-destructive transition-colors"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Context loading indicator */}
-      {contextLoading && (
-        <div className="px-3 py-2 bg-muted/50 border-b-3 border-border flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Loading your training data...
-        </div>
-      )}
-
-      {/* Memory indicator */}
-      {memory && (
-        <div className="px-3 py-1.5 bg-secondary/10 border-b-3 border-border flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground">
-          <MessageSquare className="h-3 w-3 shrink-0" />
-          Memory active — past conversations remembered
-        </div>
-      )}
-
-      {/* Shared coach plan banner — shown on Nutritionist & Physio tabs */}
-      {activePersona !== "coach" && coachPlan && (
-        <div className="px-3 py-2 bg-primary/10 border-b-3 border-border flex items-center justify-between gap-2 text-xs font-bold">
-          <span className="flex items-center gap-1.5 text-foreground">
-            <Dumbbell className="h-3 w-3 shrink-0" />
-            Coach plan shared
-            <span className="text-muted-foreground font-medium">
-              — {new Date(coachPlan.sharedAt).toLocaleDateString()}
-            </span>
-          </span>
-          <button
-            onClick={clearPlan}
-            aria-label="Clear shared coach plan"
-            tabIndex={0}
-            className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-destructive transition-colors"
-          >
-            <X className="h-3 w-3" />
-            <span className="hidden sm:inline">Clear</span>
-          </button>
-        </div>
-      )}
-
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3">
-        {activeChat.messages.length === 0 && !isStreaming && (
-          <div className="flex items-center justify-center h-full text-muted-foreground text-sm font-medium">
-            <div className="text-center space-y-2">
-              <PersonaAvatar persona={currentPersona} size="md" />
-              <p className="font-bold">{currentPersona.label}</p>
-              <p className="text-xs max-w-[200px]">
-                {activePersona === "coach" && "Ask about training plans, workouts, and race strategy"}
-                {activePersona === "nutritionist" && "Ask about fueling, hydration, and recovery nutrition"}
-                {activePersona === "physio" && "Ask about injury prevention, mobility, and recovery"}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {activeChat.messages.map((msg) => {
-          const isUser = msg.role === "user";
-          const textContent = msg.parts
-            ?.filter((part): part is { type: "text"; text: string } => part.type === "text")
-            .map((part) => part.text)
-            .join("") ?? "";
-
-          if (!textContent) return null;
-
-          const isSharedPlan = !isUser && activePersona === "coach" && coachPlan?.content === textContent;
-
-          return (
-            <div
-              key={msg.id}
-              className={`flex gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}
-            >
-              {!isUser && (
-                <PersonaAvatar persona={currentPersona} size="md" />
-              )}
-              <div
-                className={`flex-1 p-3 border-3 border-border text-sm font-medium overflow-hidden break-words ${
-                  isUser ? "bg-muted ml-4 md:ml-10" : "bg-accent/20 mr-4 md:mr-10"
-                } ${isSharedPlan ? "ring-2 ring-primary" : ""}`}
-              >
-                <span className="font-black text-xs uppercase mb-1 block">
-                  {isUser ? "You" : currentPersona.label}
-                </span>
-                {isUser ? (
-                  textContent
-                ) : (
-                  <div className="prose-sm overflow-hidden">
-                    <MarkdownContent content={textContent} />
-                  </div>
-                )}
-                {/* Share with team button — coach assistant messages only */}
-                {!isUser && activePersona === "coach" && (
-                  <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-1.5">
-                    {isSharedPlan ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-primary">
-                        <Check className="h-3 w-3" />
-                        Shared with team
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => sharePlan(textContent)}
-                        aria-label="Share this plan with Nutrition and Physio"
-                        tabIndex={0}
-                        className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        <Share2 className="h-3 w-3" />
-                        Share with team
-                      </button>
-                    )}
-                  </div>
-                )}
+              <div className={isActive ? '' : 'opacity-30 grayscale'}>
+                <PersonaAvatar persona={p} size='sm' />
               </div>
-            </div>
+              <span>{p.label}</span>
+              {isActive && (
+                <div
+                  className={`ml-auto w-2 h-2 rounded-full ${p.color} border border-border`}
+                />
+              )}
+            </button>
           );
         })}
+      </div>
+    </div>
+  );
 
-        {/* Streaming indicator */}
-        {isStreaming && activeChat.messages.length > 0 && activeChat.messages[activeChat.messages.length - 1]?.role === "user" && (
-          <div className="flex gap-2 flex-row">
-            <PersonaAvatar persona={currentPersona} size="md" />
-            <div className="p-3 border-3 border-border text-sm font-medium bg-accent/20 mr-4 md:mr-10">
-              <span className="font-black text-xs uppercase mb-1 block">{currentPersona.label}</span>
-              <div className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-foreground rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 bg-foreground rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 bg-foreground rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
-            </div>
+  // ----- Render -----
+
+  return (
+    <div className='flex h-full min-w-0 overflow-hidden'>
+      {/* Plan list sheet */}
+      <Sheet open={planListOpen} onOpenChange={setPlanListOpen}>
+        <SheetContent side='right' className='p-0 w-[340px] sm:max-w-[340px]'>
+          <SheetTitle className='sr-only'>Training Plans</SheetTitle>
+          <CoachPlanList
+            plans={plans}
+            activePlanId={activePlan?.id ?? null}
+            onActivate={activatePlan}
+            onDelete={deletePlan}
+            onClose={() => setPlanListOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
+
+      {/* Chat area */}
+      <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
+        {/* Mobile header — persona + new chat + history */}
+        <div className='md:hidden px-3 py-2 border-b-3 border-border flex items-center gap-2 bg-background'>
+          <div className='flex items-center gap-1.5 flex-1 min-w-0'>
+            <PersonaAvatar persona={currentPersona} size='sm' />
+            <span className='font-bold text-xs truncate'>
+              {activeSession?.title ?? currentPersona.label}
+            </span>
+          </div>
+          <button
+            onClick={handleNewConversation}
+            aria-label='New conversation'
+            tabIndex={0}
+            className='p-1.5 border-2 border-border hover:bg-muted transition-colors shrink-0'
+          >
+            <Plus className='h-4 w-4' />
+          </button>
+          <button
+            onClick={() => setSidebarOpen(true)}
+            aria-label='Open conversation history'
+            tabIndex={0}
+            className='p-1.5 border-2 border-border hover:bg-muted transition-colors shrink-0'
+          >
+            <Menu className='h-4 w-4' />
+          </button>
+        </div>
+
+        {/* Desktop header — new chat button top-right */}
+        <div className='hidden md:flex items-center justify-between px-3 py-1.5 border-b-3 border-border bg-background'>
+          <div className='flex items-center gap-1.5 min-w-0'>
+            <PersonaAvatar persona={currentPersona} size='sm' />
+            <span className='font-bold text-xs truncate'>
+              {activeSession?.title ?? currentPersona.label}
+            </span>
+          </div>
+          <div className='flex items-center gap-1.5'>
+            {plans.length > 0 && (
+              <button
+                onClick={() => setPlanListOpen(true)}
+                aria-label='View training plans'
+                tabIndex={0}
+                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background hover:bg-muted transition-colors shrink-0'
+              >
+                <ClipboardList className='h-3 w-3' />
+                Plans ({plans.length})
+              </button>
+            )}
+            <button
+              onClick={handleNewConversation}
+              aria-label='New conversation'
+              tabIndex={0}
+              className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-foreground text-background hover:bg-primary hover:text-primary-foreground transition-colors shrink-0'
+            >
+              <Plus className='h-3 w-3' />
+              New
+            </button>
+          </div>
+        </div>
+
+        {/* Context loading indicator */}
+        {contextLoading && (
+          <div className='px-3 py-2 bg-muted/50 border-b-3 border-border flex items-center gap-2 text-xs text-muted-foreground'>
+            <Loader2 className='h-3 w-3 animate-spin' />
+            Loading your training data...
           </div>
         )}
-      </div>
 
-      {/* Error display */}
-      {hasError && (
-        <div className="px-3 py-2 bg-destructive/10 border-t-3 border-border flex items-center gap-2 text-xs text-destructive font-medium">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">
-            {activeChat.error?.message ?? "Something went wrong. Please try again."}
-          </span>
-        </div>
-      )}
+        {/* Memory indicator */}
+        {memory && (
+          <div className='px-3 py-1.5 bg-secondary/10 border-b-3 border-border flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground'>
+            <MessageSquare className='h-3 w-3 shrink-0' />
+            Memory active — past conversations remembered
+          </div>
+        )}
 
-      {/* Input */}
-      <div className="p-3 border-t-3 border-border flex gap-2">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={isStreaming ? "Waiting for response..." : "Ask your AI team..."}
-          disabled={isStreaming}
-          aria-label="Message input"
-          className="flex-1 min-w-0 px-3 py-2 border-3 border-border font-medium text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
-        />
-        <button
-          onClick={handleSend}
-          disabled={isStreaming || !input.trim()}
-          aria-label="Send message"
-          tabIndex={0}
-          className="px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-border hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isStreaming ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
+        {/* Shared coach plan banner — shown on Nutritionist & Physio tabs */}
+        {activePersona !== 'coach' && activePlan && (
+          <div className='px-3 py-2 bg-primary/10 border-b-3 border-border flex items-center justify-between gap-2 text-xs font-bold'>
+            <button
+              onClick={() => setPlanListOpen(true)}
+              aria-label='View training plans'
+              tabIndex={0}
+              className='flex items-center gap-1.5 text-foreground hover:text-primary transition-colors'
+            >
+              <Dumbbell className='h-3 w-3 shrink-0' />
+              <span className='truncate'>{activePlan.title}</span>
+              <span className='text-muted-foreground font-medium shrink-0'>
+                — {new Date(activePlan.sharedAt).toLocaleDateString()}
+              </span>
+            </button>
+            <button
+              onClick={() => setPlanListOpen(true)}
+              aria-label='Manage plans'
+              tabIndex={0}
+              className='inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors shrink-0'
+            >
+              <ClipboardList className='h-3 w-3' />
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        <div ref={scrollRef} className='flex-1 overflow-y-auto p-3 space-y-3'>
+          {activeChat.messages.length === 0 && !isStreaming && (
+            <div className='flex items-center justify-center h-full text-muted-foreground text-sm font-medium'>
+              <div className='text-center space-y-2'>
+                <PersonaAvatar persona={currentPersona} size='md' />
+                <p className='font-bold'>{currentPersona.label}</p>
+                <p className='text-xs max-w-[200px]'>
+                  {activePersona === 'coach' &&
+                    'Ask about training plans, workouts, and race strategy'}
+                  {activePersona === 'nutritionist' &&
+                    'Ask about fueling, hydration, and recovery nutrition'}
+                  {activePersona === 'physio' &&
+                    'Ask about injury prevention, mobility, and recovery'}
+                </p>
+              </div>
+            </div>
           )}
-          <span className="hidden sm:inline">{isStreaming ? "..." : "Send"}</span>
-        </button>
+
+          {activeChat.messages.map((msg) => {
+            const isUser = msg.role === 'user';
+
+            // Collect text content
+            const textContent =
+              msg.parts
+                ?.filter(
+                  (part): part is {type: 'text'; text: string} =>
+                    part.type === 'text',
+                )
+                .map((part) => part.text)
+                .join('') ?? '';
+
+            // Check for tool call parts
+            const toolParts = msg.parts?.filter(
+              (part) => part.type === 'tool-shareTrainingPlan',
+            ) ?? [];
+
+            // Skip if no content at all
+            if (!textContent && toolParts.length === 0) return null;
+
+            return (
+              <div
+                key={msg.id}
+                className={`flex gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+              >
+                {!isUser && (
+                  <PersonaAvatar persona={currentPersona} size='md' />
+                )}
+                <div
+                  className={`flex-1 p-3 border-3 border-border text-sm font-medium overflow-hidden break-words ${
+                    isUser
+                      ? 'bg-muted ml-4 md:ml-10'
+                      : 'bg-accent/20 mr-4 md:mr-10'
+                  }`}
+                >
+                  <span className='font-black text-xs uppercase mb-1 block'>
+                    {isUser ? 'You' : currentPersona.label}
+                  </span>
+                  {isUser ? (
+                    textContent
+                  ) : (
+                    <>
+                      {textContent && (
+                        <div className='prose-sm overflow-hidden'>
+                          <MarkdownContent content={textContent} />
+                        </div>
+                      )}
+                      {/* Render tool call results as plan cards */}
+                      {toolParts.map((part, idx) => {
+                        if (!('state' in part)) return null;
+                        const toolPart = part as {
+                          type: string;
+                          state: string;
+                          input?: ShareTrainingPlanInput;
+                          output?: {planId: string; title: string; sharedAt: number};
+                        };
+                        if (toolPart.state !== 'output-available' || !toolPart.input) {
+                          return <PlanSaving key={idx} />;
+                        }
+                        const isSaved = toolPart.output
+                          ? savedPlanIds.current.has(toolPart.output.planId)
+                          : false;
+                        return (
+                          <PlanCard
+                            key={idx}
+                            plan={toolPart.input}
+                            isSaved={isSaved || !!toolPart.output}
+                          />
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Streaming indicator */}
+          {isStreaming &&
+            activeChat.messages.length > 0 &&
+            activeChat.messages[activeChat.messages.length - 1]?.role ===
+              'user' && (
+              <div className='flex gap-2 flex-row'>
+                <PersonaAvatar persona={currentPersona} size='md' />
+                <div className='p-3 border-3 border-border text-sm font-medium bg-accent/20 mr-4 md:mr-10'>
+                  <span className='font-black text-xs uppercase mb-1 block'>
+                    {currentPersona.label}
+                  </span>
+                  <div className='flex items-center gap-1'>
+                    <span
+                      className='w-1.5 h-1.5 bg-foreground rounded-full animate-bounce'
+                      style={{animationDelay: '0ms'}}
+                    />
+                    <span
+                      className='w-1.5 h-1.5 bg-foreground rounded-full animate-bounce'
+                      style={{animationDelay: '150ms'}}
+                    />
+                    <span
+                      className='w-1.5 h-1.5 bg-foreground rounded-full animate-bounce'
+                      style={{animationDelay: '300ms'}}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+        </div>
+
+        {/* Error display */}
+        {hasError && (
+          <div className='px-3 py-2 bg-destructive/10 border-t-3 border-border flex items-center gap-2 text-xs text-destructive font-medium'>
+            <AlertCircle className='h-3.5 w-3.5 shrink-0' />
+            <span className='truncate'>
+              {activeChat.error?.message ??
+                'Something went wrong. Please try again.'}
+            </span>
+          </div>
+        )}
+
+        {/* Input */}
+        <div className='p-3 border-t-3 border-border flex gap-2'>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              isStreaming ? 'Waiting for response...' : 'Ask your AI team...'
+            }
+            disabled={isStreaming}
+            aria-label='Message input'
+            className='flex-1 min-w-0 px-3 py-2 border-3 border-border font-medium text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50'
+          />
+          <button
+            onClick={handleSend}
+            disabled={isStreaming || !input.trim()}
+            aria-label='Send message'
+            tabIndex={0}
+            className='px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-border hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            {isStreaming ? (
+              <Loader2 className='h-4 w-4 animate-spin' />
+            ) : (
+              <Send className='h-4 w-4' />
+            )}
+            <span className='hidden sm:inline'>
+              {isStreaming ? '...' : 'Send'}
+            </span>
+          </button>
+        </div>
       </div>
+
+      {/* Desktop history sidebar (right) — always visible on md+ */}
+      <div className='hidden md:flex flex-col w-[280px] border-l-3 border-border bg-muted/30 shrink-0 overflow-hidden'>
+        {sidebarContent}
+      </div>
+
+      {/* Mobile history drawer (right) */}
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent side='right' className='p-0 w-[280px] sm:max-w-[280px]'>
+          <SheetTitle className='sr-only'>Conversation History</SheetTitle>
+          {sidebarContent}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

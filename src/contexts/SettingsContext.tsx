@@ -1,12 +1,14 @@
-import { createContext, useContext, useState, ReactNode } from "react";
-import { UserSettings, defaultSettings } from "@/lib/mockData";
+import {createContext, useContext, useState, ReactNode} from 'react';
+import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/mockData';
 
 interface SettingsContextType {
   settings: UserSettings;
   updateSettings: (newSettings: UserSettings) => void;
 }
 
-const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
+const SettingsContext = createContext<SettingsContextType | undefined>(
+  undefined,
+);
 
 /** Migrate saved settings: 5→6 zones, add goal field if missing */
 const migrateSettings = (parsed: unknown): UserSettings => {
@@ -30,13 +32,17 @@ const migrateSettings = (parsed: unknown): UserSettings => {
   if (s.injuries === undefined) {
     s.injuries = [];
   }
+  // Add AI model field if missing
+  if (s.aiModel === undefined) {
+    s.aiModel = DEFAULT_MODEL;
+  }
   return s;
 };
 
-export function SettingsProvider({ children }: { children: ReactNode }) {
+export function SettingsProvider({children}: {children: ReactNode}) {
   const [settings, setSettings] = useState<UserSettings>(() => {
     try {
-      const saved = localStorage.getItem("runteam-settings");
+      const saved = localStorage.getItem('runteam-settings');
       if (!saved) return defaultSettings;
       return migrateSettings(JSON.parse(saved));
     } catch {
@@ -46,11 +52,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const updateSettings = (newSettings: UserSettings) => {
     setSettings(newSettings);
-    localStorage.setItem("runteam-settings", JSON.stringify(newSettings));
+    localStorage.setItem('runteam-settings', JSON.stringify(newSettings));
   };
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings }}>
+    <SettingsContext.Provider value={{settings, updateSettings}}>
       {children}
     </SettingsContext.Provider>
   );
@@ -59,6 +65,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 export function useSettings() {
   const context = useContext(SettingsContext);
   if (!context)
-    throw new Error("useSettings must be used within a SettingsProvider");
+    throw new Error('useSettings must be used within a SettingsProvider');
   return context;
 }
