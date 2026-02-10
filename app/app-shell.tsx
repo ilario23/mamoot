@@ -6,12 +6,14 @@ import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import LoginWall from '@/components/auth/LoginWall';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import usePageTheme from '@/hooks/usePageTheme';
+import useServiceWorker from '@/hooks/useServiceWorker';
 import {Loader2} from 'lucide-react';
 import type {ReactNode} from 'react';
 
 const AppShell = ({children}: {children: ReactNode}) => {
   const {isAuthenticated, isLoading} = useStravaAuth();
   const pageTheme = usePageTheme();
+  useServiceWorker();
 
   const themeStyle = {
     '--page-accent': `var(${pageTheme.accent})`,
