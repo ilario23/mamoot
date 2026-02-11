@@ -26,15 +26,14 @@ import type {
 } from '@/lib/strava';
 
 // ----- Stale time constants -----
-// These are React Query stale times. Since the real persistence is in
-// Dexie/IndexedDB, we set long stale times here so React Query almost
-// never triggers a background refetch on its own. The Dexie cache layer
-// handles freshness checks against the API.
+// React Query provides in-memory caching for the browser session.
+// The Neon cache layer handles persistent storage and freshness
+// checks against the Strava API.
 
 const ONE_HOUR = 60 * 60 * 1000;
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
-/** Fetch all activities, served from IndexedDB cache when fresh */
+/** Fetch all activities, served from Neon cache when fresh */
 export const useActivities = () => {
   const {isAuthenticated} = useStravaAuth();
 
@@ -48,7 +47,7 @@ export const useActivities = () => {
   });
 };
 
-/** Fetch single activity detail — cached forever in IndexedDB */
+/** Fetch single activity detail — cached forever in Neon */
 export const useActivityDetail = (activityId: string | undefined) => {
   const {isAuthenticated} = useStravaAuth();
 
@@ -61,7 +60,7 @@ export const useActivityDetail = (activityId: string | undefined) => {
   });
 };
 
-/** Fetch activity streams — cached forever in IndexedDB */
+/** Fetch activity streams — cached forever in Neon */
 export const useActivityStreams = (activityId: string | undefined) => {
   const {isAuthenticated} = useStravaAuth();
 
@@ -74,7 +73,7 @@ export const useActivityStreams = (activityId: string | undefined) => {
   });
 };
 
-/** Fetch athlete stats — refreshed hourly via IndexedDB cache */
+/** Fetch athlete stats — refreshed hourly via Neon cache */
 export const useAthleteStats = () => {
   const {isAuthenticated, athlete} = useStravaAuth();
 
@@ -87,7 +86,7 @@ export const useAthleteStats = () => {
   });
 };
 
-/** Fetch athlete HR zones — refreshed daily via IndexedDB cache */
+/** Fetch athlete HR zones — refreshed daily via Neon cache */
 export const useAthleteZones = () => {
   const {isAuthenticated} = useStravaAuth();
 
@@ -127,7 +126,7 @@ export const useSegmentDetail = (segmentId: number | null) => {
   });
 };
 
-/** Fetch athlete's gear (bikes + shoes + retired IDs) — refreshed hourly via IndexedDB cache */
+/** Fetch athlete's gear (bikes + shoes + retired IDs) — refreshed hourly via Neon cache */
 export const useAthleteGear = () => {
   const {isAuthenticated} = useStravaAuth();
 

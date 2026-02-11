@@ -3,25 +3,29 @@
 // ============================================================
 //
 // Provides typed read/write functions that call /api/db/[table]
-// for chat sessions, messages, and coach plans. Follows the same
-// pattern as neonSync.ts: reads are awaitable, writes are
-// fire-and-forget.
+// for chat sessions, messages, and coach plans.
+// Neon is the primary persistent store — writes are awaitable.
 
-import type {CachedChatSession, CachedChatMessage, CachedCoachPlan} from './db';
+import type {CachedChatSession, CachedChatMessage, CachedCoachPlan} from './cacheTypes';
 
 const API = '/api/db';
 
 // ---- Internal helpers ----
 
-/** Fire-and-forget POST to Neon. Never throws, never blocks. */
-const postToNeon = (table: string, data: unknown): void => {
-  fetch(`${API}/${table}`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data),
-  }).catch(() => {
-    // Silently ignore — Neon sync is best-effort
-  });
+/** Awaitable POST to Neon. Resolves silently on success, logs on failure. */
+const postToNeon = async (table: string, data: unknown): Promise<void> => {
+  try {
+    const res = await fetch(`${API}/${table}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      console.warn(`[chatSync] POST /${table} failed: ${res.status}`);
+    }
+  } catch (err) {
+    console.warn(`[chatSync] POST /${table} error:`, err);
+  }
 };
 
 /** Awaitable GET from Neon. Returns parsed JSON or null on any error. */
@@ -47,10 +51,18 @@ export const neonGetChatSessions = async (
     `${API}/chat-sessions?athleteId=${athleteId}&persona=${persona}`,
   );
 
-export const neonSyncChatSessions = (
+/** Get a single chat session by ID. */
+export const neonGetChatSession = async (
+  sessionId: string,
+): Promise<CachedChatSession | null> =>
+  getFromNeon<CachedChatSession>(
+    `${API}/chat-sessions?id=${sessionId}`,
+  );
+
+export const neonSyncChatSessions = async (
   records: CachedChatSession | CachedChatSession[],
-): void => {
-  postToNeon('chat-sessions', records);
+): Promise<void> => {
+  await postToNeon('chat-sessions', records);
 };
 
 // ---- Chat Messages ----
@@ -62,19 +74,21 @@ export const neonGetChatMessages = async (
     `${API}/chat-messages?sessionId=${sessionId}`,
   );
 
-export const neonSyncChatMessages = (
+export const neonSyncChatMessages = async (
   records: CachedChatMessage | CachedChatMessage[],
-): void => {
-  postToNeon('chat-messages', records);
+): Promise<void> => {
+  await postToNeon('chat-messages', records);
 };
 
-/** Fire-and-forget delete of a chat session and all its data (messages, plans, memory). */
-export const neonDeleteChatSession = (sessionId: string): void => {
-  fetch(`${API}/chat-sessions?id=${sessionId}`, {
-    method: 'DELETE',
-  }).catch(() => {
-    // Silently ignore — Neon sync is best-effort
-  });
+/** Awaitable delete of a chat session and all its data (messages, plans, memory). */
+export const neonDeleteChatSession = async (sessionId: string): Promise<void> => {
+  try {
+    await fetch(`${API}/chat-sessions?id=${sessionId}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.warn('[chatSync] DELETE chat-session error:', err);
+  }
 };
 
 // ---- Coach Plans ----
@@ -95,30 +109,32 @@ export const neonGetActiveCoachPlan = async (
     `${API}/coach-plans?athleteId=${athleteId}&active=true`,
   );
 
-/** Fire-and-forget upsert of a coach plan. */
-export const neonSyncCoachPlan = (record: CachedCoachPlan): void => {
-  postToNeon('coach-plans', record);
+/** Awaitable upsert of a coach plan. */
+export const neonSyncCoachPlan = async (record: CachedCoachPlan): Promise<void> => {
+  await postToNeon('coach-plans', record);
 };
 
-/** Awaitable delete of a coach plan by ID. Resolves even on failure. */
+/** Awaitable delete of a coach plan by ID. */
 export const neonDeleteCoachPlan = async (planId: string): Promise<void> => {
   try {
     await fetch(`${API}/coach-plans?id=${planId}`, {
       method: 'DELETE',
     });
-  } catch {
-    // Silently ignore — Neon sync is best-effort
+  } catch (err) {
+    console.warn('[chatSync] DELETE coach-plan error:', err);
   }
 };
 
-/** Fire-and-forget activate a plan (deactivates all others for the athlete). */
-export const neonActivateCoachPlan = (
+/** Awaitable activate a plan (deactivates all others for the athlete). */
+export const neonActivateCoachPlan = async (
   planId: string,
   athleteId: number,
-): void => {
-  fetch(`${API}/coach-plans?id=${planId}&athleteId=${athleteId}`, {
-    method: 'PATCH',
-  }).catch(() => {
-    // Silently ignore — Neon sync is best-effort
-  });
+): Promise<void> => {
+  try {
+    await fetch(`${API}/coach-plans?id=${planId}&athleteId=${athleteId}`, {
+      method: 'PATCH',
+    });
+  } catch (err) {
+    console.warn('[chatSync] PATCH coach-plan activate error:', err);
+  }
 };

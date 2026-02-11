@@ -2,12 +2,11 @@
 // Mention Data Resolver — Resolves @-mention pills into data
 // ============================================================
 //
-// Fetches data from Dexie (client-side cache) for each MentionReference,
+// Fetches data from Neon (via API routes) for each MentionReference,
 // serializes it into compact text, and returns ResolvedMention[] ready
 // to send to the server as explicitContext.
 
 import {useCallback} from 'react';
-import {db} from '@/lib/db';
 import {useSettings} from '@/contexts/SettingsContext';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {formatPace, formatDuration, ZONE_NAMES} from '@/lib/mockData';
@@ -16,31 +15,18 @@ import type {StravaSummaryGear} from '@/lib/strava';
 import type {MentionReference, ResolvedMention} from '@/lib/mentionTypes';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
 import {classifyWorkout, formatLabelForAI} from '@/lib/workoutLabel';
-import {neonSyncActivityLabel} from '@/lib/neonSync';
+import {
+  neonGetActivities,
+  neonGetActivityDetail,
+  neonGetAthleteGear,
+  neonGetAllZoneBreakdowns,
+  neonGetActivityLabel,
+  neonSyncActivityLabel,
+} from '@/lib/neonSync';
+import {neonGetCoachPlans} from '@/lib/chatSync';
+import {transformActivity} from '@/lib/strava';
 
 // ----- Helpers -----
-
-/** Convert a Dexie CachedActivity into an ActivitySummary. */
-const toActivitySummary = (row: {
-  data: unknown;
-  date: string;
-}): ActivitySummary => {
-  const d = row.data as unknown as Record<string, unknown>;
-  return {
-    id: String(d.id ?? ''),
-    name: String(d.name ?? ''),
-    date: row.date,
-    type: (d.type as ActivitySummary['type']) ?? 'Run',
-    distance: Number(d.distance ?? 0),
-    duration: Number(d.duration ?? 0),
-    avgPace: Number(d.avgPace ?? 0),
-    avgHr: Number(d.avgHr ?? 0),
-    maxHr: Number(d.maxHr ?? 0),
-    elevationGain: Number(d.elevationGain ?? 0),
-    calories: Number(d.calories ?? 0),
-    hasDetailedData: Boolean(d.hasDetailedData),
-  };
-};
 
 const getWeekStart = (dateStr: string): string => {
   const d = new Date(dateStr);
@@ -108,7 +94,7 @@ const resolveTraining = (activities: ActivitySummary[]): string => {
 const resolveZones = async (activities: ActivitySummary[]): Promise<string> => {
   const recent = filterByWeeks(activities, 4);
   const ids = new Set(recent.map((a) => Number(a.id)));
-  const breakdowns = await db.zoneBreakdowns.toArray();
+  const breakdowns = await neonGetAllZoneBreakdowns();
   const matching = breakdowns.filter((b) => ids.has(b.activityId));
 
   if (matching.length === 0) return 'No zone breakdown data available.';
@@ -184,26 +170,25 @@ const resolveFitness = (
 
 /**
  * Get or compute the workout label for a single activity.
- * Checks Dexie cache first; computes from activity detail data if missing.
+ * Checks Neon cache first; computes from activity detail data if missing.
  */
 const getOrComputeLabel = async (
   activityId: number,
   zones: UserSettings['zones'],
 ): Promise<string | null> => {
-  // Check Dexie cache
-  const cached = await db.activityLabels.get(activityId);
+  // Check Neon cache
+  const cached = await neonGetActivityLabel(activityId);
   if (cached) return formatLabelForAI(cached.label);
 
   // Compute from activity detail
-  const detail = await db.activityDetails.get(activityId);
+  const detail = await neonGetActivityDetail(activityId);
   if (!detail) return null;
 
   const label = classifyWorkout(detail.data, zones);
   if (!label) return null;
 
-  // Cache in Dexie and fire-and-forget to Neon
+  // Cache in Neon
   const record = {id: activityId, label, computedAt: Date.now()};
-  await db.activityLabels.put(record);
   neonSyncActivityLabel(record);
 
   return formatLabelForAI(label);
@@ -242,8 +227,7 @@ const resolveActivity = async (
 };
 
 const resolveGear = async (itemId?: string): Promise<string> => {
-  const gearRecords = await db.athleteGear.toArray();
-  const gear = gearRecords[0];
+  const gear = await neonGetAthleteGear('athlete-gear');
   if (!gear) return 'No gear data available.';
 
   const shoes = gear.shoes as StravaSummaryGear[];
@@ -268,13 +252,12 @@ const resolveGear = async (itemId?: string): Promise<string> => {
 };
 
 const resolvePlan = async (athleteId: number): Promise<string> => {
-  const plans = await db.coachPlans
-    .where('athleteId')
-    .equals(athleteId)
-    .and((p) => p.isActive)
-    .toArray();
+  const plans = await neonGetCoachPlans(athleteId);
+  if (!plans || plans.length === 0) return 'No active training plan.';
 
-  const plan = plans.sort((a, b) => b.sharedAt - a.sharedAt)[0];
+  const plan = plans
+    .filter((p) => p.isActive)
+    .sort((a, b) => b.sharedAt - a.sharedAt)[0];
   if (!plan) return 'No active training plan.';
 
   const lines = [
@@ -299,7 +282,7 @@ const resolvePlan = async (athleteId: number): Promise<string> => {
 
 /**
  * Hook that provides a function to resolve MentionReference[] into
- * ResolvedMention[] with serialized data from Dexie.
+ * ResolvedMention[] with serialized data from Neon.
  */
 export const useMentionResolver = () => {
   const {settings} = useSettings();
@@ -310,11 +293,12 @@ export const useMentionResolver = () => {
       if (mentions.length === 0) return [];
 
       // Preload activities once (many resolvers need them)
-      const cachedActivities = await db.activities
-        .orderBy('date')
-        .reverse()
-        .toArray();
-      const activities = cachedActivities.map(toActivitySummary);
+      const cachedActivities = await neonGetActivities();
+      const activities: ActivitySummary[] = cachedActivities
+        ? [...cachedActivities]
+            .sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0))
+            .map((record) => transformActivity(record.data))
+        : [];
       const athleteId = athlete?.id ?? 0;
 
       const results: ResolvedMention[] = [];
@@ -375,12 +359,14 @@ export const useMentionResolver = () => {
 export const loadActivitySubItems = async (): Promise<
   Array<{id: string; label: string}>
 > => {
-  const cached = await db.activities
-    .orderBy('date')
-    .reverse()
-    .limit(20)
-    .toArray();
-  return cached.map((row) => {
+  const cached = await neonGetActivities();
+  if (!cached) return [];
+
+  const sorted = [...cached]
+    .sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0))
+    .slice(0, 20);
+
+  return sorted.map((row) => {
     const d = row.data as unknown as Record<string, unknown>;
     return {
       id: String(row.id),
@@ -393,8 +379,7 @@ export const loadActivitySubItems = async (): Promise<
 export const loadGearSubItems = async (): Promise<
   Array<{id: string; label: string}>
 > => {
-  const gearRecords = await db.athleteGear.toArray();
-  const gear = gearRecords[0];
+  const gear = await neonGetAthleteGear('athlete-gear');
   if (!gear) return [];
 
   const shoes = gear.shoes as StravaSummaryGear[];

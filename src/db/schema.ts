@@ -1,10 +1,9 @@
 // ============================================================
-// Drizzle ORM Schema — Neon PostgreSQL (mirrors Dexie local cache)
+// Drizzle ORM Schema — Neon PostgreSQL (primary persistent store)
 // ============================================================
 //
 // Each table stores raw Strava JSON payloads in a `data` JSONB column
-// alongside metadata (fetchedAt timestamps, indexes). This mirrors the
-// existing Dexie/IndexedDB structure for a smooth migration path.
+// alongside metadata (fetchedAt timestamps, indexes).
 // Tables can be normalized later for more powerful analytical queries.
 
 import {

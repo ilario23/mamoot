@@ -1,13 +1,13 @@
 'use client';
 
-import {useState, useEffect, useCallback} from 'react';
+import {useState, useEffect} from 'react';
 import {useTheme} from 'next-themes';
 import {useSearchParams, useRouter} from 'next/navigation';
 import {useSettings} from '@/contexts/SettingsContext';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useForceRefreshActivities} from '@/hooks/useStrava';
 import {UserSettings, ZONE_COLORS, ZONE_NAMES} from '@/lib/mockData';
-import {getCacheStats, clearAllCache} from '@/lib/db';
+import {useQueryClient} from '@tanstack/react-query';
 import {toast} from '@/hooks/use-toast';
 import {Switch} from '@/components/ui/switch';
 import {
@@ -16,8 +16,6 @@ import {
   Link2,
   Link2Off,
   Loader2,
-  Database,
-  Trash2,
   RefreshCw,
 } from 'lucide-react';
 
@@ -38,55 +36,15 @@ const Settings = () => {
     JSON.parse(JSON.stringify(settings)),
   );
   const [isExchangingCode, setIsExchangingCode] = useState(false);
-  const [cacheStats, setCacheStats] = useState<{
-    activities: number;
-    activityDetails: number;
-    activityStreams: number;
-    totalRecords: number;
-  } | null>(null);
-  const [isCacheLoading, setIsCacheLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const forceRefreshActivities = useForceRefreshActivities();
-
-  const loadCacheStats = useCallback(async () => {
-    try {
-      const stats = await getCacheStats();
-      setCacheStats(stats);
-    } catch {
-      // Silently fail — cache stats are non-critical
-    }
-  }, []);
-
-  useEffect(() => {
-    loadCacheStats();
-  }, [loadCacheStats]);
-
-  const handleClearCache = async () => {
-    setIsCacheLoading(true);
-    try {
-      await clearAllCache();
-      await loadCacheStats();
-      toast({
-        title: 'Cache Cleared',
-        description:
-          'All cached Strava data has been removed. Data will be re-fetched from Strava on next visit.',
-      });
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to clear cache. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsCacheLoading(false);
-    }
-  };
+  const queryClient = useQueryClient();
 
   const handleForceRefresh = async () => {
     setIsRefreshing(true);
     try {
       await forceRefreshActivities();
-      await loadCacheStats();
+      queryClient.invalidateQueries({queryKey: ['strava']});
       toast({
         title: 'Activities Refreshed',
         description: 'All activities have been re-fetched from Strava.',
@@ -315,55 +273,23 @@ const Settings = () => {
         )}
       </div>
 
-      {/* Data Cache */}
+      {/* Data Sync */}
       {isAuthenticated && (
         <div className='border-3 border-border p-5 bg-background shadow-neo'>
           <h3 className='font-black text-lg uppercase tracking-wider mb-4'>
-            Data Cache
+            Data Sync
           </h3>
           <div className='space-y-4'>
-            {/* Stats row */}
             <div className='flex items-start gap-3'>
-              <Database className='h-5 w-5 mt-0.5 shrink-0' />
+              <RefreshCw className='h-5 w-5 mt-0.5 shrink-0' />
               <div className='flex-1'>
-                <p className='font-black text-sm'>Local Cache (IndexedDB)</p>
+                <p className='font-black text-sm'>Strava Data</p>
                 <p className='text-xs font-bold text-muted-foreground mt-1'>
-                  Strava data is cached locally to minimize API calls.
-                  Historical activity details and streams are cached
-                  permanently. Activity lists refresh hourly.
+                  Data is stored in the cloud database and synced from Strava.
+                  Activity lists refresh hourly. Historical data is cached permanently.
                 </p>
-                {cacheStats && (
-                  <div className='grid grid-cols-3 gap-3 mt-3'>
-                    <div className='border-3 border-border p-3 text-center bg-muted/30'>
-                      <p className='font-black text-xl'>
-                        {cacheStats.activities}
-                      </p>
-                      <p className='text-xs font-bold text-muted-foreground'>
-                        Activities
-                      </p>
-                    </div>
-                    <div className='border-3 border-border p-3 text-center bg-muted/30'>
-                      <p className='font-black text-xl'>
-                        {cacheStats.activityDetails}
-                      </p>
-                      <p className='text-xs font-bold text-muted-foreground'>
-                        Details
-                      </p>
-                    </div>
-                    <div className='border-3 border-border p-3 text-center bg-muted/30'>
-                      <p className='font-black text-xl'>
-                        {cacheStats.activityStreams}
-                      </p>
-                      <p className='text-xs font-bold text-muted-foreground'>
-                        Streams
-                      </p>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
-
-            {/* Action buttons */}
             <div className='flex flex-wrap gap-3'>
               <button
                 onClick={handleForceRefresh}
@@ -377,20 +303,6 @@ const Settings = () => {
                     className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`}
                   />
                   {isRefreshing ? 'Refreshing...' : 'Sync Now'}
-                </span>
-              </button>
-              <button
-                onClick={handleClearCache}
-                disabled={isCacheLoading}
-                className='px-4 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-neo-sm disabled:hover:translate-x-0 disabled:hover:translate-y-0'
-                aria-label='Clear all cached data'
-                tabIndex={0}
-              >
-                <span className='flex items-center gap-2'>
-                  <Trash2
-                    className={`h-4 w-4 ${isCacheLoading ? 'animate-spin' : ''}`}
-                  />
-                  {isCacheLoading ? 'Clearing...' : 'Clear Cache'}
                 </span>
               </button>
             </div>

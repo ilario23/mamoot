@@ -1,11 +1,11 @@
 'use client';
 
-import {useState, useCallback, useMemo, useEffect, useRef} from 'react';
+import {useState, useCallback, useMemo} from 'react';
 import {Loader2, Bike, Footprints} from 'lucide-react';
 import {useQueryClient} from '@tanstack/react-query';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useAthleteGear} from '@/hooks/useStrava';
-import {toggleRetiredGear, migrateLocalStorageRetiredGear} from '@/lib/retiredGear';
+import {toggleRetiredGear} from '@/lib/retiredGear';
 import GearCard from '@/components/gear/GearCard';
 
 const Gear = () => {
@@ -19,16 +19,6 @@ const Gear = () => {
     [gearData?.retiredGearIds],
   );
 
-  // One-time migration from localStorage to Dexie (runs once per mount)
-  const migratedRef = useRef(false);
-  useEffect(() => {
-    if (migratedRef.current || !gearData) return;
-    migratedRef.current = true;
-    migrateLocalStorageRetiredGear().then(() => {
-      // Refresh gear data after migration so retiredIds are up-to-date
-      queryClient.invalidateQueries({queryKey: ['strava', 'gear']});
-    });
-  }, [gearData, queryClient]);
 
   const handleToggleRetire = useCallback(async (gearId: string) => {
     await toggleRetiredGear(gearId);

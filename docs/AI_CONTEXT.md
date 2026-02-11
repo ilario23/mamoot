@@ -2,7 +2,7 @@
 
 > **Status:** Implemented  
 > **Date:** 2026-02-11  
-> **Depends on:** [Three-Tier Cache](./THREE_TIER_CACHE.md)
+> **Depends on:** [Two-Tier Cache](./TWO_TIER_CACHE.md)
 
 ## Overview
 
@@ -16,7 +16,7 @@ Every chat message pushed ~1-2K tokens of athlete context into the system prompt
 
 Two complementary ways for context to reach the LLM:
 
-1. **Explicit (@-mentions)**: User types `@` in the chat input, selects a data category (and optionally a specific item), and a pill/tag appears. The referenced data is fetched client-side from Dexie and sent alongside the message. The AI sees it immediately — no tool call needed.
+1. **Explicit (@-mentions)**: User types `@` in the chat input, selects a data category (and optionally a specific item), and a pill/tag appears. The referenced data is fetched client-side from Neon (via API routes) and sent alongside the message. The AI sees it immediately — no tool call needed.
 
 2. **Implicit (AI tools)**: The LLM has 10 retrieval tools it can call autonomously when it decides it needs data the user didn't explicitly reference. Tools execute server-side against Neon.
 
@@ -29,7 +29,7 @@ Two complementary ways for context to reach the LLM:
 │    └── pill appears: [@gear: Nike Pegasus 41]                │
 │                                                              │
 │  On Send:                                                    │
-│    ├── Resolve pill data from Dexie (instant, client-side)   │
+│    ├── Resolve pill data from Neon (via API routes)          │
 │    └── POST /api/ai/chat with {messages, explicitContext}    │
 │                                                              │
 ├──────────────────────────────────────────────────────────────┤
@@ -50,7 +50,7 @@ Two complementary ways for context to reach the LLM:
 
 Users type `@` in the chat input to attach specific data.
 
-| Category    | Label             | Sub-items?            | Data Source (Dexie)        | Description                  |
+| Category    | Label             | Sub-items?            | Data Source (Neon)           | Description                  |
 | ----------- | ----------------- | --------------------- | -------------------------- | ---------------------------- |
 | `@goal`     | Training Goal     | No                    | localStorage (settings)    | Free-text training goal      |
 | `@injuries` | Injuries          | No                    | localStorage (settings)    | Current reported injuries    |
@@ -66,9 +66,9 @@ Users type `@` in the chat input to attach specific data.
 
 1. User types `@` → a popup opens with all 9 categories
 2. User selects a category (fuzzy search supported)
-3. For `@activity` and `@gear`, a sub-item list loads from Dexie
+3. For `@activity` and `@gear`, a sub-item list loads from Neon
 4. A pill (e.g., `[@gear: Nike Pegasus 41]`) appears above the textarea
-5. On send, pills are resolved into text data from Dexie
+5. On send, pills are resolved into text data from Neon
 6. Data is sent as `explicitContext` in the request body
 7. Server injects it into the user message as `[User attached context]`
 
@@ -156,7 +156,7 @@ src/lib/
 └── mentionTypes.ts       ← @-mention category registry
 
 src/hooks/
-└── useMentionData.ts     ← Resolves pills → text from Dexie
+└── useMentionData.ts     ← Resolves pills → text from Neon
 
 src/components/chat/
 ├── ChatInput.tsx          ← Textarea with @-detection + pills

@@ -33,7 +33,7 @@ import {DEFAULT_MODEL} from '@/lib/mockData';
 import type {PersonaId} from '@/lib/aiPrompts';
 import type {ShareTrainingPlanInput} from '@/lib/aiTools';
 import {getMentionCategory, parseMentionMeta, type MentionReference} from '@/lib/mentionTypes';
-import type {PlanSession} from '@/lib/db';
+import type {PlanSession} from '@/lib/cacheTypes';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import {
   AlertDialog,
@@ -333,7 +333,7 @@ const AITeamChat = () => {
   // Persist messages when they change (after streaming completes)
   const lastPersistedCount = useRef(0);
 
-  // Track which tool plan IDs we've already saved to Dexie.
+  // Track which tool plan IDs we've already saved to Neon.
   // Seed from existing plans so reloaded tool results aren't re-saved.
   const savedPlanIds = useRef<Set<string>>(new Set());
 
@@ -360,7 +360,7 @@ const AITeamChat = () => {
       for (const msg of newMessages) {
         await persistMessage(sessionId, msg);
 
-        // Detect tool results from shareTrainingPlan and save to Dexie
+        // Detect tool results from shareTrainingPlan and save to Neon
         if (msg.role === 'assistant' && msg.parts) {
           for (const part of msg.parts) {
             if (
@@ -463,7 +463,7 @@ const AITeamChat = () => {
       activeChat.setMessages(trimmedMessages);
     }
 
-    // Resolve @-mention data from Dexie
+    // Resolve @-mention data from Neon
     const explicitContext = mentions.length > 0 ? await resolveAll(mentions) : undefined;
 
     // Encode mentions into message text so they're visible in the conversation
@@ -536,7 +536,7 @@ const AITeamChat = () => {
 
     // If deleted plans included the active plan, useCoachPlan will
     // re-hydrate next render, but we should also trigger a local
-    // cleanup for linked plans that were already deleted from Dexie+Neon
+    // cleanup for linked plans that were already deleted from Neon
     // via the cascade in deleteSession / API route.
     for (const planId of linkedPlanIds) {
       await deletePlan(planId);

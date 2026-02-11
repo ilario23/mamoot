@@ -3,10 +3,10 @@
 // ============================================================
 //
 // Provides typed read/write functions that call /api/db/[table].
-// - Reads are awaitable and return null on error (Neon is optional).
-// - Writes are fire-and-forget so they never block the UI.
+// - Reads are awaitable and return null on error (graceful degradation).
+// - Writes are awaitable and throw on error so callers can handle failures.
 //
-// This module is only imported by stravaCache.ts (client-side).
+// Neon is the primary persistent store. Strava is the source of truth.
 
 import type {
   CachedActivity,
@@ -17,21 +17,26 @@ import type {
   CachedAthleteZones,
   CachedAthleteGear,
   CachedZoneBreakdown,
-} from './db';
+} from './cacheTypes';
 
 const API = '/api/db';
 
 // ---- Internal helpers ----
 
-/** Fire-and-forget POST to Neon. Never throws, never blocks. */
-const postToNeon = (table: string, data: unknown): void => {
-  fetch(`${API}/${table}`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data),
-  }).catch(() => {
-    // Silently ignore — Neon sync is best-effort
-  });
+/** Awaitable POST to Neon. Resolves silently on success, logs on failure. */
+const postToNeon = async (table: string, data: unknown): Promise<void> => {
+  try {
+    const res = await fetch(`${API}/${table}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      console.warn(`[neonSync] POST /${table} failed: ${res.status}`);
+    }
+  } catch (err) {
+    console.warn(`[neonSync] POST /${table} error:`, err);
+  }
 };
 
 /** Awaitable GET from Neon. Returns parsed JSON or null on any error. */
@@ -57,8 +62,8 @@ const getFromNeon = async <T>(
 export const neonGetActivities = async (): Promise<CachedActivity[] | null> =>
   getFromNeon<CachedActivity[]>('activities');
 
-export const neonSyncActivities = (records: CachedActivity[]): void => {
-  postToNeon('activities', records);
+export const neonSyncActivities = async (records: CachedActivity[]): Promise<void> => {
+  await postToNeon('activities', records);
 };
 
 // ---- Activity Details (single) ----
@@ -68,8 +73,8 @@ export const neonGetActivityDetail = async (
 ): Promise<CachedActivityDetail | null> =>
   getFromNeon<CachedActivityDetail>('activity-details', id);
 
-export const neonSyncActivityDetail = (record: CachedActivityDetail): void => {
-  postToNeon('activity-details', record);
+export const neonSyncActivityDetail = async (record: CachedActivityDetail): Promise<void> => {
+  await postToNeon('activity-details', record);
 };
 
 // ---- Activity Details (bulk) ----
@@ -97,7 +102,7 @@ export const neonGetActivityDetailsBulk = async (
       const data: CachedActivityDetail[] = await res.json();
       if (Array.isArray(data)) results.push(...data);
     } catch {
-      // Neon is best-effort — skip this chunk on failure
+      // Skip this chunk on failure
     }
   }
 
@@ -105,14 +110,14 @@ export const neonGetActivityDetailsBulk = async (
 };
 
 /**
- * Fire-and-forget bulk write of activity details to Neon.
+ * Awaitable bulk write of activity details to Neon.
  * The POST endpoint already accepts arrays.
  */
-export const neonSyncActivityDetailsBulk = (
+export const neonSyncActivityDetailsBulk = async (
   records: CachedActivityDetail[],
-): void => {
+): Promise<void> => {
   if (records.length === 0) return;
-  postToNeon('activity-details', records);
+  await postToNeon('activity-details', records);
 };
 
 // ---- Activity Labels (bulk) ----
@@ -134,24 +139,24 @@ export const neonGetActivityLabelsBulk = async (
       const data: CachedActivityLabel[] = await res.json();
       if (Array.isArray(data)) results.push(...data);
     } catch {
-      // Neon is best-effort — skip this chunk on failure
+      // Skip this chunk on failure
     }
   }
 
   return results;
 };
 
-/** Fire-and-forget bulk write of activity labels to Neon. */
-export const neonSyncActivityLabelsBulk = (
+/** Awaitable bulk write of activity labels to Neon. */
+export const neonSyncActivityLabelsBulk = async (
   records: CachedActivityLabel[],
-): void => {
+): Promise<void> => {
   if (records.length === 0) return;
-  postToNeon('activity-labels', records);
+  await postToNeon('activity-labels', records);
 };
 
-/** Fire-and-forget write of a single activity label to Neon. */
-export const neonSyncActivityLabel = (record: CachedActivityLabel): void => {
-  postToNeon('activity-labels', record);
+/** Awaitable write of a single activity label to Neon. */
+export const neonSyncActivityLabel = async (record: CachedActivityLabel): Promise<void> => {
+  await postToNeon('activity-labels', record);
 };
 
 // ---- Activity Streams (single) ----
@@ -161,10 +166,10 @@ export const neonGetActivityStreams = async (
 ): Promise<CachedActivityStreams | null> =>
   getFromNeon<CachedActivityStreams>('activity-streams', activityId);
 
-export const neonSyncActivityStreams = (
+export const neonSyncActivityStreams = async (
   record: CachedActivityStreams,
-): void => {
-  postToNeon('activity-streams', record);
+): Promise<void> => {
+  await postToNeon('activity-streams', record);
 };
 
 // ---- Athlete Stats (single) ----
@@ -174,8 +179,8 @@ export const neonGetAthleteStats = async (
 ): Promise<CachedAthleteStats | null> =>
   getFromNeon<CachedAthleteStats>('athlete-stats', athleteId);
 
-export const neonSyncAthleteStats = (record: CachedAthleteStats): void => {
-  postToNeon('athlete-stats', record);
+export const neonSyncAthleteStats = async (record: CachedAthleteStats): Promise<void> => {
+  await postToNeon('athlete-stats', record);
 };
 
 // ---- Athlete Zones (single by key) ----
@@ -185,8 +190,8 @@ export const neonGetAthleteZones = async (
 ): Promise<CachedAthleteZones | null> =>
   getFromNeon<CachedAthleteZones>('athlete-zones', key);
 
-export const neonSyncAthleteZones = (record: CachedAthleteZones): void => {
-  postToNeon('athlete-zones', record);
+export const neonSyncAthleteZones = async (record: CachedAthleteZones): Promise<void> => {
+  await postToNeon('athlete-zones', record);
 };
 
 // ---- Athlete Gear (single by key) ----
@@ -196,8 +201,8 @@ export const neonGetAthleteGear = async (
 ): Promise<CachedAthleteGear | null> =>
   getFromNeon<CachedAthleteGear>('athlete-gear', key);
 
-export const neonSyncAthleteGear = (record: CachedAthleteGear): void => {
-  postToNeon('athlete-gear', record);
+export const neonSyncAthleteGear = async (record: CachedAthleteGear): Promise<void> => {
+  await postToNeon('athlete-gear', record);
 };
 
 // ---- Zone Breakdowns (single) ----
@@ -207,6 +212,28 @@ export const neonGetZoneBreakdown = async (
 ): Promise<CachedZoneBreakdown | null> =>
   getFromNeon<CachedZoneBreakdown>('zone-breakdowns', activityId);
 
-export const neonSyncZoneBreakdown = (record: CachedZoneBreakdown): void => {
-  postToNeon('zone-breakdowns', record);
+export const neonSyncZoneBreakdown = async (record: CachedZoneBreakdown): Promise<void> => {
+  await postToNeon('zone-breakdowns', record);
 };
+
+// ---- Zone Breakdowns (bulk) ----
+
+/** Fetch all zone breakdowns from Neon. */
+export const neonGetAllZoneBreakdowns = async (): Promise<CachedZoneBreakdown[]> => {
+  try {
+    const res = await fetch(`${API}/zone-breakdowns`);
+    if (!res.ok) return [];
+    const data: CachedZoneBreakdown[] = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+};
+
+// ---- Activity Labels (single) ----
+
+/** Fetch a single activity label from Neon. */
+export const neonGetActivityLabel = async (
+  id: number,
+): Promise<CachedActivityLabel | null> =>
+  getFromNeon<CachedActivityLabel>('activity-labels', id);

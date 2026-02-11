@@ -1,47 +1,42 @@
-# Three-Tier Cache Architecture
+# Two-Tier Cache Architecture
 
 > **Status:** Implemented  
-> **Date:** 2026-02-09  
+> **Date:** 2026-02-11  
 > **Depends on:** [Remote Database Evaluation](./REMOTE_DATABASE.md)
 
 ## Overview
 
-The app uses a three-tier cache-through pattern to balance **speed**, **persistence**, and **data freshness**. Every data request cascades through three layers before hitting the external API.
+The app uses a two-tier cache-through pattern to balance **persistence**, **multi-device access**, and **data freshness**. Every data request cascades through two layers before hitting the external API. React Query provides in-memory caching for instant reads within a browser session.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Client (Browser)                                               │
 │                                                                 │
-│  ┌──────────────┐    miss/stale    ┌──────────────────────┐     │
-│  │  Tier 1      │ ───────────────► │  Tier 2              │     │
-│  │  Dexie       │ ◄─────────────── │  Neon (via API route)│     │
-│  │  (IndexedDB) │    hydrate       │  (PostgreSQL)        │     │
-│  └──────────────┘                  └──────────┬───────────┘     │
-│         │                                     │                 │
-│         │ miss/stale                          │ miss/stale      │
-│         ▼                                     ▼                 │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Tier 3 — Strava API (source of truth)                  │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                          │                                      │
-│                          │ write to both                        │
-│                          ▼                                      │
-│              ┌───────────────────────┐                          │
-│              │ Dexie.put() (sync)    │                          │
-│              │ Neon POST (async f&f) │                          │
-│              └───────────────────────┘                          │
+│  ┌──────────────┐                                               │
+│  │  React Query  │  (in-memory, per-session)                    │
+│  │  staleTime    │                                              │
+│  └──────┬───────┘                                               │
+│         │ miss/stale                                            │
+│         ▼                                                       │
+│  ┌──────────────────────┐    miss/stale    ┌─────────────────┐  │
+│  │  Tier 1              │ ───────────────► │  Tier 2          │  │
+│  │  Neon (via API route)│                  │  Strava API      │  │
+│  │  (PostgreSQL)        │ ◄─────────────── │  (source of      │  │
+│  └──────────────────────┘    write back     │   truth)         │  │
+│                                            └─────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Why three tiers?
+### Why two tiers?
 
-| Tier  | Technology        | Purpose                          | Latency      | Survives                   |
-| ----- | ----------------- | -------------------------------- | ------------ | -------------------------- |
-| **1** | Dexie (IndexedDB) | Instant reads, offline support   | ~1 ms        | Page reload (same browser) |
-| **2** | Neon (PostgreSQL) | Persistent storage, multi-device | ~50–200 ms   | Forever (server-side)      |
-| **3** | Strava API        | Source of truth                  | ~300–1000 ms | N/A (external)             |
+| Tier  | Technology        | Purpose                              | Latency      | Survives                   |
+| ----- | ----------------- | ------------------------------------ | ------------ | -------------------------- |
+| **1** | Neon (PostgreSQL) | Persistent storage, multi-device     | ~50–200 ms   | Forever (server-side)      |
+| **2** | Strava API        | Source of truth                      | ~300–1000 ms | N/A (external)             |
 
-**Key benefit:** If you clear browser data or switch devices, Tier 2 (Neon) still has all your data — no need to re-fetch everything from Strava (which is rate-limited to 100 req/15 min).
+**In-memory layer:** React Query caches data in the browser for the duration of a session (~0ms reads after first fetch). It handles deduplication, stale-while-revalidate, and background refetching.
+
+**Key benefit:** Data persists in Neon across devices and browser sessions. No need to re-fetch everything from Strava (which is rate-limited to 100 req/15 min) when switching browsers or clearing local storage.
 
 ---
 
@@ -52,35 +47,22 @@ The app uses a three-tier cache-through pattern to balance **speed**, **persiste
 Every `cachedGet*` function in `stravaCache.ts` follows this pattern:
 
 ```
-1. Check Dexie (IndexedDB)
-   ├── Fresh? → return data + backfill Neon (fire-and-forget)
+1. Check Neon (via GET /api/db/[table])
+   ├── Fresh? → return data
    └── Miss or stale? → continue
 
-2. Check Neon (via GET /api/db/[table])
-   ├── Fresh? → hydrate Dexie, return
-   └── Miss or stale? → continue
-
-3. Fetch from Strava API
-   → Write to Dexie (synchronous)
-   → Write to Neon (fire-and-forget POST)
+2. Fetch from Strava API
+   → Write to Neon (awaitable)
    → Return data
 ```
 
+React Query wraps these functions and adds an in-memory cache layer:
+- If data is in React Query's cache and within `staleTime`, the `cachedGet*` function is never called.
+- If data is stale or missing, React Query calls the function which triggers the Neon → Strava cascade.
+
 ### Write Flow
 
-Writes happen in two directions simultaneously:
-
-- **Dexie:** Synchronous `db.put()` / `db.bulkPut()` — blocks until complete so subsequent reads hit cache
-- **Neon:** Asynchronous `fetch()` POST — fire-and-forget, never blocks the UI. If Neon is unreachable, the write silently fails and the app continues working with Dexie only.
-
-### Neon Backfill
-
-When Neon is added to an existing install that already has data in Dexie, the Neon tables start empty. To populate them without requiring a manual re-fetch from Strava:
-
-- **On every Dexie cache hit**, the record is also fire-and-forget synced to Neon.
-- **For activities (bulk)**, a `sessionStorage` flag ensures the full list is only synced once per browser session to avoid redundant uploads.
-- **For single-record tables** (details, streams, zones, gear, breakdowns), each record is synced individually as it's accessed — the overhead is negligible.
-- All writes use PostgreSQL `ON CONFLICT DO UPDATE` (upsert), so repeated syncs are idempotent.
+Writes go to Neon via awaitable POST requests through `/api/db/[table]`. All writes use PostgreSQL `ON CONFLICT DO UPDATE` (upsert), so repeated writes are idempotent.
 
 ---
 
@@ -105,12 +87,13 @@ Defined in `src/lib/stravaCache.ts`:
 ```
 src/
 ├── db/
-│   ├── schema.ts          ← Drizzle ORM schema (7 PostgreSQL tables)
+│   ├── schema.ts          ← Drizzle ORM schema (PostgreSQL tables)
 │   └── index.ts           ← Neon serverless connection (HTTP driver)
 ├── lib/
-│   ├── db.ts              ← Dexie (IndexedDB) schema + helpers
-│   ├── stravaCache.ts     ← Three-tier cache logic (the orchestrator)
+│   ├── cacheTypes.ts      ← Shared type definitions for cached records
+│   ├── stravaCache.ts     ← Two-tier cache logic (the orchestrator)
 │   ├── neonSync.ts        ← Client-side fetch helpers for /api/db/*
+│   ├── chatSync.ts        ← Client-side fetch helpers for chat/plan tables
 │   └── strava.ts          ← Strava API client + token management
 └── hooks/
     └── useStrava.ts       ← React Query hooks (call stravaCache functions)
@@ -128,13 +111,14 @@ drizzle.config.ts          ← Drizzle Kit config (migrations, push)
 
 ## Database Tables (Neon)
 
-All tables mirror the Dexie/IndexedDB schema where applicable. Data is stored as JSONB blobs with metadata columns.
+Data is stored as JSONB blobs with metadata columns.
 
 | Table              | Primary Key            | Data Column(s)                           | Metadata                                                                                        |
 | ------------------ | ---------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `activities`       | `id` (bigint)          | `data` (jsonb)                           | `date`, `fetched_at`                                                                            |
 | `activity_details` | `id` (bigint)          | `data` (jsonb)                           | `fetched_at`                                                                                    |
 | `activity_streams` | `activity_id` (bigint) | `data` (jsonb)                           | `fetched_at`                                                                                    |
+| `activity_labels`  | `id` (bigint)          | `data` (jsonb)                           | `computed_at`                                                                                   |
 | `athlete_stats`    | `athlete_id` (bigint)  | `data` (jsonb)                           | `fetched_at`                                                                                    |
 | `athlete_zones`    | `key` (text)           | `data` (jsonb)                           | `fetched_at`                                                                                    |
 | `athlete_gear`     | `key` (text)           | `bikes`, `shoes` (jsonb)                 | `fetched_at`                                                                                    |
@@ -178,42 +162,40 @@ Uses PostgreSQL `ON CONFLICT DO UPDATE` so existing records are overwritten with
 
 ---
 
-## Client Sync Module (`neonSync.ts`)
+## Client Sync Modules
 
-Typed helper functions that `stravaCache.ts` imports:
+### `neonSync.ts` — Strava data tables
 
-| Function                          | Direction      | Blocking?            |
-| --------------------------------- | -------------- | -------------------- |
-| `neonGetActivities()`             | Read (all)     | Yes (awaitable)      |
-| `neonGetActivityDetail(id)`       | Read (by PK)   | Yes (awaitable)      |
-| `neonGetActivityStreams(id)`      | Read (by PK)   | Yes (awaitable)      |
-| `neonGetAthleteStats(id)`         | Read (by PK)   | Yes (awaitable)      |
-| `neonGetAthleteZones(key)`        | Read (by PK)   | Yes (awaitable)      |
-| `neonGetAthleteGear(key)`         | Read (by PK)   | Yes (awaitable)      |
-| `neonGetZoneBreakdown(id)`        | Read (by PK)   | Yes (awaitable)      |
-| `neonSyncActivities(records)`     | Write (bulk)   | No (fire-and-forget) |
-| `neonSyncActivityDetail(record)`  | Write (single) | No (fire-and-forget) |
-| `neonSyncActivityStreams(record)` | Write (single) | No (fire-and-forget) |
-| `neonSyncAthleteStats(record)`    | Write (single) | No (fire-and-forget) |
-| `neonSyncAthleteZones(record)`    | Write (single) | No (fire-and-forget) |
-| `neonSyncAthleteGear(record)`     | Write (single) | No (fire-and-forget) |
-| `neonSyncZoneBreakdown(record)`   | Write (single) | No (fire-and-forget) |
+| Function                          | Direction      | Blocking?       |
+| --------------------------------- | -------------- | --------------- |
+| `neonGetActivities()`             | Read (all)     | Yes (awaitable) |
+| `neonGetActivityDetail(id)`       | Read (by PK)   | Yes (awaitable) |
+| `neonGetActivityStreams(id)`      | Read (by PK)   | Yes (awaitable) |
+| `neonGetAthleteStats(id)`         | Read (by PK)   | Yes (awaitable) |
+| `neonGetAthleteZones(key)`        | Read (by PK)   | Yes (awaitable) |
+| `neonGetAthleteGear(key)`         | Read (by PK)   | Yes (awaitable) |
+| `neonGetZoneBreakdown(id)`        | Read (by PK)   | Yes (awaitable) |
+| `neonSyncActivities(records)`     | Write (bulk)   | Yes (awaitable) |
+| `neonSyncActivityDetail(record)`  | Write (single) | Yes (awaitable) |
+| `neonSyncActivityStreams(record)` | Write (single) | Yes (awaitable) |
+| `neonSyncAthleteStats(record)`    | Write (single) | Yes (awaitable) |
+| `neonSyncAthleteZones(record)`    | Write (single) | Yes (awaitable) |
+| `neonSyncAthleteGear(record)`     | Write (single) | Yes (awaitable) |
+| `neonSyncZoneBreakdown(record)`   | Write (single) | Yes (awaitable) |
 
-All read functions return `null` on any error — Neon is **optional**, the app degrades gracefully to Dexie + Strava.
+### `chatSync.ts` — Chat, messages, and coach plan tables
+
+All functions are awaitable (both reads and writes).
 
 ---
 
 ## Graceful Degradation
 
-The system is designed to work even when tiers are unavailable:
-
-| Scenario             | Behavior                                                      |
-| -------------------- | ------------------------------------------------------------- |
-| Neon is down         | App works normally with Dexie + Strava (original behavior)    |
-| Browser data cleared | Neon provides all data without re-fetching from Strava        |
-| New device / browser | Neon hydrates Dexie on first load                             |
-| Offline              | Dexie serves cached data; Neon and Strava calls fail silently |
-| Strava rate-limited  | Dexie and Neon serve cached data until limits reset           |
+| Scenario             | Behavior                                                       |
+| -------------------- | -------------------------------------------------------------- |
+| Neon is down         | Strava API is called directly; writes fail silently with a log |
+| New device / browser | Neon provides all data without re-fetching from Strava         |
+| Strava rate-limited  | Neon serves cached data until limits reset                     |
 
 ---
 
@@ -247,19 +229,18 @@ User settings (HR zones, training goal, injuries, allergies, food preferences, A
 
 ```
 localStorage (runteam-settings)
-  ─── fire-and-forget POST /api/db/user-settings ───►  Neon (user_settings table)
+  ─── awaitable POST /api/db/user-settings ───►  Neon (user_settings table)
 ```
 
-- **On save**: After every `updateSettings()` call, a fire-and-forget POST upserts the settings to Neon.
+- **On save**: After every `updateSettings()` call, a POST upserts the settings to Neon.
 - **On startup (backfill)**: When the athlete first authenticates, the `SettingsSyncBridge` component pushes current settings to Neon if they haven't been synced yet.
-- **Staleness**: Settings change infrequently; the ~100-500ms write delay is acceptable.
 
 ### Who reads from where
 
 | Consumer           | Reads From                           | Why                           |
 | ------------------ | ------------------------------------ | ----------------------------- |
 | UI components      | `localStorage` (via `useSettings()`) | Instant, no network           |
-| @-mention resolver | Dexie / `localStorage`               | Client-side, fast             |
+| @-mention resolver | Neon (via API routes)                | Client-side, persistent       |
 | AI retrieval tools | Neon (`user_settings`)               | Server-side, no client access |
 
 See [AI Context documentation](./AI_CONTEXT.md) for details on the dual context strategy.
@@ -269,8 +250,7 @@ See [AI Context documentation](./AI_CONTEXT.md) for details on the dual context 
 ## Future Improvements
 
 - [ ] **Schema normalization** — Extract key fields from JSONB into proper columns for faster SQL queries (pace trends, weekly mileage, PR tracking)
-- [x] **Dexie → Neon backfill** — When Dexie has data but Neon is empty, records are fire-and-forget synced on cache hit (implemented via backfill on Tier 1 hits)
-- [x] **User settings sync** — localStorage settings synced to Neon for server-side AI tool access
 - [ ] **API route authentication** — Add a session check or API key to the `/api/db/*` routes for production deployments
 - [ ] **Selective fetching** — For activities, fetch only records newer than what Neon already has instead of transferring the full list
 - [ ] **Connection pooling** — Switch from Neon HTTP driver to WebSocket driver if query volume increases
+- [ ] **Offline support** — Add a service worker or lightweight IndexedDB layer if offline access is needed

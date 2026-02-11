@@ -1,8 +1,7 @@
 'use client';
 
 import {useState, useEffect, useCallback, useRef} from 'react';
-import {db} from '@/lib/db';
-import type {CachedActivityDetail} from '@/lib/db';
+import type {CachedActivityDetail} from '@/lib/cacheTypes';
 import {fetchActivityDetail} from '@/lib/strava';
 import {neonGetActivityDetailsBulk, neonSyncActivityDetailsBulk} from '@/lib/neonSync';
 import type {StravaDetailedActivity, StravaBestEffort, StravaSegmentEffort} from '@/lib/strava';
@@ -206,17 +205,18 @@ export const useSyncActivityDetails = (
 
     setState((prev) => ({...prev, total, isSyncing: true}));
 
-    // 1. Check which activities are already cached in IndexedDB
+    // 1. Check Neon (persistent, multi-device) for cached activity details
     const cachedIds = new Set<number>();
     const allEfforts: BestEffortWithMeta[] = [];
     const allSegmentEfforts: SegmentEffortWithMeta[] = [];
 
-    const cachedDetails = await db.activityDetails.bulkGet(activityIds);
-    for (const cached of cachedDetails) {
-      if (cached) {
-        cachedIds.add(cached.id);
-        allEfforts.push(...extractBestEfforts(cached.data));
-        allSegmentEfforts.push(...extractSegmentEfforts(cached.data));
+    if (activityIds.length > 0 && !abortRef.current) {
+      const neonDetails = await neonGetActivityDetailsBulk(activityIds);
+
+      for (const detail of neonDetails) {
+        cachedIds.add(detail.id);
+        allEfforts.push(...extractBestEfforts(detail.data));
+        allSegmentEfforts.push(...extractSegmentEfforts(detail.data));
       }
     }
 
@@ -230,47 +230,14 @@ export const useSyncActivityDetails = (
       segmentEfforts: [...allSegmentEfforts],
     }));
 
-    // If everything is cached in Dexie, we're done
+    // If everything is cached in Neon, we're done
     if (uncachedIds.length === 0) {
       setState((prev) => ({...prev, isSyncing: false}));
       isSyncRunningRef.current = false;
       return;
     }
 
-    // 2. Check Neon (persistent, multi-device) for activities missing from Dexie
-    if (uncachedIds.length > 0 && !abortRef.current) {
-      const neonDetails = await neonGetActivityDetailsBulk(uncachedIds);
-
-      if (neonDetails.length > 0) {
-        for (const detail of neonDetails) {
-          cachedIds.add(detail.id);
-          allEfforts.push(...extractBestEfforts(detail.data));
-          allSegmentEfforts.push(...extractSegmentEfforts(detail.data));
-        }
-
-        // Hydrate Dexie from Neon so future loads are instant
-        await db.activityDetails.bulkPut(neonDetails);
-
-        // Narrow uncachedIds to only what Neon didn't have
-        uncachedIds = activityIds.filter((id) => !cachedIds.has(id));
-
-        setState((prev) => ({
-          ...prev,
-          synced: cachedIds.size,
-          bestEfforts: [...allEfforts],
-          segmentEfforts: [...allSegmentEfforts],
-        }));
-      }
-    }
-
-    // If everything is now cached (Dexie + Neon), we're done
-    if (uncachedIds.length === 0) {
-      setState((prev) => ({...prev, isSyncing: false}));
-      isSyncRunningRef.current = false;
-      return;
-    }
-
-    // 3. Fetch remaining uncached activities from Strava API with rate limiting
+    // 2. Fetch remaining uncached activities from Strava API with rate limiting
     let cursor = 0;
     const newlyFetchedRecords: CachedActivityDetail[] = [];
 
@@ -310,8 +277,6 @@ export const useSyncActivityDetails = (
           const detail = await fetchActivityDetail(id);
           const now = Date.now();
           const record: CachedActivityDetail = {id, data: detail, fetchedAt: now};
-          // Cache to IndexedDB immediately on success
-          await db.activityDetails.put(record);
           // Collect for Neon write-back
           newlyFetchedRecords.push(record);
           return detail;
@@ -392,8 +357,8 @@ export const useSyncActivityDetails = (
       }
     }
 
-    // Persist freshly-fetched details to Neon (fire-and-forget)
-    neonSyncActivityDetailsBulk(newlyFetchedRecords);
+    // Persist freshly-fetched details to Neon
+    await neonSyncActivityDetailsBulk(newlyFetchedRecords);
 
     setState((prev) => ({
       ...prev,

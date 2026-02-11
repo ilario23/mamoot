@@ -14,7 +14,7 @@ import {
   DEFAULT_MODEL,
   type Injury,
 } from '@/lib/mockData';
-import {getCacheStats, clearAllCache} from '@/lib/db';
+import {useQueryClient} from '@tanstack/react-query';
 import {toast} from '@/hooks/use-toast';
 import {Switch} from '@/components/ui/switch';
 import {
@@ -23,8 +23,6 @@ import {
   Link2,
   Link2Off,
   Loader2,
-  Database,
-  Trash2,
   RefreshCw,
   X,
   Plus,
@@ -58,16 +56,10 @@ const Settings = () => {
     JSON.parse(JSON.stringify(settings)),
   );
   const [isExchangingCode, setIsExchangingCode] = useState(false);
-  const [cacheStats, setCacheStats] = useState<{
-    activities: number;
-    activityDetails: number;
-    activityStreams: number;
-    totalRecords: number;
-  } | null>(null);
-  const [isCacheLoading, setIsCacheLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [allergyInput, setAllergyInput] = useState('');
   const forceRefreshActivities = useForceRefreshActivities();
+  const queryClient = useQueryClient();
 
   const handleAddAllergy = (allergy: string) => {
     const trimmed = allergy.trim();
@@ -124,45 +116,12 @@ const Settings = () => {
     }));
   };
 
-  const loadCacheStats = useCallback(async () => {
-    try {
-      const stats = await getCacheStats();
-      setCacheStats(stats);
-    } catch {
-      // Silently fail — cache stats are non-critical
-    }
-  }, []);
-
-  useEffect(() => {
-    loadCacheStats();
-  }, [loadCacheStats]);
-
-  const handleClearCache = async () => {
-    setIsCacheLoading(true);
-    try {
-      await clearAllCache();
-      await loadCacheStats();
-      toast({
-        title: 'Cache Cleared',
-        description:
-          'All cached Strava data has been removed. Data will be re-fetched from Strava on next visit.',
-      });
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to clear cache. Please try again.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsCacheLoading(false);
-    }
-  };
-
   const handleForceRefresh = async () => {
     setIsRefreshing(true);
     try {
       await forceRefreshActivities();
-      await loadCacheStats();
+      // Clear React Query in-memory cache so data is re-fetched from Neon
+      queryClient.invalidateQueries({queryKey: ['strava']});
       toast({
         title: 'Activities Refreshed',
         description: 'All activities have been re-fetched from Strava.',

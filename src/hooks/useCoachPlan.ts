@@ -1,17 +1,16 @@
 // ============================================================
-// useCoachPlan — Manages coach plan history (localStorage + Dexie + Neon)
+// useCoachPlan — Manages coach plan history (localStorage + Neon)
 // ============================================================
 //
 // Stores structured training plans so the Nutritionist and Physio
 // agents can reference the active plan in their system prompts.
 //
-// Persistence layers (three-tier, same pattern as chat data):
+// Persistence layers:
 //   1. localStorage — fast cross-tab sync for the active plan
-//   2. Dexie / IndexedDB — durable local cache (all plans)
-//   3. Neon PostgreSQL — cloud backup (fire-and-forget writes)
+//   2. Neon PostgreSQL — primary persistent store
 
 import {useState, useEffect, useCallback, useRef} from 'react';
-import {db, type CachedCoachPlan} from '@/lib/db';
+import type {CachedCoachPlan} from '@/lib/cacheTypes';
 import {
   neonGetCoachPlans,
   neonSyncCoachPlan,
@@ -82,7 +81,7 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
 
   const activePlan = plans.find((p) => p.isActive) ?? null;
 
-  // Hydrate from Dexie → Neon when athlete is known
+  // Hydrate from Neon when athlete is known
   useEffect(() => {
     if (!athleteId || hydratedRef.current) return;
     hydratedRef.current = true;
@@ -90,36 +89,12 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
     const hydrate = async () => {
       setIsLoading(true);
 
-      // 1. Try Dexie first
-      try {
-        const local = await db.coachPlans
-          .where('athleteId')
-          .equals(athleteId)
-          .reverse()
-          .sortBy('sharedAt');
-        if (local.length > 0) {
-          setPlans(local);
-          const active = local.find((p) => p.isActive);
-          if (active) writeActiveRef(active);
-          setIsLoading(false);
-          return;
-        }
-      } catch {
-        // Dexie unavailable — fall through
-      }
-
-      // 2. Fall back to Neon
       const remote = await neonGetCoachPlans(athleteId);
       if (remote && remote.length > 0) {
-        setPlans(remote);
-        const active = remote.find((p) => p.isActive);
+        const sorted = [...remote].sort((a, b) => b.sharedAt - a.sharedAt);
+        setPlans(sorted);
+        const active = sorted.find((p) => p.isActive);
         if (active) writeActiveRef(active);
-        // Back-fill Dexie
-        try {
-          await db.coachPlans.bulkPut(remote);
-        } catch {
-          // Silently ignore
-        }
       }
 
       setIsLoading(false);
@@ -132,15 +107,13 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return;
-      // Another tab changed the active plan — reload from Dexie
+      // Another tab changed the active plan — reload from Neon
       if (athleteId) {
-        db.coachPlans
-          .where('athleteId')
-          .equals(athleteId)
-          .reverse()
-          .sortBy('sharedAt')
-          .then((local) => setPlans(local))
-          .catch(() => {});
+        neonGetCoachPlans(athleteId).then((remote) => {
+          if (remote && remote.length > 0) {
+            setPlans([...remote].sort((a, b) => b.sharedAt - a.sharedAt));
+          }
+        }).catch(() => {});
       }
     };
 
@@ -161,17 +134,7 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
 
       if (!athleteId) return;
 
-      // Dexie — insert new plan (no need to deactivate others since new plan is inactive)
-      (async () => {
-        try {
-          await db.coachPlans.put(newPlan);
-        } catch {
-          // Silently ignore
-        }
-      })();
-
-      // Neon (fire-and-forget) — server already saved via tool execute,
-      // but sync anyway for resilience
+      // Neon — sync the new plan
       neonSyncCoachPlan(newPlan);
     },
     [athleteId],
@@ -189,24 +152,7 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
 
       if (!athleteId) return;
 
-      // Dexie — flip flags
-      (async () => {
-        try {
-          const all = await db.coachPlans
-            .where('athleteId')
-            .equals(athleteId)
-            .toArray();
-          const updates = all.map((p) => ({
-            ...p,
-            isActive: p.id === planId,
-          }));
-          await db.coachPlans.bulkPut(updates);
-        } catch {
-          // Silently ignore
-        }
-      })();
-
-      // Neon
+      // Neon — activate plan (deactivates all others)
       neonActivateCoachPlan(planId, athleteId);
     },
     [athleteId, plans],
@@ -234,26 +180,16 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
         }
       }
 
-      // Dexie — await to ensure deletion completes before any potential refresh
-      try {
-        await db.coachPlans.delete(planId);
-      } catch {
-        // Dexie unavailable — continue with Neon delete
-      }
+      // Delete from Neon
+      await neonDeleteCoachPlan(planId);
 
-      // If the deleted plan was active, activate next in Dexie + Neon
+      // If the deleted plan was active, activate next in Neon
       if (wasActive && athleteId) {
         const nextActive = plans.filter((p) => p.id !== planId)[0];
         if (nextActive) {
-          db.coachPlans
-            .update(nextActive.id, {isActive: true})
-            .catch(() => {});
           neonActivateCoachPlan(nextActive.id, athleteId);
         }
       }
-
-      // Neon — await to ensure deletion completes on the server
-      await neonDeleteCoachPlan(planId);
     },
     [athleteId, plans],
   );

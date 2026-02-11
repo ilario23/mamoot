@@ -1,8 +1,8 @@
 # Remote Database — Provider Evaluation
 
-> **Status:** Research / Future Implementation  
+> **Status:** Completed — Neon PostgreSQL selected and implemented  
 > **Date:** 2026-02-08  
-> **Current setup:** Dexie.js (IndexedDB) client-side cache (`src/lib/db.ts`)
+> **Outcome:** Neon chosen as the primary persistent store. Dexie.js (IndexedDB) has been removed. See [Two-Tier Cache](./TWO_TIER_CACHE.md) for the current architecture.
 
 ## Context
 

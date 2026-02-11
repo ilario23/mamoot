@@ -1,15 +1,15 @@
 // ============================================================
-// Strava Three-Tier Cache-Through Layer
+// Strava Two-Tier Cache-Through Layer
 // ============================================================
 //
-// Tier 1 — Dexie (IndexedDB)  : instant, offline, per-browser
-// Tier 2 — Neon  (PostgreSQL)  : persistent, multi-device, server-side
-// Tier 3 — Strava API          : source of truth, rate-limited
+// Tier 1 — Neon (PostgreSQL)  : persistent, multi-device, server-side
+// Tier 2 — Strava API         : source of truth, rate-limited
 //
-// Read flow:  Dexie → Neon → Strava API
-// Write flow: Dexie (sync) + Neon (fire-and-forget)
+// Read flow:  Neon → Strava API
+// Write flow: Neon (awaitable)
+//
+// React Query provides in-memory caching for the browser session.
 
-import {db} from './db';
 import {
   fetchAllActivities,
   fetchActivityDetail,
@@ -21,9 +21,7 @@ import {
   transformStreams,
 } from './strava';
 import type {
-  StravaSummaryActivity,
   StravaDetailedActivity,
-  StravaStream,
   StravaAthleteStats,
   StravaAthleteZones,
   StravaSummaryGear,
@@ -70,73 +68,28 @@ const isFresh = (fetchedAt: number, maxAge: number): boolean => {
   return Date.now() - fetchedAt < maxAge;
 };
 
-// ----- Neon backfill tracking -----
-// When Dexie has data from before Neon was set up, we backfill Neon
-// on the first Dexie hit per session so the remote DB gets populated.
-// Uses sessionStorage so the backfill runs once per browser session.
-
-const BACKFILL_KEY = 'neon-backfill';
-
-const needsBackfill = (table: string): boolean => {
-  try {
-    const done = sessionStorage.getItem(`${BACKFILL_KEY}:${table}`);
-    return done !== 'true';
-  } catch {
-    return false; // SSR or sessionStorage unavailable — skip
-  }
-};
-
-const markBackfilled = (table: string): void => {
-  try {
-    sessionStorage.setItem(`${BACKFILL_KEY}:${table}`, 'true');
-  } catch {
-    // ignore
-  }
-};
-
 // ----- Activities (list) -----
 
 /**
  * Returns all activities, transformed to app format.
- * Three-tier: Dexie → Neon → Strava API.
+ * Two-tier: Neon → Strava API.
  */
 export const cachedGetAllActivities = async (): Promise<ActivitySummary[]> => {
-  // ── Tier 1: Dexie (instant, offline) ──
-  const cachedCount = await db.activities.count();
-
-  if (cachedCount > 0) {
-    const newest = await db.activities.orderBy('fetchedAt').last();
-
-    if (newest && isFresh(newest.fetchedAt, STALE.activities)) {
-      const all = await db.activities.orderBy('date').reverse().toArray();
-
-      // Backfill Neon once per session (fire-and-forget)
-      if (needsBackfill('activities')) {
-        markBackfilled('activities');
-        neonSyncActivities(all);
-      }
-
-      return all.map((record) => transformActivity(record.data));
-    }
-  }
-
-  // ── Tier 2: Neon (persistent, multi-device) ──
+  // ── Tier 1: Neon (persistent, multi-device) ──
   const neonData = await neonGetActivities();
 
-  if (neonData) {
+  if (neonData && neonData.length > 0) {
     const newestNeon = neonData.reduce((a, b) =>
       a.fetchedAt > b.fetchedAt ? a : b,
     );
 
     if (isFresh(newestNeon.fetchedAt, STALE.activities)) {
-      // Hydrate Dexie from Neon
-      await db.activities.bulkPut(neonData);
-      const all = await db.activities.orderBy('date').reverse().toArray();
-      return all.map((record) => transformActivity(record.data));
+      const sorted = [...neonData].sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0));
+      return sorted.map((record) => transformActivity(record.data));
     }
   }
 
-  // ── Tier 3: Strava API (source of truth) ──
+  // ── Tier 2: Strava API (source of truth) ──
   const raw = await fetchAllActivities();
   const now = Date.now();
 
@@ -147,46 +100,35 @@ export const cachedGetAllActivities = async (): Promise<ActivitySummary[]> => {
     fetchedAt: now,
   }));
 
-  // Write to both caches
-  await db.activities.bulkPut(records);
-  neonSyncActivities(records);
+  // Write to Neon
+  await neonSyncActivities(records);
 
-  const all = await db.activities.orderBy('date').reverse().toArray();
-  return all.map((record) => transformActivity(record.data));
+  const sorted = [...records].sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0));
+  return sorted.map((record) => transformActivity(record.data));
 };
 
 // ----- Activity Detail -----
 
 /**
  * Returns a single detailed activity.
- * Three-tier: Dexie → Neon → Strava API.
+ * Two-tier: Neon → Strava API.
  * Historical activities never change, so once cached they stay forever.
  */
 export const cachedGetActivityDetail = async (
   activityId: number,
 ): Promise<StravaDetailedActivity> => {
-  // ── Tier 1: Dexie ──
-  const cached = await db.activityDetails.get(activityId);
-
-  if (cached && isFresh(cached.fetchedAt, STALE.activityDetail)) {
-    neonSyncActivityDetail(cached); // backfill Neon (fire-and-forget)
-    return cached.data;
-  }
-
-  // ── Tier 2: Neon ──
+  // ── Tier 1: Neon ──
   const neonData = await neonGetActivityDetail(activityId);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.activityDetail)) {
-    await db.activityDetails.put(neonData);
     return neonData.data;
   }
 
-  // ── Tier 3: Strava API ──
+  // ── Tier 2: Strava API ──
   const detail = await fetchActivityDetail(activityId);
   const record = {id: activityId, data: detail, fetchedAt: Date.now()};
 
-  await db.activityDetails.put(record);
-  neonSyncActivityDetail(record);
+  await neonSyncActivityDetail(record);
 
   return detail;
 };
@@ -195,34 +137,24 @@ export const cachedGetActivityDetail = async (
 
 /**
  * Returns stream data for an activity, transformed to StreamPoint[].
- * Three-tier: Dexie → Neon → Strava API.
+ * Two-tier: Neon → Strava API.
  * Streams never change for historical activities.
  */
 export const cachedGetActivityStreams = async (
   activityId: number,
 ): Promise<StreamPoint[]> => {
-  // ── Tier 1: Dexie ──
-  const cached = await db.activityStreams.get(activityId);
-
-  if (cached && isFresh(cached.fetchedAt, STALE.activityStreams)) {
-    neonSyncActivityStreams(cached); // backfill Neon (fire-and-forget)
-    return transformStreams(cached.data);
-  }
-
-  // ── Tier 2: Neon ──
+  // ── Tier 1: Neon ──
   const neonData = await neonGetActivityStreams(activityId);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.activityStreams)) {
-    await db.activityStreams.put(neonData);
     return transformStreams(neonData.data);
   }
 
-  // ── Tier 3: Strava API ──
+  // ── Tier 2: Strava API ──
   const raw = await fetchActivityStreams(activityId);
   const record = {activityId, data: raw, fetchedAt: Date.now()};
 
-  await db.activityStreams.put(record);
-  neonSyncActivityStreams(record);
+  await neonSyncActivityStreams(record);
 
   return transformStreams(raw);
 };
@@ -231,33 +163,23 @@ export const cachedGetActivityStreams = async (
 
 /**
  * Returns athlete aggregate stats (recent, ytd, all-time totals).
- * Three-tier: Dexie → Neon → Strava API. Refetch after 1 hour.
+ * Two-tier: Neon → Strava API. Refetch after 1 hour.
  */
 export const cachedGetAthleteStats = async (
   athleteId: number,
 ): Promise<StravaAthleteStats> => {
-  // ── Tier 1: Dexie ──
-  const cached = await db.athleteStats.get(athleteId);
-
-  if (cached && isFresh(cached.fetchedAt, STALE.athleteStats)) {
-    neonSyncAthleteStats(cached); // backfill Neon (fire-and-forget)
-    return cached.data;
-  }
-
-  // ── Tier 2: Neon ──
+  // ── Tier 1: Neon ──
   const neonData = await neonGetAthleteStats(athleteId);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.athleteStats)) {
-    await db.athleteStats.put(neonData);
     return neonData.data;
   }
 
-  // ── Tier 3: Strava API ──
+  // ── Tier 2: Strava API ──
   const stats = await fetchAthleteStats(athleteId);
   const record = {athleteId, data: stats, fetchedAt: Date.now()};
 
-  await db.athleteStats.put(record);
-  neonSyncAthleteStats(record);
+  await neonSyncAthleteStats(record);
 
   return stats;
 };
@@ -266,33 +188,23 @@ export const cachedGetAthleteStats = async (
 
 /**
  * Returns heart rate (and optionally power) zones.
- * Three-tier: Dexie → Neon → Strava API. Refetch after 24 hours.
+ * Two-tier: Neon → Strava API. Refetch after 24 hours.
  */
 export const cachedGetAthleteZones = async (): Promise<StravaAthleteZones> => {
   const ZONES_KEY = 'athlete-zones';
 
-  // ── Tier 1: Dexie ──
-  const cached = await db.athleteZones.get(ZONES_KEY);
-
-  if (cached && isFresh(cached.fetchedAt, STALE.athleteZones)) {
-    neonSyncAthleteZones(cached); // backfill Neon (fire-and-forget)
-    return cached.data;
-  }
-
-  // ── Tier 2: Neon ──
+  // ── Tier 1: Neon ──
   const neonData = await neonGetAthleteZones(ZONES_KEY);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.athleteZones)) {
-    await db.athleteZones.put(neonData);
     return neonData.data;
   }
 
-  // ── Tier 3: Strava API ──
+  // ── Tier 2: Strava API ──
   const zones = await fetchAthleteZones();
   const record = {key: ZONES_KEY, data: zones, fetchedAt: Date.now()};
 
-  await db.athleteZones.put(record);
-  neonSyncAthleteZones(record);
+  await neonSyncAthleteZones(record);
 
   return zones;
 };
@@ -301,7 +213,7 @@ export const cachedGetAthleteZones = async (): Promise<StravaAthleteZones> => {
 
 /**
  * Returns athlete's bikes and shoes, fetched from GET /athlete.
- * Three-tier: Dexie → Neon → Strava API. Refetch after 1 hour.
+ * Two-tier: Neon → Strava API. Refetch after 1 hour.
  */
 export const cachedGetAthleteGear = async (): Promise<{
   bikes: StravaSummaryGear[];
@@ -310,34 +222,24 @@ export const cachedGetAthleteGear = async (): Promise<{
 }> => {
   const GEAR_KEY = 'athlete-gear';
 
-  // ── Tier 1: Dexie ──
-  const cached = await db.athleteGear.get(GEAR_KEY);
-
-  if (cached && isFresh(cached.fetchedAt, STALE.athleteGear)) {
-    neonSyncAthleteGear(cached); // backfill Neon (fire-and-forget)
-    return {bikes: cached.bikes, shoes: cached.shoes, retiredGearIds: cached.retiredGearIds ?? []};
-  }
-
-  // ── Tier 2: Neon ──
+  // ── Tier 1: Neon ──
   const neonData = await neonGetAthleteGear(GEAR_KEY);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.athleteGear)) {
     // Ensure retiredGearIds is populated (backward compat with old records)
     if (!neonData.retiredGearIds) neonData.retiredGearIds = [];
-    await db.athleteGear.put(neonData);
     return {bikes: neonData.bikes, shoes: neonData.shoes, retiredGearIds: neonData.retiredGearIds};
   }
 
-  // ── Tier 3: Strava API ──
+  // ── Tier 2: Strava API ──
   // Preserve user-defined retiredGearIds from existing cache
-  const existingRetiredIds = cached?.retiredGearIds ?? neonData?.retiredGearIds ?? [];
+  const existingRetiredIds = neonData?.retiredGearIds ?? [];
   const profile = await fetchAthleteWithGear();
   const bikes = profile.bikes ?? [];
   const shoes = profile.shoes ?? [];
   const record = {key: GEAR_KEY, bikes, shoes, retiredGearIds: existingRetiredIds, fetchedAt: Date.now()};
 
-  await db.athleteGear.put(record);
-  neonSyncAthleteGear(record);
+  await neonSyncAthleteGear(record);
 
   return {bikes, shoes, retiredGearIds: existingRetiredIds};
 };
@@ -346,7 +248,7 @@ export const cachedGetAthleteGear = async (): Promise<{
 
 /**
  * Returns a zone breakdown for a single activity.
- * Three-tier: Dexie → Neon → compute from streams.
+ * Two-tier: Neon → compute from streams.
  * Checks settingsHash to invalidate on zone config changes.
  */
 export const cachedGetZoneBreakdown = async (
@@ -355,23 +257,14 @@ export const cachedGetZoneBreakdown = async (
 ): Promise<ZoneBreakdown> => {
   const currentHash = hashZoneSettings(zones);
 
-  // ── Tier 1: Dexie ──
-  const cached = await db.zoneBreakdowns.get(activityId);
-
-  if (cached && cached.settingsHash === currentHash) {
-    neonSyncZoneBreakdown(cached); // backfill Neon (fire-and-forget)
-    return {zones: cached.zones, settingsHash: cached.settingsHash};
-  }
-
-  // ── Tier 2: Neon ──
+  // ── Tier 1: Neon ──
   const neonData = await neonGetZoneBreakdown(activityId);
 
   if (neonData && neonData.settingsHash === currentHash) {
-    await db.zoneBreakdowns.put(neonData);
     return {zones: neonData.zones, settingsHash: neonData.settingsHash};
   }
 
-  // ── Tier 3: Compute from streams (streams use their own three-tier) ──
+  // ── Tier 2: Compute from streams (streams use their own two-tier) ──
   const stream = await cachedGetActivityStreams(activityId);
   const breakdown = computeZoneBreakdown(stream, zones);
   const record = {
@@ -381,8 +274,7 @@ export const cachedGetZoneBreakdown = async (
     computedAt: Date.now(),
   };
 
-  await db.zoneBreakdowns.put(record);
-  neonSyncZoneBreakdown(record);
+  await neonSyncZoneBreakdown(record);
 
   return breakdown;
 };
@@ -432,7 +324,7 @@ export const batchGetZoneBreakdowns = async (
 
 /**
  * Force-refresh all activities from the API, ignoring cache freshness.
- * Writes to both Dexie and Neon. Useful for a manual "sync" button.
+ * Writes to Neon. Useful for a manual "sync" button.
  */
 export const forceRefreshActivities = async (): Promise<ActivitySummary[]> => {
   const raw = await fetchAllActivities();
@@ -445,9 +337,8 @@ export const forceRefreshActivities = async (): Promise<ActivitySummary[]> => {
     fetchedAt: now,
   }));
 
-  await db.activities.bulkPut(records);
-  neonSyncActivities(records);
+  await neonSyncActivities(records);
 
-  const all = await db.activities.orderBy('date').reverse().toArray();
-  return all.map((record) => transformActivity(record.data));
+  const sorted = [...records].sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0));
+  return sorted.map((record) => transformActivity(record.data));
 };

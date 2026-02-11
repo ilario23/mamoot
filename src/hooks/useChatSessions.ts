@@ -2,12 +2,11 @@
 // useChatSessions — Manages chat sessions per persona
 // ============================================================
 //
-// Handles CRUD for chat sessions backed by Dexie (local) and
-// Neon (remote). Sessions are scoped to (athleteId, persona).
+// Handles CRUD for chat sessions backed by Neon (PostgreSQL).
+// Sessions are scoped to (athleteId, persona).
 
 import {useState, useEffect, useCallback, useRef} from 'react';
-import {db} from '@/lib/db';
-import type {CachedChatSession} from '@/lib/db';
+import type {CachedChatSession} from '@/lib/cacheTypes';
 import {neonGetChatSessions, neonSyncChatSessions, neonDeleteChatSession} from '@/lib/chatSync';
 import type {PersonaId} from '@/lib/aiPrompts';
 
@@ -39,7 +38,7 @@ export const useChatSessions = (
   const [isLoading, setIsLoading] = useState(true);
   const loadedRef = useRef<string | null>(null);
 
-  // Load sessions from Dexie, backfill from Neon if empty
+  // Load sessions from Neon
   useEffect(() => {
     if (!athleteId) {
       setIsLoading(false);
@@ -53,27 +52,16 @@ export const useChatSessions = (
     const load = async () => {
       setIsLoading(true);
 
-      // Try Dexie first
-      let localSessions = await db.chatSessions
-        .where('[athleteId+persona]')
-        .equals([athleteId, persona])
-        .reverse()
-        .sortBy('updatedAt');
+      const remote = await neonGetChatSessions(athleteId, persona);
+      const loaded = remote
+        ? [...remote].sort((a, b) => b.updatedAt - a.updatedAt)
+        : [];
 
-      // Backfill from Neon if Dexie is empty
-      if (localSessions.length === 0) {
-        const remote = await neonGetChatSessions(athleteId, persona);
-        if (remote && remote.length > 0) {
-          await db.chatSessions.bulkPut(remote);
-          localSessions = remote.sort((a, b) => b.updatedAt - a.updatedAt);
-        }
-      }
-
-      setSessions(localSessions);
+      setSessions(loaded);
 
       // Auto-select the most recent session
-      if (localSessions.length > 0) {
-        setActiveSessionId(localSessions[0].id);
+      if (loaded.length > 0) {
+        setActiveSessionId(loaded[0].id);
       } else {
         setActiveSessionId(null);
       }
@@ -99,8 +87,7 @@ export const useChatSessions = (
       updatedAt: now,
     };
 
-    await db.chatSessions.put(session);
-    neonSyncChatSessions(session);
+    await neonSyncChatSessions(session);
 
     setSessions((prev) => [session, ...prev]);
     setActiveSessionId(session.id);
@@ -113,20 +100,8 @@ export const useChatSessions = (
   }, []);
 
   const deleteSession = useCallback(async (id: string) => {
-    // 1. Dexie — delete messages, associated plans, then the session
-    await db.chatMessages.where('sessionId').equals(id).delete();
-    // sourceSessionId is not indexed — use filter() instead of where()
-    const allPlans = await db.coachPlans.toArray();
-    const linkedPlanIds = allPlans
-      .filter((p) => p.sourceSessionId === id)
-      .map((p) => p.id);
-    if (linkedPlanIds.length > 0) {
-      await db.coachPlans.bulkDelete(linkedPlanIds);
-    }
-    await db.chatSessions.delete(id);
-
-    // 2. Neon — cascade delete session + messages + linked plans + memory
-    neonDeleteChatSession(id);
+    // Delete from Neon (cascade deletes messages + linked plans)
+    await neonDeleteChatSession(id);
 
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== id);
@@ -144,23 +119,23 @@ export const useChatSessions = (
     id: string,
     updates: Partial<Pick<CachedChatSession, 'title' | 'summary' | 'messageCount'>>,
   ) => {
-    const session = await db.chatSessions.get(id);
-    if (!session) return;
+    setSessions((prev) => {
+      const session = prev.find((s) => s.id === id);
+      if (!session) return prev;
 
-    const updated: CachedChatSession = {
-      ...session,
-      ...updates,
-      updatedAt: Date.now(),
-    };
+      const updated: CachedChatSession = {
+        ...session,
+        ...updates,
+        updatedAt: Date.now(),
+      };
 
-    await db.chatSessions.put(updated);
-    neonSyncChatSessions(updated);
+      // Write to Neon (fire-and-forget for session metadata updates)
+      neonSyncChatSessions(updated);
 
-    setSessions((prev) =>
-      prev
+      return prev
         .map((s) => (s.id === id ? updated : s))
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    );
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+    });
   }, []);
 
   return {

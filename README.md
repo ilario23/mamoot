@@ -24,7 +24,7 @@ RunTeam AI connects to your Strava account to pull activity data and present it 
 - **Segments** — Starred segment tracking with effort history and progression charts
 - **Personal Records** — PR tracking across distances with pace progression over time
 - **AI Team Chat** — Mock AI coaching personas (Coach, Nutritionist, Physio) with contextual advice
-- **Settings** — Strava OAuth connection, HR zone configuration, and local cache management
+- **Settings** — Strava OAuth connection, HR zone configuration, and data sync management
 
 ---
 
@@ -39,7 +39,7 @@ RunTeam AI connects to your Strava account to pull activity data and present it 
 | Charts         | Recharts                                        |
 | Maps           | Leaflet + React Leaflet                         |
 | Data Fetching  | TanStack React Query                            |
-| Local Database | Dexie.js (IndexedDB)                            |
+| Cloud Database | Neon PostgreSQL + Drizzle ORM                   |
 | Forms          | React Hook Form + Zod validation                |
 | Font           | Space Grotesk                                   |
 
@@ -78,8 +78,9 @@ The app will be available at **http://localhost:3000**.
 | `NEXT_PUBLIC_STRAVA_CLIENT_ID`    | Your Strava app's Client ID       | Yes      |
 | `NEXT_PUBLIC_STRAVA_REDIRECT_URI` | OAuth callback URL                 | Yes      |
 | `STRAVA_CLIENT_SECRET`            | Your Strava app's Client Secret    | Yes      |
+| `DATABASE_URL`                    | Neon PostgreSQL connection string   | Yes      |
 
-> The client secret is only used server-side via the Next.js API route at `app/api/strava/token/route.ts` and is never exposed to the browser.
+> The client secret and database URL are only used server-side and are never exposed to the browser.
 
 ---
 
@@ -110,11 +111,14 @@ run-zone-ai/
 │   │   └── ui/             # shadcn/ui primitives
 │   ├── contexts/           # React contexts (Settings, Strava Auth)
 │   ├── hooks/              # Custom hooks (useStrava, usePageTheme, etc.)
-│   ├── lib/                # Utilities, Strava API client, DB, caching
+│   ├── db/                 # Drizzle ORM schema & Neon connection
+│   ├── lib/                # Utilities, Strava API client, caching
 │   └── views/              # Page-level view components
 ├── docs/                   # Technical documentation
+│   ├── TWO_TIER_CACHE.md   # Cache architecture (Neon → Strava)
 │   ├── STRAVA_API.md       # Strava API reference & data models
 │   └── REMOTE_DATABASE.md  # Remote DB provider evaluation
+├── drizzle/                # Database migrations
 └── public/                 # Static assets
 ```
 
@@ -128,6 +132,10 @@ run-zone-ai/
 | `npm run build` | Create production build              |
 | `npm run start` | Start production server              |
 | `npm run lint`  | Run ESLint                           |
+| `npm run db:push` | Push schema changes to Neon (dev)  |
+| `npm run db:generate` | Generate migration files         |
+| `npm run db:migrate`  | Run pending migrations           |
+| `npm run db:studio`   | Open Drizzle Studio              |
 
 ---
 
@@ -146,9 +154,10 @@ The app uses a **Neo-Brutalist** visual identity:
 
 1. User authenticates via Strava OAuth (authorization code flow)
 2. Access tokens are exchanged server-side through `app/api/strava/token/route.ts`
-3. Activity data is fetched from the Strava V3 API and cached locally in IndexedDB via Dexie.js
-4. TanStack React Query manages data fetching, caching, and background refetching
+3. Activity data is fetched from the Strava V3 API and cached in Neon PostgreSQL
+4. TanStack React Query provides in-memory caching and manages background refetching
 5. The cache layer uses a `fetchedAt` timestamp to determine data staleness
+6. See [Two-Tier Cache Architecture](docs/TWO_TIER_CACHE.md) for details
 
 ---
 

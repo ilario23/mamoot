@@ -2,14 +2,13 @@
 // useChatPersistence — Message persistence and memory summaries
 // ============================================================
 //
-// Bridges the Vercel AI SDK's useChat with Dexie/Neon storage.
+// Bridges the Vercel AI SDK's useChat with Neon storage.
 // Handles loading messages for a session, persisting new messages,
 // and triggering summary generation when conversations grow long.
 
 import {useCallback, useRef} from 'react';
-import {db} from '@/lib/db';
-import type {CachedChatMessage} from '@/lib/db';
-import {neonGetChatMessages, neonSyncChatMessages} from '@/lib/chatSync';
+import type {CachedChatMessage} from '@/lib/cacheTypes';
+import {neonGetChatMessages, neonSyncChatMessages, neonGetChatSession} from '@/lib/chatSync';
 import type {UIMessage} from 'ai';
 
 /** How many assistant messages before we auto-trigger a summary */
@@ -19,9 +18,9 @@ const SUMMARY_THRESHOLD = 10;
 export const MAX_MESSAGES_IN_CONTEXT = 20;
 
 interface UseChatPersistenceResult {
-  /** Load messages for a session (from Dexie, fallback to Neon) and return as UIMessages */
+  /** Load messages for a session (from Neon) and return as UIMessages */
   loadMessages: (sessionId: string) => Promise<UIMessage[]>;
-  /** Persist a single message to Dexie + Neon */
+  /** Persist a single message to Neon */
   persistMessage: (sessionId: string, msg: UIMessage) => Promise<void>;
   /** Get the memory summary for a session */
   getMemorySummary: (sessionId: string) => Promise<string | null>;
@@ -79,22 +78,11 @@ export const useChatPersistence = (): UseChatPersistenceResult => {
   const summaryInFlight = useRef<Set<string>>(new Set());
 
   const loadMessages = useCallback(async (sessionId: string): Promise<UIMessage[]> => {
-    // Try Dexie first
-    let local = await db.chatMessages
-      .where('sessionId')
-      .equals(sessionId)
-      .sortBy('createdAt');
+    const remote = await neonGetChatMessages(sessionId);
+    if (!remote || remote.length === 0) return [];
 
-    // Backfill from Neon if Dexie is empty
-    if (local.length === 0) {
-      const remote = await neonGetChatMessages(sessionId);
-      if (remote && remote.length > 0) {
-        await db.chatMessages.bulkPut(remote);
-        local = remote.sort((a, b) => a.createdAt - b.createdAt);
-      }
-    }
-
-    return local.map(toUIMessage);
+    const sorted = [...remote].sort((a, b) => a.createdAt - b.createdAt);
+    return sorted.map(toUIMessage);
   }, []);
 
   const persistMessage = useCallback(async (sessionId: string, msg: UIMessage) => {
@@ -112,12 +100,11 @@ export const useChatPersistence = (): UseChatPersistenceResult => {
       createdAt: Date.now(),
     };
 
-    await db.chatMessages.put(record);
-    neonSyncChatMessages(record);
+    await neonSyncChatMessages(record);
   }, []);
 
   const getMemorySummary = useCallback(async (sessionId: string): Promise<string | null> => {
-    const session = await db.chatSessions.get(sessionId);
+    const session = await neonGetChatSession(sessionId);
     return session?.summary ?? null;
   }, []);
 
@@ -137,14 +124,14 @@ export const useChatPersistence = (): UseChatPersistenceResult => {
     // Run summary generation in the background
     (async () => {
       try {
-        // Load all messages for the session
-        const messages = await db.chatMessages
-          .where('sessionId')
-          .equals(sessionId)
-          .sortBy('createdAt');
+        // Load all messages for the session from Neon
+        const remote = await neonGetChatMessages(sessionId);
+        if (!remote || remote.length === 0) return;
+
+        const messages = [...remote].sort((a, b) => a.createdAt - b.createdAt);
 
         // Get existing summary
-        const session = await db.chatSessions.get(sessionId);
+        const session = await neonGetChatSession(sessionId);
         const existingSummary = session?.summary ?? null;
 
         const res = await fetch('/api/ai/summarize', {
