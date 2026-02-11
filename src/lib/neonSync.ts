@@ -71,6 +71,49 @@ export const neonSyncActivityDetail = (record: CachedActivityDetail): void => {
   postToNeon('activity-details', record);
 };
 
+// ---- Activity Details (bulk) ----
+
+/** Max IDs per chunk to stay within URL length limits */
+const BULK_CHUNK_SIZE = 200;
+
+/**
+ * Fetch multiple activity details from Neon in one (or few) round-trips.
+ * Returns whatever Neon has — callers handle missing IDs.
+ */
+export const neonGetActivityDetailsBulk = async (
+  ids: number[],
+): Promise<CachedActivityDetail[]> => {
+  if (ids.length === 0) return [];
+
+  const results: CachedActivityDetail[] = [];
+
+  for (let i = 0; i < ids.length; i += BULK_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
+    const pks = chunk.join(',');
+    try {
+      const res = await fetch(`${API}/activity-details?pks=${pks}`);
+      if (!res.ok) continue;
+      const data: CachedActivityDetail[] = await res.json();
+      if (Array.isArray(data)) results.push(...data);
+    } catch {
+      // Neon is best-effort — skip this chunk on failure
+    }
+  }
+
+  return results;
+};
+
+/**
+ * Fire-and-forget bulk write of activity details to Neon.
+ * The POST endpoint already accepts arrays.
+ */
+export const neonSyncActivityDetailsBulk = (
+  records: CachedActivityDetail[],
+): void => {
+  if (records.length === 0) return;
+  postToNeon('activity-details', records);
+};
+
 // ---- Activity Streams (single) ----
 
 export const neonGetActivityStreams = async (

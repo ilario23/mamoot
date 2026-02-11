@@ -2,7 +2,9 @@
 
 import {useState, useEffect, useCallback, useRef} from 'react';
 import {db} from '@/lib/db';
+import type {CachedActivityDetail} from '@/lib/db';
 import {fetchActivityDetail} from '@/lib/strava';
+import {neonGetActivityDetailsBulk, neonSyncActivityDetailsBulk} from '@/lib/neonSync';
 import type {StravaDetailedActivity, StravaBestEffort, StravaSegmentEffort} from '@/lib/strava';
 import type {ActivitySummary} from '@/lib/mockData';
 
@@ -218,7 +220,7 @@ export const useSyncActivityDetails = (
       }
     }
 
-    const uncachedIds = activityIds.filter((id) => !cachedIds.has(id));
+    let uncachedIds = activityIds.filter((id) => !cachedIds.has(id));
 
     setState((prev) => ({
       ...prev,
@@ -228,15 +230,49 @@ export const useSyncActivityDetails = (
       segmentEfforts: [...allSegmentEfforts],
     }));
 
-    // If everything is cached, we're done
+    // If everything is cached in Dexie, we're done
     if (uncachedIds.length === 0) {
       setState((prev) => ({...prev, isSyncing: false}));
       isSyncRunningRef.current = false;
       return;
     }
 
-    // 2. Fetch uncached activities in batches with sliding-window rate limiting
+    // 2. Check Neon (persistent, multi-device) for activities missing from Dexie
+    if (uncachedIds.length > 0 && !abortRef.current) {
+      const neonDetails = await neonGetActivityDetailsBulk(uncachedIds);
+
+      if (neonDetails.length > 0) {
+        for (const detail of neonDetails) {
+          cachedIds.add(detail.id);
+          allEfforts.push(...extractBestEfforts(detail.data));
+          allSegmentEfforts.push(...extractSegmentEfforts(detail.data));
+        }
+
+        // Hydrate Dexie from Neon so future loads are instant
+        await db.activityDetails.bulkPut(neonDetails);
+
+        // Narrow uncachedIds to only what Neon didn't have
+        uncachedIds = activityIds.filter((id) => !cachedIds.has(id));
+
+        setState((prev) => ({
+          ...prev,
+          synced: cachedIds.size,
+          bestEfforts: [...allEfforts],
+          segmentEfforts: [...allSegmentEfforts],
+        }));
+      }
+    }
+
+    // If everything is now cached (Dexie + Neon), we're done
+    if (uncachedIds.length === 0) {
+      setState((prev) => ({...prev, isSyncing: false}));
+      isSyncRunningRef.current = false;
+      return;
+    }
+
+    // 3. Fetch remaining uncached activities from Strava API with rate limiting
     let cursor = 0;
+    const newlyFetchedRecords: CachedActivityDetail[] = [];
 
     while (cursor < uncachedIds.length) {
       if (abortRef.current) break;
@@ -272,12 +308,12 @@ export const useSyncActivityDetails = (
       const results = await Promise.allSettled(
         batchIds.map(async (id) => {
           const detail = await fetchActivityDetail(id);
+          const now = Date.now();
+          const record: CachedActivityDetail = {id, data: detail, fetchedAt: now};
           // Cache to IndexedDB immediately on success
-          await db.activityDetails.put({
-            id,
-            data: detail,
-            fetchedAt: Date.now(),
-          });
+          await db.activityDetails.put(record);
+          // Collect for Neon write-back
+          newlyFetchedRecords.push(record);
           return detail;
         }),
       );
@@ -355,6 +391,9 @@ export const useSyncActivityDetails = (
         await sleep(MIN_BATCH_GAP_MS);
       }
     }
+
+    // Persist freshly-fetched details to Neon (fire-and-forget)
+    neonSyncActivityDetailsBulk(newlyFetchedRecords);
 
     setState((prev) => ({
       ...prev,

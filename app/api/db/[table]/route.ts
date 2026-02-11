@@ -20,7 +20,7 @@ import {
   chatMessages,
   coachPlans,
 } from '@/db/schema';
-import {eq, and, sql, desc} from 'drizzle-orm';
+import {eq, and, sql, desc, inArray} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
 
 type RouteContext = {params: Promise<{table: string}>};
@@ -48,8 +48,21 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'activity-details': {
+        // Bulk fetch: GET /api/db/activity-details?pks=1,2,3
+        const pks = req.nextUrl.searchParams.get('pks');
+        if (pks) {
+          const ids = pks.split(',').map(Number).filter(Boolean);
+          if (ids.length === 0)
+            return NextResponse.json([], {status: 200});
+          const rows = await db
+            .select()
+            .from(activityDetails)
+            .where(inArray(activityDetails.id, ids));
+          return NextResponse.json(rows);
+        }
+        // Single fetch: GET /api/db/activity-details?pk=123
         if (!pk)
-          return NextResponse.json({error: 'pk required'}, {status: 400});
+          return NextResponse.json({error: 'pk or pks required'}, {status: 400});
         const rows = await db
           .select()
           .from(activityDetails)
