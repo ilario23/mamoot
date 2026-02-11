@@ -74,6 +74,31 @@ export async function POST(req: Request) {
     explicitContext?: ResolvedMention[] | null;
   } = body;
 
+  // --- AI Debug Logging ---
+  const resolvedModel =
+    clientModel && ALLOWED_MODELS[clientModel]
+      ? clientModel
+      : (process.env.AI_MODEL ?? 'gpt-4o-mini');
+  console.log(`\n[AI] ========== New Chat Request ==========`);
+  console.log(`[AI] Model: ${resolvedModel}`);
+  console.log(`[AI] Persona: ${persona}`);
+  console.log(`[AI] Session: ${sessionId ?? 'none'}`);
+  console.log(`[AI] Athlete: ${athleteId ?? 'none'}`);
+  console.log(`[AI] Messages in context: ${messages?.length ?? 0}`);
+  console.log(
+    `[AI] Memory: ${memory ? 'yes (' + memory.length + ' chars)' : 'none'}`,
+  );
+  if (explicitContext?.length) {
+    console.log(`[AI] Explicit context (@-mentions):`);
+    for (const m of explicitContext) {
+      console.log(
+        `[AI]   - @${m.categoryId}: ${m.label} (${m.data.length} chars)`,
+      );
+    }
+  } else {
+    console.log(`[AI] Explicit context: none`);
+  }
+
   // Validate persona
   if (!persona || !isValidPersona(persona)) {
     return new Response(
@@ -232,12 +257,59 @@ export async function POST(req: Request) {
     ...shareTrainingPlan,
   };
 
+  const toolNames = Object.keys(tools);
+  console.log(`[AI] Tools registered: [${toolNames.join(', ')}]`);
+
   const result = streamText({
     model: getModel(clientModel),
     system,
     messages: await convertToModelMessages(processedMessages),
     tools: Object.keys(tools).length > 0 ? tools : undefined,
     stopWhen: stepCountIs(5),
+    onStepFinish(event) {
+      console.log(`[AI] --- Step finished (reason: ${event.finishReason}) ---`);
+      const calls = event.toolCalls;
+      if (Array.isArray(calls) && calls.length > 0) {
+        for (const tc of calls) {
+          console.log(`[AI]   Tool call: ${tc.toolName}`);
+          console.log(`[AI]     Args: ${JSON.stringify(tc.args)}`);
+        }
+      }
+      const results = event.toolResults;
+      if (Array.isArray(results) && results.length > 0) {
+        for (const tr of results) {
+          const resultStr = JSON.stringify(tr.result) ?? '(empty)';
+          const preview =
+            resultStr.length > 300
+              ? resultStr.slice(0, 300) + '...'
+              : resultStr;
+          console.log(`[AI]   Tool result [${tr.toolName}]: ${preview}`);
+        }
+      }
+      const txt = event.text ?? '';
+      if (txt) {
+        const preview = txt.length > 200 ? txt.slice(0, 200) + '...' : txt;
+        console.log(`[AI]   Text: ${preview}`);
+      }
+      const u = event.usage;
+      if (u) {
+        console.log(
+          `[AI]   Tokens: ${u.inputTokens ?? '?'} in / ${u.outputTokens ?? '?'} out`,
+        );
+      }
+    },
+    onFinish(event) {
+      console.log(`[AI] ========== Request Complete ==========`);
+      console.log(`[AI] Final reason: ${event.finishReason}`);
+      console.log(`[AI] Total steps: ${Array.isArray(event.steps) ? event.steps.length : '?'}`);
+      const u = event.usage;
+      if (u && typeof u === 'object') {
+        console.log(
+          `[AI] Total tokens: ${u.inputTokens ?? '?'} in / ${u.outputTokens ?? '?'} out`,
+        );
+      }
+      console.log(`[AI] ========================================\n`);
+    },
   });
 
   return result.toUIMessageStreamResponse();

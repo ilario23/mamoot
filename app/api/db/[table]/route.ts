@@ -162,12 +162,13 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
 
       case 'chat-sessions': {
         // GET /api/db/chat-sessions?athleteId=123&persona=coach → sessions list
-        // GET /api/db/chat-sessions?pk=uuid → single session
-        if (pk) {
+        // GET /api/db/chat-sessions?pk=uuid OR ?id=uuid → single session
+        const sessionPk = pk ?? req.nextUrl.searchParams.get('id');
+        if (sessionPk) {
           const rows = await db
             .select()
             .from(chatSessions)
-            .where(eq(chatSessions.id, pk));
+            .where(eq(chatSessions.id, sessionPk));
           return NextResponse.json(rows[0] ?? null);
         }
         const athleteId = req.nextUrl.searchParams.get('athleteId');
