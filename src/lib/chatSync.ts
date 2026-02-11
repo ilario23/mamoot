@@ -100,13 +100,15 @@ export const neonSyncCoachPlan = (record: CachedCoachPlan): void => {
   postToNeon('coach-plans', record);
 };
 
-/** Fire-and-forget delete of a coach plan by ID. */
-export const neonDeleteCoachPlan = (planId: string): void => {
-  fetch(`${API}/coach-plans?id=${planId}`, {
-    method: 'DELETE',
-  }).catch(() => {
+/** Awaitable delete of a coach plan by ID. Resolves even on failure. */
+export const neonDeleteCoachPlan = async (planId: string): Promise<void> => {
+  try {
+    await fetch(`${API}/coach-plans?id=${planId}`, {
+      method: 'DELETE',
+    });
+  } catch {
     // Silently ignore — Neon sync is best-effort
-  });
+  }
 };
 
 /** Fire-and-forget activate a plan (deactivates all others for the athlete). */

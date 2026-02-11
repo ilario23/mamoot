@@ -33,12 +33,46 @@ interface UseChatPersistenceResult {
   ) => void;
 }
 
-/** Convert a CachedChatMessage to the UIMessage format used by useChat */
-const toUIMessage = (msg: CachedChatMessage): UIMessage => ({
-  id: msg.id,
-  role: msg.role as 'user' | 'assistant',
-  parts: [{type: 'text' as const, text: msg.content}],
-});
+/** Extract plain text from a stored content field (handles both JSON parts and legacy text). */
+const extractTextFromContent = (content: string): string => {
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((p: {type: string}) => p.type === 'text')
+        .map((p: {text: string}) => p.text)
+        .join('');
+    }
+  } catch {
+    // Not JSON — legacy plain text
+  }
+  return content;
+};
+
+/** Convert a CachedChatMessage to the UIMessage format used by useChat.
+ *  New messages store the full parts array as JSON; legacy messages store plain text. */
+const toUIMessage = (msg: CachedChatMessage): UIMessage => {
+  // Try to parse as JSON parts array (new format)
+  try {
+    const parsed = JSON.parse(msg.content);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return {
+        id: msg.id,
+        role: msg.role as 'user' | 'assistant',
+        parts: parsed,
+      };
+    }
+  } catch {
+    // Not JSON — fall through to legacy handling
+  }
+
+  // Legacy format: plain text content
+  return {
+    id: msg.id,
+    role: msg.role as 'user' | 'assistant',
+    parts: [{type: 'text' as const, text: msg.content}],
+  };
+};
 
 export const useChatPersistence = (): UseChatPersistenceResult => {
   // Track which sessions have an in-flight summary to avoid duplicates
@@ -64,13 +98,11 @@ export const useChatPersistence = (): UseChatPersistenceResult => {
   }, []);
 
   const persistMessage = useCallback(async (sessionId: string, msg: UIMessage) => {
-    // Extract text content from message parts
-    const content = msg.parts
-      ?.filter((part): part is {type: 'text'; text: string} => part.type === 'text')
-      .map((part) => part.text)
-      .join('') ?? '';
+    const parts = msg.parts ?? [];
+    if (parts.length === 0) return;
 
-    if (!content) return;
+    // Serialize the full parts array as JSON so tool calls, plan cards, etc. survive reload
+    const content = JSON.stringify(parts);
 
     const record: CachedChatMessage = {
       id: msg.id,
@@ -119,7 +151,7 @@ export const useChatPersistence = (): UseChatPersistenceResult => {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            messages: messages.map((m) => ({role: m.role, content: m.content})),
+            messages: messages.map((m) => ({role: m.role, content: extractTextFromContent(m.content)})),
             existingSummary,
           }),
         });

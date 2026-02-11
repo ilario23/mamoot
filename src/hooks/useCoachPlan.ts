@@ -41,7 +41,7 @@ export interface UseCoachPlanResult {
   /** Set a specific plan as the active one */
   activatePlan: (planId: string) => void;
   /** Delete a plan by ID */
-  deletePlan: (planId: string) => void;
+  deletePlan: (planId: string) => Promise<void>;
   /** Whether plans are still loading */
   isLoading: boolean;
 }
@@ -223,7 +223,7 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
   );
 
   const deletePlan = useCallback(
-    (planId: string) => {
+    async (planId: string) => {
       const wasActive = plans.find((p) => p.id === planId)?.isActive ?? false;
 
       setPlans((prev) => {
@@ -244,8 +244,12 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
         }
       }
 
-      // Dexie
-      db.coachPlans.delete(planId).catch(() => {});
+      // Dexie — await to ensure deletion completes before any potential refresh
+      try {
+        await db.coachPlans.delete(planId);
+      } catch {
+        // Dexie unavailable — continue with Neon delete
+      }
 
       // If the deleted plan was active, activate next in Dexie + Neon
       if (wasActive && athleteId) {
@@ -258,8 +262,8 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
         }
       }
 
-      // Neon
-      neonDeleteCoachPlan(planId);
+      // Neon — await to ensure deletion completes on the server
+      await neonDeleteCoachPlan(planId);
     },
     [athleteId, plans],
   );

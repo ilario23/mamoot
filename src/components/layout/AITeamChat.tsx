@@ -301,16 +301,23 @@ const AITeamChat = () => {
     loadedSessionRef.current = sid;
 
     const load = async () => {
-      const messages = await loadMessages(sid);
-      if (messages.length > 0) {
-        activeChat.setMessages(messages);
-      } else {
+      try {
+        const messages = await loadMessages(sid);
+        if (messages.length > 0) {
+          activeChat.setMessages(messages);
+        } else {
+          activeChat.setMessages([]);
+        }
+
+        // Load memory summary
+        const summary = await getMemorySummary(sid);
+        setMemory(summary);
+      } catch (err) {
+        console.error('[AITeamChat] Failed to load messages for session', sid, err);
+        // Ensure the chat area is cleared so the user sees the empty state
+        // rather than stale messages from a previous session
         activeChat.setMessages([]);
       }
-
-      // Load memory summary
-      const summary = await getMemorySummary(sid);
-      setMemory(summary);
     };
 
     load();
@@ -398,13 +405,16 @@ const AITeamChat = () => {
             .slice(0, 50) || 'New conversation'
         : 'New conversation';
 
+      // Count only messages that have parts (matching what persistMessage actually stores)
+      const persistedCount = messages.filter((m) => (m.parts ?? []).length > 0).length;
+
       await activeSM.updateSession(sessionId, {
         title,
-        messageCount: messages.length,
+        messageCount: persistedCount,
       });
 
       // Check if summary should be triggered
-      maybeTriggerSummary(sessionId, messages.length, async (summary) => {
+      maybeTriggerSummary(sessionId, persistedCount, async (summary) => {
         setMemory(summary);
         await activeSM.updateSession(sessionId, {summary});
       });
@@ -522,7 +532,7 @@ const AITeamChat = () => {
     // cleanup for linked plans that were already deleted from Dexie+Neon
     // via the cascade in deleteSession / API route.
     for (const planId of linkedPlanIds) {
-      deletePlan(planId);
+      await deletePlan(planId);
     }
 
     if (activeSM.sessions.length <= 1) {

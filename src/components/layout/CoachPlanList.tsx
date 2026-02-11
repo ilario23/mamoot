@@ -21,7 +21,7 @@ interface CoachPlanListProps {
   plans: CoachPlan[];
   activePlanId: string | null;
   onActivate: (planId: string) => void;
-  onDelete: (planId: string) => void;
+  onDelete: (planId: string) => Promise<void>;
   onClose: () => void;
 }
 
@@ -54,9 +54,9 @@ const CoachPlanList = ({
     setConfirmDeleteId(null);
   };
 
-  const handleDelete = (planId: string) => {
+  const handleDelete = async (planId: string) => {
     if (confirmDeleteId === planId) {
-      onDelete(planId);
+      await onDelete(planId);
       setConfirmDeleteId(null);
     } else {
       setConfirmDeleteId(planId);
