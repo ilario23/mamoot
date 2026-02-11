@@ -23,7 +23,7 @@ const AppShell = ({children}: {children: ReactNode}) => {
 
   if (isLoading) {
     return (
-      <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe'>
+      <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe' suppressHydrationWarning>
         <Loader2 className='h-8 w-8 animate-spin text-primary' />
       </div>
     );

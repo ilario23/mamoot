@@ -13,6 +13,7 @@ const ToastViewport = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ToastPrimitives.Viewport
     ref={ref}
+    suppressHydrationWarning
     className={cn(
       "fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 pt-safe sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col sm:pb-safe md:max-w-[420px]",
       className,

@@ -26,9 +26,9 @@ const SegmentList = ({
   };
 
   return (
-    <div className="border-3 border-border bg-background shadow-neo overflow-hidden max-w-full">
+    <div className="border-3 border-border bg-background shadow-neo overflow-hidden w-full">
       {/* Header + search */}
-      <div className="p-4 border-b-3 border-border space-y-3">
+      <div className="p-3 md:p-4 border-b-3 border-border space-y-3">
         <h3 className="font-black text-lg uppercase tracking-wider">
           All Segments
         </h3>
@@ -66,54 +66,58 @@ const SegmentList = ({
                 key={segment.segmentId}
                 onClick={() => onSelect(segment.segmentId)}
                 aria-label={`Select segment ${segment.name}`}
-                className={`w-full text-left p-4 border-b-3 border-border last:border-b-0 transition-colors flex items-center gap-3 ${
+                className={`w-full text-left p-3 md:p-4 border-b-3 border-border last:border-b-0 transition-colors ${
                   isSelected
                     ? "bg-primary/10"
                     : "bg-background hover:bg-muted"
                 }`}
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    {segment.starred && (
-                      <Star
-                        className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0"
-                        aria-hidden="true"
-                      />
-                    )}
-                    <p className="font-black text-sm truncate">
-                      {segment.name}
-                    </p>
+                <div className="grid grid-cols-[1fr_auto] gap-2 md:gap-3 items-center">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {segment.starred && (
+                        <Star
+                          className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <p className="font-black text-sm truncate">
+                        {segment.name}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 md:gap-3 mt-1 flex-wrap">
+                      <span className="text-xs font-bold text-muted-foreground whitespace-nowrap">
+                        {distKm >= 1
+                          ? `${distKm.toFixed(2)} km`
+                          : `${Math.round(segment.distance)}m`}
+                      </span>
+                      <span className="flex items-center gap-0.5 text-xs font-bold text-muted-foreground whitespace-nowrap">
+                        <Mountain className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {segment.averageGrade.toFixed(1)}%
+                      </span>
+                      <span className="text-xs font-bold text-muted-foreground whitespace-nowrap">
+                        {segment.effortCount} effort
+                        {segment.effortCount !== 1 ? "s" : ""}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="text-xs font-bold text-muted-foreground">
-                      {distKm >= 1
-                        ? `${distKm.toFixed(2)} km`
-                        : `${Math.round(segment.distance)}m`}
-                    </span>
-                    <span className="flex items-center gap-0.5 text-xs font-bold text-muted-foreground">
-                      <Mountain className="h-3 w-3" aria-hidden="true" />
-                      {segment.averageGrade.toFixed(1)}%
-                    </span>
-                    <span className="text-xs font-bold text-muted-foreground">
-                      {segment.effortCount} effort
-                      {segment.effortCount !== 1 ? "s" : ""}
-                    </span>
+                  <div className="flex items-center gap-1.5 md:gap-2">
+                    <div className="text-right">
+                      <p className="font-black text-sm whitespace-nowrap">
+                        {formatDuration(segment.bestEffort.elapsed_time)}
+                      </p>
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase">
+                        Best
+                      </p>
+                    </div>
+                    <ChevronRight
+                      className={`h-4 w-4 shrink-0 transition-colors hidden sm:block ${
+                        isSelected ? "text-primary" : "text-muted-foreground"
+                      }`}
+                      aria-hidden="true"
+                    />
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="font-black text-sm">
-                    {formatDuration(segment.bestEffort.elapsed_time)}
-                  </p>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase">
-                    Best
-                  </p>
-                </div>
-                <ChevronRight
-                  className={`h-4 w-4 shrink-0 transition-colors ${
-                    isSelected ? "text-primary" : "text-muted-foreground"
-                  }`}
-                  aria-hidden="true"
-                />
               </button>
             );
           })
