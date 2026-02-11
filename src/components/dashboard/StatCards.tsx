@@ -21,6 +21,8 @@ const StatCards = () => {
   const {data: activities, isLoading} = useActivities();
   const {data: stats} = useAthleteStats();
   const {settings} = useSettings();
+  const isMobile = useIsMobile();
+  const [showAll, setShowAll] = useState(false);
 
   const cards = useMemo<StatCard[]>(() => {
     const allActivities = activities ?? [];
@@ -158,9 +160,6 @@ const StatCards = () => {
   }
 
   if (cards.length === 0) return null;
-
-  const isMobile = useIsMobile();
-  const [showAll, setShowAll] = useState(false);
 
   const topRow = cards.slice(0, 4);
   const bottomRow = cards.slice(4);
