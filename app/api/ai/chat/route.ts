@@ -272,13 +272,13 @@ export async function POST(req: Request) {
       if (Array.isArray(calls) && calls.length > 0) {
         for (const tc of calls) {
           console.log(`[AI]   Tool call: ${tc.toolName}`);
-          console.log(`[AI]     Args: ${JSON.stringify(tc.args)}`);
+          console.log(`[AI]     Args: ${JSON.stringify('args' in tc ? tc.args : undefined)}`);
         }
       }
       const results = event.toolResults;
       if (Array.isArray(results) && results.length > 0) {
         for (const tr of results) {
-          const resultStr = JSON.stringify(tr.result) ?? '(empty)';
+          const resultStr = JSON.stringify('result' in tr ? tr.result : undefined) ?? '(empty)';
           const preview =
             resultStr.length > 300
               ? resultStr.slice(0, 300) + '...'
