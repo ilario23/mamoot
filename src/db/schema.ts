@@ -7,7 +7,14 @@
 // existing Dexie/IndexedDB structure for a smooth migration path.
 // Tables can be normalized later for more powerful analytical queries.
 
-import {pgTable, bigint, integer, text, jsonb, boolean} from 'drizzle-orm/pg-core';
+import {
+  pgTable,
+  bigint,
+  integer,
+  text,
+  jsonb,
+  boolean,
+} from 'drizzle-orm/pg-core';
 
 // ----- Activities -----
 // Maps to CachedActivity (src/lib/db.ts)
@@ -67,6 +74,22 @@ export const zoneBreakdowns = pgTable('zone_breakdowns', {
   settingsHash: text('settings_hash').notNull(),
   zones: jsonb('zones').notNull(),
   computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
+});
+
+// ----- User Settings -----
+// Synced from localStorage to enable server-side AI tool access.
+// Stores HR zones, training goal, allergies, dietary preferences, and injuries.
+export const userSettings = pgTable('user_settings', {
+  athleteId: bigint('athlete_id', {mode: 'number'}).primaryKey(),
+  maxHr: integer('max_hr').notNull(),
+  restingHr: integer('resting_hr').notNull(),
+  zones: jsonb('zones').notNull(), // {z1: [min,max], ...z6}
+  goal: text('goal'),
+  allergies: jsonb('allergies').notNull().default([]),
+  foodPreferences: text('food_preferences'),
+  injuries: jsonb('injuries').notNull().default([]),
+  aiModel: text('ai_model'),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
 });
 
 // ----- Chat Sessions -----

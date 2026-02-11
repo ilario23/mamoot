@@ -16,6 +16,7 @@ import {
   athleteZones,
   athleteGear,
   zoneBreakdowns,
+  userSettings,
   chatSessions,
   chatMessages,
   coachPlans,
@@ -118,6 +119,21 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .from(zoneBreakdowns)
           .where(eq(zoneBreakdowns.activityId, Number(pk)));
         return NextResponse.json(rows[0] ?? null);
+      }
+
+      case 'user-settings': {
+        // GET /api/db/user-settings?athleteId=123 → settings for athlete
+        const settingsAthleteId = req.nextUrl.searchParams.get('athleteId') ?? pk;
+        if (!settingsAthleteId)
+          return NextResponse.json(
+            {error: 'athleteId or pk required'},
+            {status: 400},
+          );
+        const settingsRows = await db
+          .select()
+          .from(userSettings)
+          .where(eq(userSettings.athleteId, Number(settingsAthleteId)));
+        return NextResponse.json(settingsRows[0] ?? null);
       }
 
       case 'chat-sessions': {
@@ -333,6 +349,26 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
+      case 'user-settings':
+        await db
+          .insert(userSettings)
+          .values(records)
+          .onConflictDoUpdate({
+            target: userSettings.athleteId,
+            set: {
+              maxHr: sql`excluded.max_hr`,
+              restingHr: sql`excluded.resting_hr`,
+              zones: sql`excluded.zones`,
+              goal: sql`excluded.goal`,
+              allergies: sql`excluded.allergies`,
+              foodPreferences: sql`excluded.food_preferences`,
+              injuries: sql`excluded.injuries`,
+              aiModel: sql`excluded.ai_model`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
       case 'chat-sessions':
         await db
           .insert(chatSessions)
@@ -440,6 +476,45 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
 
   try {
     switch (table) {
+      case 'chat-sessions': {
+        // DELETE /api/db/chat-sessions?id=uuid → delete session, its messages, and linked plans
+        const sessionId = req.nextUrl.searchParams.get('id');
+        if (!sessionId)
+          return NextResponse.json(
+            {error: 'id required'},
+            {status: 400},
+          );
+        // Delete messages belonging to this session
+        await db
+          .delete(chatMessages)
+          .where(eq(chatMessages.sessionId, sessionId));
+        // Delete plans linked to this session (best-effort — table may be out of sync)
+        try {
+          await db
+            .delete(coachPlans)
+            .where(eq(coachPlans.sourceSessionId, sessionId));
+        } catch (e) {
+          console.warn('[DB DELETE /chat-sessions] Could not cascade-delete coach_plans:', (e as Error).message);
+        }
+        // Delete the session itself (includes memory/summary)
+        await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'chat-messages': {
+        // DELETE /api/db/chat-messages?sessionId=uuid → delete all messages for a session
+        const sessionId = req.nextUrl.searchParams.get('sessionId');
+        if (!sessionId)
+          return NextResponse.json(
+            {error: 'sessionId required'},
+            {status: 400},
+          );
+        await db
+          .delete(chatMessages)
+          .where(eq(chatMessages.sessionId, sessionId));
+        return NextResponse.json({success: true});
+      }
+
       case 'coach-plans': {
         // DELETE /api/db/coach-plans?id=uuid → delete a specific plan
         const planId = req.nextUrl.searchParams.get('id');

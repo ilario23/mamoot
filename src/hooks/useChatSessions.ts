@@ -8,7 +8,7 @@
 import {useState, useEffect, useCallback, useRef} from 'react';
 import {db} from '@/lib/db';
 import type {CachedChatSession} from '@/lib/db';
-import {neonGetChatSessions, neonSyncChatSessions} from '@/lib/chatSync';
+import {neonGetChatSessions, neonSyncChatSessions, neonDeleteChatSession} from '@/lib/chatSync';
 import type {PersonaId} from '@/lib/aiPrompts';
 
 const generateId = (): string => crypto.randomUUID();
@@ -113,9 +113,20 @@ export const useChatSessions = (
   }, []);
 
   const deleteSession = useCallback(async (id: string) => {
-    // Remove messages first, then the session
+    // 1. Dexie — delete messages, associated plans, then the session
     await db.chatMessages.where('sessionId').equals(id).delete();
+    // sourceSessionId is not indexed — use filter() instead of where()
+    const allPlans = await db.coachPlans.toArray();
+    const linkedPlanIds = allPlans
+      .filter((p) => p.sourceSessionId === id)
+      .map((p) => p.id);
+    if (linkedPlanIds.length > 0) {
+      await db.coachPlans.bulkDelete(linkedPlanIds);
+    }
     await db.chatSessions.delete(id);
+
+    // 2. Neon — cascade delete session + messages + linked plans + memory
+    neonDeleteChatSession(id);
 
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== id);

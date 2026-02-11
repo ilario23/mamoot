@@ -1,9 +1,19 @@
-import {createContext, useContext, useState, ReactNode} from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  ReactNode,
+} from 'react';
 import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/mockData';
 
 interface SettingsContextType {
   settings: UserSettings;
   updateSettings: (newSettings: UserSettings) => void;
+  /** Sync settings to Neon for server-side AI tool access. Call once athleteId is known. */
+  syncToNeon: (athleteId: number) => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(
@@ -39,6 +49,31 @@ const migrateSettings = (parsed: unknown): UserSettings => {
   return s;
 };
 
+/** Fire-and-forget POST to sync settings to Neon */
+const pushSettingsToNeon = (
+  athleteId: number,
+  settings: UserSettings,
+): void => {
+  fetch('/api/db/user-settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      athleteId,
+      maxHr: settings.maxHr,
+      restingHr: settings.restingHr,
+      zones: settings.zones,
+      goal: settings.goal ?? null,
+      allergies: settings.allergies ?? [],
+      foodPreferences: settings.foodPreferences ?? null,
+      injuries: settings.injuries ?? [],
+      aiModel: settings.aiModel ?? null,
+      updatedAt: Date.now(),
+    }),
+  }).catch((err) => {
+    console.error('[SettingsSync] Failed to sync to Neon:', err);
+  });
+};
+
 export function SettingsProvider({children}: {children: ReactNode}) {
   const [settings, setSettings] = useState<UserSettings>(() => {
     try {
@@ -50,13 +85,35 @@ export function SettingsProvider({children}: {children: ReactNode}) {
     }
   });
 
-  const updateSettings = (newSettings: UserSettings) => {
+  // Track the athleteId for fire-and-forget syncs
+  const athleteIdRef = useRef<number | null>(null);
+  const backfilledRef = useRef(false);
+
+  const updateSettings = useCallback((newSettings: UserSettings) => {
     setSettings(newSettings);
     localStorage.setItem('runteam-settings', JSON.stringify(newSettings));
-  };
+
+    // Fire-and-forget sync to Neon
+    if (athleteIdRef.current) {
+      pushSettingsToNeon(athleteIdRef.current, newSettings);
+    }
+  }, []);
+
+  const syncToNeon = useCallback(
+    (athleteId: number) => {
+      athleteIdRef.current = athleteId;
+
+      // Backfill on first call: push current settings so Neon has them
+      if (!backfilledRef.current) {
+        backfilledRef.current = true;
+        pushSettingsToNeon(athleteId, settings);
+      }
+    },
+    [settings],
+  );
 
   return (
-    <SettingsContext.Provider value={{settings, updateSettings}}>
+    <SettingsContext.Provider value={{settings, updateSettings, syncToNeon}}>
       {children}
     </SettingsContext.Provider>
   );

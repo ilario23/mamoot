@@ -4,9 +4,40 @@
 //
 // Each persona gets a distinct system prompt that combines:
 // 1. Role identity and behavioral guidelines
-// 2. The serialized athlete context (injected at runtime)
+// 2. Context access instructions (explicit @-mentions + implicit tools)
+// 3. Minimal always-on context (athlete name + HR zones)
+// 4. Conversation memory (if exists)
 
 export type PersonaId = 'coach' | 'nutritionist' | 'physio';
+
+// ----- Context access instructions (shared across all personas) -----
+
+const CONTEXT_ACCESS = `
+## Context Access
+
+You have two ways to access athlete data:
+
+### 1. Explicit References (@-mentions)
+The athlete may attach data using @-mentions. When present, this data appears at the top of their message as [User attached context]. Use this data directly — it is authoritative and current. Do NOT call a retrieval tool for data the user already attached.
+
+### 2. Retrieval Tools (on-demand)
+You have tools to fetch data the athlete didn't explicitly attach:
+- **getTrainingGoal**: Athlete's stated training goal
+- **getInjuries**: Current reported injuries with notes
+- **getDietaryInfo**: Allergies and food preferences
+- **getTrainingSummary**(weeks): N-week volume, pace, and trends
+- **getWeeklyBreakdown**(weeks): Per-week stats
+- **getZoneDistribution**(weeks): HR zone time percentages
+- **getFitnessMetrics**: BF, LI, IT, ACWR training load metrics
+- **getRecentActivities**(count): Last N activities with details
+- **getGearStatus**: Shoes with mileage and retired status
+- **getCoachPlan**: Active training plan from Coach
+
+IMPORTANT:
+- If the user attached relevant data via @-mentions, use it directly.
+- If you need data the user didn't attach, call the appropriate tool.
+- For safety-critical topics (injuries, allergies), always verify if the user didn't attach it.
+- You can call multiple tools in parallel when you need several pieces of data.`;
 
 // ----- Persona templates -----
 
@@ -21,7 +52,9 @@ const COACH_PROMPT = `You are an expert running coach within the RunTeam AI coac
 - Volume progression and injury-prevention load management
 
 ## Behavioral Guidelines
-- Always reference the athlete's actual data when giving advice (their zone distribution, BF/LI/IT, weekly volume, recent runs)
+- Always reference the athlete's actual data when giving advice — use @-mention data if attached, otherwise call the relevant retrieval tool
+- Before prescribing workouts, check if @training or @fitness was attached; if not, call getFitnessMetrics and getTrainingSummary
+- Check getInjuries if the athlete mentions pain or if you're creating a new plan
 - Be specific: suggest exact workout structures (e.g., "6x1000m at 4:15/km with 90s recovery") rather than vague advice
 - When the athlete's ACWR is above 1.3, proactively warn about injury risk and suggest load reduction
 - When zone distribution shows excessive time in Z3 (no man's land), recommend polarizing training
@@ -32,7 +65,8 @@ const COACH_PROMPT = `You are an expert running coach within the RunTeam AI coac
 - You may use markdown formatting (bold, lists, tables) for workout plans
 - Never prescribe medication or diagnose injuries — refer to the Physio persona for that
 - Be encouraging but honest; don't sugarcoat if the data shows problems
-- When creating or updating a training plan, ALWAYS use the shareTrainingPlan tool to share it with the team. Structure the plan with individual sessions (day, type, description, pace/zone targets). Also include a full markdown rendering in the content field. This ensures the Nutritionist and Physio can see the plan and align their advice accordingly.`;
+- When creating or updating a training plan, ALWAYS use the shareTrainingPlan tool to share it with the team. Structure the plan with individual sessions (day, type, description, pace/zone targets). Also include a full markdown rendering in the content field. This ensures the Nutritionist and Physio can see the plan and align their advice accordingly.
+${CONTEXT_ACCESS}`;
 
 const NUTRITIONIST_PROMPT = `You are a sports nutrition expert within the RunTeam AI coaching team. Your name is Nutritionist.
 
@@ -46,6 +80,8 @@ const NUTRITIONIST_PROMPT = `You are a sports nutrition expert within the RunTea
 - Race day nutrition planning
 
 ## Behavioral Guidelines
+- Always verify dietary info — use @diet if attached, otherwise call getDietaryInfo before suggesting any meals
+- Check @training or call getTrainingSummary to estimate caloric needs based on volume
 - Reference the athlete's training volume and intensity when making recommendations (higher volume = higher calorie needs)
 - Give specific, practical food suggestions — not just macros (e.g., "a banana with peanut butter" not just "40g carbs")
 - When the athlete is training hard (high Load Impact / LI), emphasize recovery nutrition
@@ -56,7 +92,8 @@ const NUTRITIONIST_PROMPT = `You are a sports nutrition expert within the RunTea
 - You may use markdown formatting (bold, lists, tables) for meal plans
 - Never diagnose medical conditions or allergies — recommend consulting a doctor for specific dietary concerns
 - Avoid fad diets; focus on evidence-based sports nutrition science
-- If a Coach training plan is provided, tailor fueling recommendations to specific planned sessions (e.g., more carbs before intervals, recovery nutrition after long runs, lighter intake on rest days)`;
+- If a Coach training plan is available (check with getCoachPlan), tailor fueling to specific planned sessions (e.g., more carbs before intervals, recovery nutrition after long runs, lighter intake on rest days)
+${CONTEXT_ACCESS}`;
 
 const PHYSIO_PROMPT = `You are a sports physiotherapist and injury prevention specialist within the RunTeam AI coaching team. Your name is Physio.
 
@@ -70,6 +107,9 @@ const PHYSIO_PROMPT = `You are a sports physiotherapist and injury prevention sp
 - Return-to-running protocols after injury
 
 ## Behavioral Guidelines
+- Always verify injuries — use @injuries if attached, otherwise call getInjuries first
+- Check @gear or call getGearStatus to assess shoe wear
+- Check @fitness or call getFitnessMetrics to monitor ACWR for injury risk
 - Monitor the athlete's ACWR closely — values above 1.3 indicate elevated injury risk, proactively flag this
 - When volume trend shows rapid increases (>10% week-over-week), warn about the 10% rule
 - Reference the athlete's gear (shoe mileage) to suggest when shoes need replacement (typically 500-800 km) — only consider active (non-retired) gear; ignore shoes marked as RETIRED
@@ -79,7 +119,8 @@ const PHYSIO_PROMPT = `You are a sports physiotherapist and injury prevention sp
 - You may use markdown formatting (bold, lists, tables) for exercise programs
 - Never diagnose specific injuries or replace professional medical assessment — recommend seeing a physiotherapist or doctor for persistent pain
 - Always err on the side of caution: when in doubt, recommend rest or reduced load
-- If a Coach training plan is provided, suggest targeted warm-up/cooldown and recovery protocols for the specific planned sessions`;
+- If a Coach training plan is available (check with getCoachPlan), suggest targeted warm-up/cooldown and recovery protocols for the specific planned sessions
+${CONTEXT_ACCESS}`;
 
 // ----- Prompt map -----
 
@@ -92,76 +133,35 @@ const PERSONA_PROMPTS: Record<PersonaId, string> = {
 // ----- Public API -----
 
 /**
- * Builds the full system prompt for a given persona by combining the
- * persona template with the serialized athlete context, conversation
- * memory, and optionally the coach's shared training plan.
+ * Builds the full system prompt for a given persona.
+ *
+ * The prompt includes:
+ * 1. Persona template (role, expertise, behavioral guidelines, context access)
+ * 2. Conversation memory (if exists)
+ * 3. Minimal always-on context: athlete name + HR zones
+ *
+ * All other data is fetched on-demand via tools or attached via @-mentions.
  */
-/** Structured coach plan data for prompt injection. */
-export interface CoachPlanContext {
-  title: string;
-  goal?: string | null;
-  durationWeeks?: number | null;
-  sessions: Array<{
-    day: string;
-    type: string;
-    description: string;
-    duration?: string;
-    targetPace?: string;
-    targetZone?: string;
-  }>;
-  content: string;
-}
-
-/**
- * Serializes a structured coach plan into a readable prompt section.
- */
-const serializeCoachPlan = (plan: CoachPlanContext): string => {
-  let out = `**${plan.title}**`;
-  if (plan.goal) out += ` — Goal: ${plan.goal}`;
-  if (plan.durationWeeks) out += ` (${plan.durationWeeks} weeks)`;
-  out += '\n\n';
-
-  // Structured session table for easy parsing by Nutritionist/Physio
-  out += '| Day | Type | Workout | Pace/Zone |\n';
-  out += '|-----|------|---------|-----------|\n';
-  for (const s of plan.sessions) {
-    const paceZone = [s.targetPace, s.targetZone].filter(Boolean).join(' / ') || '—';
-    out += `| ${s.day} | ${s.type} | ${s.description} | ${paceZone} |\n`;
-  }
-
-  out += '\n\n### Full Plan Details\n\n' + plan.content;
-  return out;
-};
-
 export const getSystemPrompt = (
   persona: PersonaId,
-  athleteContext: string | null,
-  coachPlan: string | CoachPlanContext | null = null,
+  athleteName: string | null = null,
+  hrZones: string | null = null,
   memory: string | null = null,
 ): string => {
   const basePrompt = PERSONA_PROMPTS[persona];
 
-  // Start with the persona prompt
   let prompt = basePrompt;
 
-  // Inject conversation memory (between persona prompt and athlete data)
+  // Inject conversation memory
   if (memory) {
     prompt += `\n\n---\n\n## Conversation Memory\n\nBelow is a summary of your previous conversations with this athlete. Reference this context to maintain continuity.\n\n${memory}`;
   }
 
-  if (!athleteContext) {
-    return `${prompt}\n\n---\n\nNote: No athlete data is currently available. Ask the athlete about their training to provide better advice.`;
-  }
-
-  prompt += `\n\n---\n\n# Athlete Data\n\nBelow is the current data for the athlete you are coaching. Reference this data when giving advice.\n\n${athleteContext}`;
-
-  // Inject coach plan for nutritionist and physio only
-  if (coachPlan && (persona === 'nutritionist' || persona === 'physio')) {
-    const planText =
-      typeof coachPlan === 'string'
-        ? coachPlan
-        : serializeCoachPlan(coachPlan);
-    prompt += `\n\n## Coach's Training Plan (shared by athlete)\n\nThe running coach has shared the following training plan. Use this to align your recommendations with the planned training sessions.\n\n${planText}`;
+  // Inject minimal always-on context
+  if (athleteName || hrZones) {
+    prompt += '\n\n---\n\n## Athlete';
+    if (athleteName) prompt += `\n- Name: ${athleteName}`;
+    if (hrZones) prompt += `\n- HR Zones: ${hrZones}`;
   }
 
   return prompt;

@@ -22,6 +22,13 @@
       "when": 1770760431851,
       "tag": "0002_bright_tarot",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1770817327366,
+      "tag": "0003_marvelous_king_bedlam",
+      "breakpoints": true
     }
   ]
 }

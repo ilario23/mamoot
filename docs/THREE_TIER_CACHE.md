@@ -35,11 +35,11 @@ The app uses a three-tier cache-through pattern to balance **speed**, **persiste
 
 ### Why three tiers?
 
-| Tier | Technology | Purpose | Latency | Survives |
-|------|------------|---------|---------|----------|
-| **1** | Dexie (IndexedDB) | Instant reads, offline support | ~1 ms | Page reload (same browser) |
-| **2** | Neon (PostgreSQL) | Persistent storage, multi-device | ~50–200 ms | Forever (server-side) |
-| **3** | Strava API | Source of truth | ~300–1000 ms | N/A (external) |
+| Tier  | Technology        | Purpose                          | Latency      | Survives                   |
+| ----- | ----------------- | -------------------------------- | ------------ | -------------------------- |
+| **1** | Dexie (IndexedDB) | Instant reads, offline support   | ~1 ms        | Page reload (same browser) |
+| **2** | Neon (PostgreSQL) | Persistent storage, multi-device | ~50–200 ms   | Forever (server-side)      |
+| **3** | Strava API        | Source of truth                  | ~300–1000 ms | N/A (external)             |
 
 **Key benefit:** If you clear browser data or switch devices, Tier 2 (Neon) still has all your data — no need to re-fetch everything from Strava (which is rate-limited to 100 req/15 min).
 
@@ -88,15 +88,15 @@ When Neon is added to an existing install that already has data in Dexie, the Ne
 
 Defined in `src/lib/stravaCache.ts`:
 
-| Data Type | Max Age | Rationale |
-|-----------|---------|-----------|
-| Activities list | 1 hour | New activities appear frequently |
-| Activity detail | ∞ (never expires) | Historical data never changes |
-| Activity streams | ∞ (never expires) | Time-series data is immutable |
-| Athlete stats | 1 hour | Updates with new activities |
-| Athlete zones | 24 hours | Rarely reconfigured |
-| Athlete gear | 1 hour | Shoes/bikes change occasionally |
-| Zone breakdowns | By `settingsHash` | Invalidated when user changes zone config |
+| Data Type        | Max Age           | Rationale                                 |
+| ---------------- | ----------------- | ----------------------------------------- |
+| Activities list  | 1 hour            | New activities appear frequently          |
+| Activity detail  | ∞ (never expires) | Historical data never changes             |
+| Activity streams | ∞ (never expires) | Time-series data is immutable             |
+| Athlete stats    | 1 hour            | Updates with new activities               |
+| Athlete zones    | 24 hours          | Rarely reconfigured                       |
+| Athlete gear     | 1 hour            | Shoes/bikes change occasionally           |
+| Zone breakdowns  | By `settingsHash` | Invalidated when user changes zone config |
 
 ---
 
@@ -128,17 +128,21 @@ drizzle.config.ts          ← Drizzle Kit config (migrations, push)
 
 ## Database Tables (Neon)
 
-All 7 tables mirror the Dexie/IndexedDB schema. Data is stored as JSONB blobs with metadata columns.
+All tables mirror the Dexie/IndexedDB schema where applicable. Data is stored as JSONB blobs with metadata columns.
 
-| Table | Primary Key | Data Column(s) | Metadata |
-|-------|-------------|----------------|----------|
-| `activities` | `id` (bigint) | `data` (jsonb) | `date`, `fetched_at` |
-| `activity_details` | `id` (bigint) | `data` (jsonb) | `fetched_at` |
-| `activity_streams` | `activity_id` (bigint) | `data` (jsonb) | `fetched_at` |
-| `athlete_stats` | `athlete_id` (bigint) | `data` (jsonb) | `fetched_at` |
-| `athlete_zones` | `key` (text) | `data` (jsonb) | `fetched_at` |
-| `athlete_gear` | `key` (text) | `bikes`, `shoes` (jsonb) | `fetched_at` |
-| `zone_breakdowns` | `activity_id` (bigint) | `zones` (jsonb) | `settings_hash`, `computed_at` |
+| Table              | Primary Key            | Data Column(s)                           | Metadata                                                                                        |
+| ------------------ | ---------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `activities`       | `id` (bigint)          | `data` (jsonb)                           | `date`, `fetched_at`                                                                            |
+| `activity_details` | `id` (bigint)          | `data` (jsonb)                           | `fetched_at`                                                                                    |
+| `activity_streams` | `activity_id` (bigint) | `data` (jsonb)                           | `fetched_at`                                                                                    |
+| `athlete_stats`    | `athlete_id` (bigint)  | `data` (jsonb)                           | `fetched_at`                                                                                    |
+| `athlete_zones`    | `key` (text)           | `data` (jsonb)                           | `fetched_at`                                                                                    |
+| `athlete_gear`     | `key` (text)           | `bikes`, `shoes` (jsonb)                 | `fetched_at`                                                                                    |
+| `zone_breakdowns`  | `activity_id` (bigint) | `zones` (jsonb)                          | `settings_hash`, `computed_at`                                                                  |
+| `user_settings`    | `athlete_id` (bigint)  | `zones`, `allergies`, `injuries` (jsonb) | `max_hr`, `resting_hr`, `goal`, `food_preferences`, `ai_model`, `updated_at`                    |
+| `chat_sessions`    | `id` (text)            | —                                        | `athlete_id`, `persona`, `title`, `summary`, `message_count`, `created_at`, `updated_at`        |
+| `chat_messages`    | `id` (text)            | —                                        | `session_id`, `role`, `content`, `created_at`                                                   |
+| `coach_plans`      | `id` (text)            | `sessions` (jsonb)                       | `athlete_id`, `title`, `summary`, `goal`, `duration_weeks`, `content`, `is_active`, `shared_at` |
 
 ---
 
@@ -178,22 +182,22 @@ Uses PostgreSQL `ON CONFLICT DO UPDATE` so existing records are overwritten with
 
 Typed helper functions that `stravaCache.ts` imports:
 
-| Function | Direction | Blocking? |
-|----------|-----------|-----------|
-| `neonGetActivities()` | Read (all) | Yes (awaitable) |
-| `neonGetActivityDetail(id)` | Read (by PK) | Yes (awaitable) |
-| `neonGetActivityStreams(id)` | Read (by PK) | Yes (awaitable) |
-| `neonGetAthleteStats(id)` | Read (by PK) | Yes (awaitable) |
-| `neonGetAthleteZones(key)` | Read (by PK) | Yes (awaitable) |
-| `neonGetAthleteGear(key)` | Read (by PK) | Yes (awaitable) |
-| `neonGetZoneBreakdown(id)` | Read (by PK) | Yes (awaitable) |
-| `neonSyncActivities(records)` | Write (bulk) | No (fire-and-forget) |
-| `neonSyncActivityDetail(record)` | Write (single) | No (fire-and-forget) |
+| Function                          | Direction      | Blocking?            |
+| --------------------------------- | -------------- | -------------------- |
+| `neonGetActivities()`             | Read (all)     | Yes (awaitable)      |
+| `neonGetActivityDetail(id)`       | Read (by PK)   | Yes (awaitable)      |
+| `neonGetActivityStreams(id)`      | Read (by PK)   | Yes (awaitable)      |
+| `neonGetAthleteStats(id)`         | Read (by PK)   | Yes (awaitable)      |
+| `neonGetAthleteZones(key)`        | Read (by PK)   | Yes (awaitable)      |
+| `neonGetAthleteGear(key)`         | Read (by PK)   | Yes (awaitable)      |
+| `neonGetZoneBreakdown(id)`        | Read (by PK)   | Yes (awaitable)      |
+| `neonSyncActivities(records)`     | Write (bulk)   | No (fire-and-forget) |
+| `neonSyncActivityDetail(record)`  | Write (single) | No (fire-and-forget) |
 | `neonSyncActivityStreams(record)` | Write (single) | No (fire-and-forget) |
-| `neonSyncAthleteStats(record)` | Write (single) | No (fire-and-forget) |
-| `neonSyncAthleteZones(record)` | Write (single) | No (fire-and-forget) |
-| `neonSyncAthleteGear(record)` | Write (single) | No (fire-and-forget) |
-| `neonSyncZoneBreakdown(record)` | Write (single) | No (fire-and-forget) |
+| `neonSyncAthleteStats(record)`    | Write (single) | No (fire-and-forget) |
+| `neonSyncAthleteZones(record)`    | Write (single) | No (fire-and-forget) |
+| `neonSyncAthleteGear(record)`     | Write (single) | No (fire-and-forget) |
+| `neonSyncZoneBreakdown(record)`   | Write (single) | No (fire-and-forget) |
 
 All read functions return `null` on any error — Neon is **optional**, the app degrades gracefully to Dexie + Strava.
 
@@ -203,13 +207,13 @@ All read functions return `null` on any error — Neon is **optional**, the app 
 
 The system is designed to work even when tiers are unavailable:
 
-| Scenario | Behavior |
-|----------|----------|
-| Neon is down | App works normally with Dexie + Strava (original behavior) |
-| Browser data cleared | Neon provides all data without re-fetching from Strava |
-| New device / browser | Neon hydrates Dexie on first load |
-| Offline | Dexie serves cached data; Neon and Strava calls fail silently |
-| Strava rate-limited | Dexie and Neon serve cached data until limits reset |
+| Scenario             | Behavior                                                      |
+| -------------------- | ------------------------------------------------------------- |
+| Neon is down         | App works normally with Dexie + Strava (original behavior)    |
+| Browser data cleared | Neon provides all data without re-fetching from Strava        |
+| New device / browser | Neon hydrates Dexie on first load                             |
+| Offline              | Dexie serves cached data; Neon and Strava calls fail silently |
+| Strava rate-limited  | Dexie and Neon serve cached data until limits reset           |
 
 ---
 
@@ -235,10 +239,38 @@ DATABASE_URL=postgresql://user:pass@ep-xxxx.region.aws.neon.tech/neondb?sslmode=
 
 ---
 
+## User Settings Sync
+
+User settings (HR zones, training goal, injuries, allergies, food preferences, AI model) are stored in `localStorage` and synced to Neon's `user_settings` table. This enables **server-side AI retrieval tools** to access athlete settings without a client round-trip.
+
+### Sync path
+
+```
+localStorage (runteam-settings)
+  ─── fire-and-forget POST /api/db/user-settings ───►  Neon (user_settings table)
+```
+
+- **On save**: After every `updateSettings()` call, a fire-and-forget POST upserts the settings to Neon.
+- **On startup (backfill)**: When the athlete first authenticates, the `SettingsSyncBridge` component pushes current settings to Neon if they haven't been synced yet.
+- **Staleness**: Settings change infrequently; the ~100-500ms write delay is acceptable.
+
+### Who reads from where
+
+| Consumer           | Reads From                           | Why                           |
+| ------------------ | ------------------------------------ | ----------------------------- |
+| UI components      | `localStorage` (via `useSettings()`) | Instant, no network           |
+| @-mention resolver | Dexie / `localStorage`               | Client-side, fast             |
+| AI retrieval tools | Neon (`user_settings`)               | Server-side, no client access |
+
+See [AI Context documentation](./AI_CONTEXT.md) for details on the dual context strategy.
+
+---
+
 ## Future Improvements
 
 - [ ] **Schema normalization** — Extract key fields from JSONB into proper columns for faster SQL queries (pace trends, weekly mileage, PR tracking)
 - [x] **Dexie → Neon backfill** — When Dexie has data but Neon is empty, records are fire-and-forget synced on cache hit (implemented via backfill on Tier 1 hits)
+- [x] **User settings sync** — localStorage settings synced to Neon for server-side AI tool access
 - [ ] **API route authentication** — Add a session check or API key to the `/api/db/*` routes for production deployments
 - [ ] **Selective fetching** — For activities, fetch only records newer than what Neon already has instead of transferring the full list
 - [ ] **Connection pooling** — Switch from Neon HTTP driver to WebSocket driver if query volume increases

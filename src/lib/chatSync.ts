@@ -68,6 +68,15 @@ export const neonSyncChatMessages = (
   postToNeon('chat-messages', records);
 };
 
+/** Fire-and-forget delete of a chat session and all its data (messages, plans, memory). */
+export const neonDeleteChatSession = (sessionId: string): void => {
+  fetch(`${API}/chat-sessions?id=${sessionId}`, {
+    method: 'DELETE',
+  }).catch(() => {
+    // Silently ignore — Neon sync is best-effort
+  });
+};
+
 // ---- Coach Plans ----
 
 /** Get all plans for an athlete (ordered by sharedAt desc). */

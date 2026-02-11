@@ -5,11 +5,9 @@ import {
   Dumbbell,
   Apple,
   Stethoscope,
-  Send,
   Loader2,
   AlertCircle,
   Check,
-  X,
   Plus,
   MessageSquare,
   Trash2,
@@ -22,21 +20,33 @@ import {useChat} from '@ai-sdk/react';
 import {DefaultChatTransport} from 'ai';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {useAthleteSummary} from '@/hooks/useAthleteSummary';
 import {useCoachPlan} from '@/hooks/useCoachPlan';
 import {useChatSessions} from '@/hooks/useChatSessions';
 import {
   useChatPersistence,
   MAX_MESSAGES_IN_CONTEXT,
 } from '@/hooks/useChatPersistence';
+import {useMentionResolver} from '@/hooks/useMentionData';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/mockData';
 import type {PersonaId} from '@/lib/aiPrompts';
 import type {ShareTrainingPlanInput} from '@/lib/aiTools';
+import {getMentionCategory, parseMentionMeta, type MentionReference} from '@/lib/mentionTypes';
 import type {PlanSession} from '@/lib/db';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import CoachPlanList from '@/components/layout/CoachPlanList';
+import ChatInput from '@/components/chat/ChatInput';
 
 // ----- Personas -----
 
@@ -242,17 +252,16 @@ const usePersistentChat = (sessionId: string | null) => {
 
 const AITeamChat = () => {
   const [activePersona, setActivePersona] = useState<PersonaId>('coach');
-  const [input, setInput] = useState('');
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [planListOpen, setPlanListOpen] = useState(false);
+  const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {athlete} = useStravaAuth();
   const {settings} = useSettings();
   const selectedModel = settings.aiModel ?? DEFAULT_MODEL;
-  const {serialized: athleteContext, isLoading: contextLoading} =
-    useAthleteSummary();
+  const {resolveAll} = useMentionResolver();
   const athleteId = athlete?.id ?? null;
   const {plans, activePlan, savePlan, activatePlan, deletePlan} =
     useCoachPlan(athleteId);
@@ -416,8 +425,8 @@ const AITeamChat = () => {
     lastPersistedCount.current = 0;
   }, [activeSession?.id]);
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim() || activeChat.status === 'streaming') return;
+  const handleSend = useCallback(async (text: string, mentions: MentionReference[]) => {
+    if (!text.trim() || activeChat.status === 'streaming') return;
 
     // Auto-create a session if none exists
     let session = activeSession;
@@ -437,49 +446,41 @@ const AITeamChat = () => {
       activeChat.setMessages(trimmedMessages);
     }
 
+    // Resolve @-mention data from Dexie
+    const explicitContext = mentions.length > 0 ? await resolveAll(mentions) : undefined;
+
+    // Encode mentions into message text so they're visible in the conversation
+    let messageText = text.trim();
+    if (mentions.length > 0) {
+      const mentionMeta = JSON.stringify(
+        mentions.map((m) => ({categoryId: m.categoryId, itemId: m.itemId, label: m.label})),
+      );
+      messageText = `<!-- mentions:${mentionMeta} -->\n${messageText}`;
+    }
+
     activeChat.sendMessage(
-      {text: input.trim()},
+      {text: messageText},
       {
         body: {
           persona: activePersona,
-          athleteContext,
           model: selectedModel,
-          coachPlan:
-            activePersona !== 'coach' && activePlan
-              ? {
-                  title: activePlan.title,
-                  goal: activePlan.goal,
-                  durationWeeks: activePlan.durationWeeks,
-                  sessions: activePlan.sessions,
-                  content: activePlan.content,
-                }
-              : null,
           memory,
           athleteId,
           sessionId: session?.id ?? null,
+          explicitContext,
         },
       },
     );
-    setInput('');
   }, [
-    input,
     activeChat,
     activePersona,
-    athleteContext,
     selectedModel,
-    activePlan,
     memory,
     activeSession,
     activeSM,
     athleteId,
+    resolveAll,
   ]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
 
   const handleNewConversation = useCallback(async () => {
     await activeSM.createSession();
@@ -497,17 +498,39 @@ const AITeamChat = () => {
     [activeSM],
   );
 
-  const handleDeleteSession = useCallback(
-    async (id: string) => {
-      await activeSM.deleteSession(id);
-      if (activeSM.sessions.length <= 1) {
-        activeChat.setMessages([]);
-        lastPersistedCount.current = 0;
-        setMemory(null);
-      }
+  const handleDeleteSessionRequest = useCallback(
+    (id: string) => {
+      setDeleteConfirmSessionId(id);
     },
-    [activeSM, activeChat],
+    [],
   );
+
+  const handleDeleteSessionConfirm = useCallback(async () => {
+    const id = deleteConfirmSessionId;
+    if (!id) return;
+    setDeleteConfirmSessionId(null);
+
+    // Find linked plans to remove from local plan state
+    const linkedPlanIds = plans
+      .filter((p) => p.sourceSessionId === id)
+      .map((p) => p.id);
+
+    await activeSM.deleteSession(id);
+
+    // If deleted plans included the active plan, useCoachPlan will
+    // re-hydrate next render, but we should also trigger a local
+    // cleanup for linked plans that were already deleted from Dexie+Neon
+    // via the cascade in deleteSession / API route.
+    for (const planId of linkedPlanIds) {
+      deletePlan(planId);
+    }
+
+    if (activeSM.sessions.length <= 1) {
+      activeChat.setMessages([]);
+      lastPersistedCount.current = 0;
+      setMemory(null);
+    }
+  }, [deleteConfirmSessionId, activeSM, activeChat, plans, deletePlan]);
 
   const handlePersonaSwitch = useCallback((personaId: PersonaId) => {
     setActivePersona(personaId);
@@ -585,7 +608,7 @@ const AITeamChat = () => {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleDeleteSession(session.id);
+                handleDeleteSessionRequest(session.id);
               }}
               aria-label={`Delete conversation: ${session.title}`}
               tabIndex={0}
@@ -710,14 +733,6 @@ const AITeamChat = () => {
           </div>
         </div>
 
-        {/* Context loading indicator */}
-        {contextLoading && (
-          <div className='px-3 py-2 bg-muted/50 border-b-3 border-border flex items-center gap-2 text-xs text-muted-foreground'>
-            <Loader2 className='h-3 w-3 animate-spin' />
-            Loading your training data...
-          </div>
-        )}
-
         {/* Memory indicator */}
         {memory && (
           <div className='px-3 py-1.5 bg-secondary/10 border-b-3 border-border flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground'>
@@ -811,7 +826,31 @@ const AITeamChat = () => {
                     {isUser ? 'You' : currentPersona.label}
                   </span>
                   {isUser ? (
-                    textContent
+                    (() => {
+                      const {mentions: msgMentions, cleanText} = parseMentionMeta(textContent);
+                      return (
+                        <>
+                          {msgMentions.length > 0 && (
+                            <div className='flex flex-wrap gap-1 mb-1.5'>
+                              {msgMentions.map((mention, idx) => {
+                                const cat = getMentionCategory(mention.categoryId);
+                                const Icon = cat?.icon;
+                                return (
+                                  <span
+                                    key={`${mention.categoryId}-${mention.itemId ?? 'all'}-${idx}`}
+                                    className='inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold bg-primary/10 border-2 border-primary/30 text-primary rounded-sm'
+                                  >
+                                    {Icon && <Icon className='h-2.5 w-2.5' />}
+                                    {mention.label}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {cleanText}
+                        </>
+                      );
+                    })()
                   ) : (
                     <>
                       {textContent && (
@@ -890,36 +929,11 @@ const AITeamChat = () => {
           </div>
         )}
 
-        {/* Input */}
-        <div className='p-3 border-t-3 border-border flex gap-2'>
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isStreaming ? 'Waiting for response...' : 'Ask your AI team...'
-            }
-            disabled={isStreaming}
-            aria-label='Message input'
-            className='flex-1 min-w-0 px-3 py-2 border-3 border-border font-medium text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50'
-          />
-          <button
-            onClick={handleSend}
-            disabled={isStreaming || !input.trim()}
-            aria-label='Send message'
-            tabIndex={0}
-            className='px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-border hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed'
-          >
-            {isStreaming ? (
-              <Loader2 className='h-4 w-4 animate-spin' />
-            ) : (
-              <Send className='h-4 w-4' />
-            )}
-            <span className='hidden sm:inline'>
-              {isStreaming ? '...' : 'Send'}
-            </span>
-          </button>
-        </div>
+        {/* Input with @-mention support */}
+        <ChatInput
+          onSend={handleSend}
+          isStreaming={isStreaming}
+        />
       </div>
 
       {/* Desktop history sidebar (right) — always visible on md+ */}
@@ -934,6 +948,58 @@ const AITeamChat = () => {
           {sidebarContent}
         </SheetContent>
       </Sheet>
+
+      {/* Delete conversation confirmation dialog */}
+      <AlertDialog
+        open={!!deleteConfirmSessionId}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirmSessionId(null);
+        }}
+      >
+        <AlertDialogContent className='border-3 border-border max-w-[280px] p-4 gap-3'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='font-black text-base'>
+              Delete conversation?
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-sm text-muted-foreground space-y-2'>
+              <span className='block'>
+                This will permanently delete this conversation and all associated data:
+              </span>
+              <span className='block space-y-1 text-xs'>
+                <span className='flex items-center gap-1.5'>
+                  <MessageSquare className='h-3 w-3 shrink-0' />
+                  All messages in this conversation
+                </span>
+                <span className='flex items-center gap-1.5'>
+                  <MessageSquare className='h-3 w-3 shrink-0' />
+                  Memory &amp; conversation summary
+                </span>
+                {deleteConfirmSessionId &&
+                  plans.some((p) => p.sourceSessionId === deleteConfirmSessionId) && (
+                    <span className='flex items-center gap-1.5 text-destructive font-bold'>
+                      <ClipboardList className='h-3 w-3 shrink-0' />
+                      {plans.filter((p) => p.sourceSessionId === deleteConfirmSessionId).length} training plan(s) created in this conversation
+                    </span>
+                  )}
+              </span>
+              <span className='block font-bold text-foreground text-xs'>
+                This action cannot be undone.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className='border-2 border-border font-bold text-xs'>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSessionConfirm}
+              className='bg-destructive text-destructive-foreground hover:bg-destructive/90 border-2 border-border font-black text-xs'
+            >
+              Delete everything
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
