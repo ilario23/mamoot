@@ -23,7 +23,7 @@ const AppShell = ({children}: {children: ReactNode}) => {
 
   if (isLoading) {
     return (
-      <div className='min-h-screen flex items-center justify-center bg-background'>
+      <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe'>
         <Loader2 className='h-8 w-8 animate-spin text-primary' />
       </div>
     );
@@ -35,15 +35,29 @@ const AppShell = ({children}: {children: ReactNode}) => {
 
   return (
     <SidebarProvider>
-      <div className='min-h-screen flex w-full bg-background overflow-x-hidden' style={themeStyle}>
+      <div className='min-h-screen flex w-full bg-background overflow-x-hidden pl-safe pr-safe' style={themeStyle}>
         {/* Desktop Sidebar */}
         <DesktopSidebar />
 
         {/* Main Content */}
         <div className='flex-1 flex flex-col h-screen pb-bottom-nav md:pb-0'>
           {/* Mobile header */}
-          <header className='border-b-3 border-border p-3 md:hidden flex items-center'>
-            <h1 className='font-black text-xl tracking-tight'>🏃 RunTeam AI</h1>
+          <header className='border-b-3 border-border p-3 pt-safe md:hidden flex items-center'>
+            <div className='flex items-center gap-2.5' role='banner' aria-label='RunTeam AI'>
+              <div className='w-8 h-8 bg-primary border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0'>
+                <span className='font-black text-sm text-primary-foreground leading-none select-none'>
+                  R
+                </span>
+              </div>
+              <div className='flex flex-col overflow-hidden'>
+                <h1 className='font-black text-lg tracking-tight leading-none'>
+                  RunTeam
+                </h1>
+                <span className='inline-block mt-0.5 w-fit bg-foreground text-background text-[10px] font-black px-1.5 py-px uppercase tracking-widest select-none'>
+                  AI
+                </span>
+              </div>
+            </div>
             <div className='ml-auto'>
               <SidebarUserProfile compact />
             </div>

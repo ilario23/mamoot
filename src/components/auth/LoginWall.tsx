@@ -64,7 +64,7 @@ const LoginWallContent = () => {
 
   if (isLoading) {
     return (
-      <div className='min-h-screen flex items-center justify-center bg-background'>
+      <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe'>
         <div className='flex flex-col items-center gap-4'>
           <Loader2 className='h-8 w-8 animate-spin text-primary' />
           <p className='font-bold text-sm text-muted-foreground'>
@@ -76,7 +76,7 @@ const LoginWallContent = () => {
   }
 
   return (
-    <div className='min-h-screen flex flex-col items-center justify-center bg-background px-4'>
+    <div className='min-h-screen flex flex-col items-center justify-center bg-background px-4 pt-safe pb-safe'>
       <div className='w-full max-w-md flex flex-col items-center gap-8'>
         {/* Logo */}
         <div className='flex items-center gap-3'>
@@ -139,7 +139,7 @@ const LoginWall = () => {
   return (
     <Suspense
       fallback={
-        <div className='min-h-screen flex items-center justify-center bg-background'>
+        <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe'>
           <Loader2 className='h-8 w-8 animate-spin text-primary' />
         </div>
       }
