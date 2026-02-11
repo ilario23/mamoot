@@ -136,7 +136,7 @@ const StatCards = () => {
     return (
       <div className='space-y-4'>
         <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2, 3].map((i) => (
             <div
               key={i}
               className='border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]'
@@ -146,7 +146,7 @@ const StatCards = () => {
           ))}
         </div>
         <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[5, 6].map((i) => (
+          {[4, 5, 6].map((i) => (
             <div
               key={i}
               className='border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]'
@@ -161,8 +161,8 @@ const StatCards = () => {
 
   if (cards.length === 0) return null;
 
-  const topRow = cards.slice(0, 4);
-  const bottomRow = cards.slice(4);
+  const topRow = cards.slice(0, 3);
+  const bottomRow = cards.slice(3);
   const showBottomRow = !isMobile || showAll;
 
   const handleToggleShowAll = () => {
