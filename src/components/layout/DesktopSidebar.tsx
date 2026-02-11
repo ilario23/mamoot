@@ -12,9 +12,12 @@ import {
   Cog,
   PanelLeftClose,
   PanelLeftOpen,
+  ClipboardList,
 } from 'lucide-react';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import {useSidebarCollapse} from '@/contexts/SidebarContext';
+import {useCoachPlan} from '@/hooks/useCoachPlan';
+import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {
   Tooltip,
   TooltipContent,
@@ -35,6 +38,9 @@ const navItems = [
 const DesktopSidebar = () => {
   const pathname = usePathname();
   const {isCollapsed, toggleSidebar} = useSidebarCollapse();
+  const {athlete} = useStravaAuth();
+  const {activePlan} = useCoachPlan(athlete?.id ?? null);
+  const isPlanActive = pathname === '/training-plan';
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -147,8 +153,47 @@ const DesktopSidebar = () => {
           })}
         </nav>
 
-        {/* User profile */}
+        {/* Plan badge + User profile */}
         <div className='mt-auto'>
+          {activePlan && (
+            <div className={isCollapsed ? 'px-2 pb-1' : 'px-3 pb-1'}>
+              {isCollapsed ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href='/training-plan'
+                      aria-label='View training plan'
+                      className={`relative flex items-center justify-center py-2.5 border-3 border-border font-bold text-sm transition-all ${
+                        isPlanActive
+                          ? 'bg-primary/10 text-primary shadow-neo-sm'
+                          : 'bg-background hover:bg-primary/5 hover:text-primary'
+                      }`}
+                    >
+                      <ClipboardList className='h-5 w-5 shrink-0' />
+                      <span className='absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full animate-pulse' />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side='right'>
+                    <p>Training Plan</p>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Link
+                  href='/training-plan'
+                  aria-label='View training plan'
+                  className={`relative flex items-center gap-3 px-4 py-2.5 border-3 border-border font-bold text-sm transition-all ${
+                    isPlanActive
+                      ? 'bg-primary/10 text-primary shadow-neo-sm'
+                      : 'bg-background hover:bg-primary/5 hover:text-primary'
+                  }`}
+                >
+                  <ClipboardList className='h-5 w-5 shrink-0' />
+                  <span className='truncate'>Training Plan</span>
+                  <span className='ml-auto w-2 h-2 bg-primary rounded-full animate-pulse shrink-0' />
+                </Link>
+              )}
+            </div>
+          )}
           <SidebarUserProfile collapsed={isCollapsed} />
         </div>
       </aside>

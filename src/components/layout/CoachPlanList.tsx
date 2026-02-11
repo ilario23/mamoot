@@ -27,15 +27,7 @@ interface CoachPlanListProps {
 
 // ----- Session type badge colors -----
 
-const SESSION_TYPE_COLORS: Record<string, string> = {
-  easy: 'bg-zone-1/20 text-zone-1',
-  intervals: 'bg-zone-4/20 text-zone-4',
-  tempo: 'bg-zone-3/20 text-zone-3',
-  long: 'bg-zone-2/20 text-zone-2',
-  rest: 'bg-muted text-muted-foreground',
-  strength: 'bg-secondary/20 text-secondary',
-  recovery: 'bg-zone-1/20 text-zone-1',
-};
+import {SESSION_TYPE_COLORS} from '@/lib/planConstants';
 
 // ----- Component -----
 

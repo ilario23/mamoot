@@ -6,13 +6,16 @@ import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import LoginWall from '@/components/auth/LoginWall';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {SidebarProvider} from '@/contexts/SidebarContext';
+import {useCoachPlan} from '@/hooks/useCoachPlan';
 import usePageTheme from '@/hooks/usePageTheme';
 import useServiceWorker from '@/hooks/useServiceWorker';
-import {Loader2} from 'lucide-react';
+import {Loader2, ClipboardList} from 'lucide-react';
+import Link from 'next/link';
 import type {ReactNode} from 'react';
 
 const AppShell = ({children}: {children: ReactNode}) => {
-  const {isAuthenticated, isLoading} = useStravaAuth();
+  const {isAuthenticated, isLoading, athlete} = useStravaAuth();
+  const {activePlan} = useCoachPlan(athlete?.id ?? null);
   const pageTheme = usePageTheme();
   useServiceWorker();
 
@@ -58,7 +61,18 @@ const AppShell = ({children}: {children: ReactNode}) => {
                 </span>
               </div>
             </div>
-            <div className='ml-auto'>
+            <div className='ml-auto flex items-center gap-2'>
+              {activePlan && (
+                <Link
+                  href='/training-plan'
+                  aria-label='View training plan'
+                  tabIndex={0}
+                  className='relative p-1.5 border-2 border-border bg-background hover:bg-primary/5 transition-colors'
+                >
+                  <ClipboardList className='h-4.5 w-4.5 text-foreground' />
+                  <span className='absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-primary rounded-full animate-pulse' />
+                </Link>
+              )}
               <SidebarUserProfile compact />
             </div>
           </header>

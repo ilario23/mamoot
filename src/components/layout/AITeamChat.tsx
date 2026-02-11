@@ -144,15 +144,7 @@ const MarkdownContent = ({content}: {content: string}) => (
 
 // ----- Plan card displayed inline when the AI calls shareTrainingPlan -----
 
-const SESSION_TYPE_COLORS: Record<string, string> = {
-  easy: 'bg-zone-1/20 text-zone-1',
-  intervals: 'bg-zone-4/20 text-zone-4',
-  tempo: 'bg-zone-3/20 text-zone-3',
-  long: 'bg-zone-2/20 text-zone-2',
-  rest: 'bg-muted text-muted-foreground',
-  strength: 'bg-secondary/20 text-secondary',
-  recovery: 'bg-zone-1/20 text-zone-1',
-};
+import {SESSION_TYPE_COLORS} from '@/lib/planConstants';
 
 const PlanCard = ({
   plan,
@@ -308,6 +300,9 @@ const AITeamChat = () => {
         } else {
           activeChat.setMessages([]);
         }
+        // Mark loaded messages as already persisted so the persistence
+        // effect won't re-process them (prevents re-creating deleted plans).
+        lastPersistedCount.current = messages.length;
 
         // Load memory summary
         const summary = await getMemorySummary(sid);
@@ -436,11 +431,6 @@ const AITeamChat = () => {
     savePlan,
     athleteId,
   ]);
-
-  // Reset persisted count when session changes
-  useEffect(() => {
-    lastPersistedCount.current = 0;
-  }, [activeSession?.id]);
 
   const handleSend = useCallback(async (text: string, mentions: MentionReference[]) => {
     if (!text.trim() || activeChat.status === 'streaming') return;

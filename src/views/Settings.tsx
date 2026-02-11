@@ -508,27 +508,51 @@ const Settings = () => {
           <p className='font-black text-xs uppercase tracking-wider mb-3'>
             Zone Distribution
           </p>
-          <div className='flex h-8 border-3 border-border overflow-hidden'>
-            {zoneKeys.map((zone, i) => {
-              const zoneNum = i + 1;
-              const range = formState.zones[zone][1] - formState.zones[zone][0];
-              const totalRange = formState.maxHr - formState.restingHr;
-              const width = totalRange > 0 ? (range / totalRange) * 100 : 20;
-              return (
-                <div
-                  key={zone}
-                  className='flex items-center justify-center font-black text-xs'
-                  style={{
-                    width: `${width}%`,
-                    backgroundColor:
-                      ZONE_COLORS[zoneNum as keyof typeof ZONE_COLORS],
-                  }}
-                >
-                  Z{zoneNum}
-                </div>
-              );
-            })}
-          </div>
+          {(() => {
+            const totalRange = formState.maxHr - formState.restingHr;
+            if (totalRange <= 0) return null;
+            const grayWidth =
+              ((formState.zones.z1[0] - formState.restingHr) / totalRange) *
+              100;
+            return (
+              <div className='flex h-8 border-3 border-border overflow-hidden'>
+                {grayWidth > 0 && (
+                  <div
+                    className='flex items-center justify-center'
+                    style={{
+                      width: `${grayWidth}%`,
+                      background:
+                        'repeating-linear-gradient(45deg, transparent, transparent 3px, hsl(var(--muted-foreground) / 0.25) 3px, hsl(var(--muted-foreground) / 0.25) 4px), repeating-linear-gradient(-45deg, transparent, transparent 3px, hsl(var(--muted-foreground) / 0.25) 3px, hsl(var(--muted-foreground) / 0.25) 4px)',
+                      backgroundColor: 'hsl(var(--muted))',
+                    }}
+                  />
+                )}
+                {zoneKeys.map((zone, i) => {
+                  const zoneNum = i + 1;
+                  const nextStart =
+                    i < zoneKeys.length - 1
+                      ? formState.zones[zoneKeys[i + 1]][0]
+                      : formState.maxHr;
+                  const effectiveRange =
+                    nextStart - formState.zones[zone][0];
+                  const width = (effectiveRange / totalRange) * 100;
+                  return (
+                    <div
+                      key={zone}
+                      className='flex items-center justify-center font-black text-xs'
+                      style={{
+                        width: `${width}%`,
+                        backgroundColor:
+                          ZONE_COLORS[zoneNum as keyof typeof ZONE_COLORS],
+                      }}
+                    >
+                      Z{zoneNum}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
