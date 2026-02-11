@@ -115,6 +115,15 @@ export const chatMessages = pgTable('chat_messages', {
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
 });
 
+// ----- Activity Labels -----
+// Maps to CachedActivityLabel (src/lib/db.ts)
+// Rule-based workout classification labels (e.g., "Intervals: 5x1000m @ 4:10/km Z4")
+export const activityLabels = pgTable('activity_labels', {
+  id: bigint('id', {mode: 'number'}).primaryKey(),
+  data: jsonb('data').notNull(), // WorkoutLabel JSON
+  computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
+});
+
 // ----- Coach Plans -----
 // Maps to CachedCoachPlan (src/lib/db.ts)
 // Multiple plans per athlete with an active flag for plan history.

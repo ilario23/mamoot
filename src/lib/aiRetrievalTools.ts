@@ -11,15 +11,19 @@ import {tool} from 'ai';
 import {db} from '@/db';
 import {
   activities as activitiesTable,
+  activityDetails as activityDetailsTable,
+  activityLabels as activityLabelsTable,
   userSettings,
   zoneBreakdowns as zoneBreakdownsTable,
   athleteGear,
   coachPlans,
 } from '@/db/schema';
-import {eq, desc, and} from 'drizzle-orm';
+import {eq, desc, and, inArray} from 'drizzle-orm';
 import type {ActivitySummary, UserSettings} from './mockData';
 import {formatPace, formatDuration, ZONE_NAMES} from './mockData';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
+import type {StravaDetailedActivity} from './strava';
+import {classifyWorkout, formatLabelForAI, type WorkoutLabel} from './workoutLabel';
 
 // ----- Helpers -----
 
@@ -87,6 +91,70 @@ const filterByWeeks = (
     const d = new Date(a.date);
     return d >= start && d <= end;
   });
+};
+
+// ----- Label helpers -----
+
+/**
+ * Fetch or compute workout labels for a set of activity IDs.
+ * First checks the Neon activity_labels table; for any missing IDs,
+ * fetches the detailed activity, runs the classifier, and stores the result.
+ */
+const fetchOrComputeLabels = async (
+  activityIds: number[],
+  zones: UserSettings['zones'],
+): Promise<Map<number, WorkoutLabel>> => {
+  const result = new Map<number, WorkoutLabel>();
+  if (activityIds.length === 0) return result;
+
+  // 1. Fetch existing labels from Neon
+  try {
+    const existing = await db
+      .select()
+      .from(activityLabelsTable)
+      .where(inArray(activityLabelsTable.id, activityIds));
+
+    for (const row of existing) {
+      result.set(row.id, row.data as WorkoutLabel);
+    }
+  } catch {
+    // If labels table doesn't exist yet, continue to compute
+  }
+
+  // 2. Find IDs that need labels computed
+  const missingIds = activityIds.filter((id) => !result.has(id));
+  if (missingIds.length === 0) return result;
+
+  // 3. Fetch activity details for missing IDs
+  try {
+    const details = await db
+      .select()
+      .from(activityDetailsTable)
+      .where(inArray(activityDetailsTable.id, missingIds));
+
+    const newLabels: Array<{id: number; data: WorkoutLabel; computedAt: number}> = [];
+
+    for (const row of details) {
+      const detail = row.data as StravaDetailedActivity;
+      const label = classifyWorkout(detail, zones);
+      if (label) {
+        result.set(row.id, label);
+        newLabels.push({id: row.id, data: label, computedAt: Date.now()});
+      }
+    }
+
+    // 4. Store computed labels in Neon (fire-and-forget)
+    if (newLabels.length > 0) {
+      db.insert(activityLabelsTable)
+        .values(newLabels)
+        .onConflictDoNothing()
+        .catch(() => {});
+    }
+  } catch {
+    // Activity details may not exist for all IDs — that's fine
+  }
+
+  return result;
 };
 
 // ----- Tool factory -----
@@ -376,10 +444,10 @@ export const createRetrievalTools = (athleteId: number) => ({
     },
   }),
 
-  // ---- 8. Recent Activities ----
+  // ---- 8. Recent Activities (with workout labels) ----
   getRecentActivities: tool({
     description:
-      'Get a list of the most recent activities with name, date, type, distance, duration, pace, and avg HR.',
+      'Get a list of the most recent activities with workout labels (warm-up/main/cool-down analysis), date, distance, and duration. Labels classify each activity (e.g. "Intervals: 5x1000m @ 4:10/km Z4") based on the main work phase only, excluding warm-up and cool-down.',
     inputSchema: z.object({
       count: z
         .number()
@@ -394,11 +462,29 @@ export const createRetrievalTools = (athleteId: number) => ({
         return {activities: 'No activities found.'};
       }
 
+      // Fetch athlete zones for label computation
+      const settings = await fetchSettings(athleteId);
+      const zones = settings?.zones as UserSettings['zones'] | undefined;
+
+      // Fetch/compute labels for all recent activities
+      const activityIds = recent.map((a) => Number(a.id));
+      const labels = zones
+        ? await fetchOrComputeLabels(activityIds, zones)
+        : new Map<number, WorkoutLabel>();
+
       const lines = [`Recent Activities (Last ${recent.length})`];
       for (const a of recent) {
-        lines.push(
-          `- ${a.date} | ${a.name} | ${a.type} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)} | ${formatPace(a.avgPace)}/km | HR ${a.avgHr}`,
-        );
+        const label = labels.get(Number(a.id));
+        if (label) {
+          lines.push(
+            `- ${a.date} | ${formatLabelForAI(label)} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)}`,
+          );
+        } else {
+          // Fallback to basic format if no label available
+          lines.push(
+            `- ${a.date} | ${a.name} | ${a.type} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)} | ${formatPace(a.avgPace)}/km | HR ${a.avgHr}`,
+          );
+        }
       }
 
       return {activities: lines.join('\n')};
@@ -493,6 +579,210 @@ export const createRetrievalTools = (athleteId: number) => ({
       }
 
       return {plan: lines.join('\n')};
+    },
+  }),
+
+  // ---- 11. Plan vs Actual Comparison ----
+  comparePlanVsActual: tool({
+    description:
+      'Compare the active training plan against actual activities. Matches planned sessions to real activities by date and compares workout type, pace, and zone. Use proactively at the end of each week or when the athlete asks for a review.',
+    inputSchema: z.object({
+      weekOffset: z
+        .number()
+        .optional()
+        .describe(
+          '0 = current week (Mon-Sun), -1 = last week, etc. Default 0.',
+        ),
+    }),
+    execute: async ({weekOffset = 0}: {weekOffset?: number}) => {
+      // 1. Fetch active plan
+      const plans = await db
+        .select()
+        .from(coachPlans)
+        .where(
+          and(
+            eq(coachPlans.athleteId, athleteId),
+            eq(coachPlans.isActive, true),
+          ),
+        )
+        .orderBy(desc(coachPlans.sharedAt))
+        .limit(1);
+
+      const plan = plans[0];
+      if (!plan) {
+        return {comparison: 'No active training plan to compare against.'};
+      }
+
+      const sessions = (plan.sessions ?? []) as Array<{
+        day: string;
+        date?: string;
+        type: string;
+        description: string;
+        targetPace?: string;
+        targetZone?: string;
+      }>;
+
+      // 2. Determine the target week date range (Mon-Sun)
+      const now = new Date();
+      const todayMs = now.getTime();
+      const dayOfWeek = (now.getDay() + 6) % 7; // 0=Mon, 6=Sun
+      const mondayMs =
+        todayMs -
+        dayOfWeek * 86400000 +
+        weekOffset * 7 * 86400000;
+      const sundayMs = mondayMs + 6 * 86400000;
+
+      const weekStartDate = new Date(mondayMs).toISOString().slice(0, 10);
+      const weekEndDate = new Date(sundayMs).toISOString().slice(0, 10);
+
+      // 3. Filter planned sessions to this week
+      const weekSessions = sessions.filter((s) => {
+        if (!s.date) return false;
+        return s.date >= weekStartDate && s.date <= weekEndDate;
+      });
+
+      // 4. Fetch actual activities in this date range
+      const allActivities = await fetchActivities();
+      const weekActivities = allActivities.filter(
+        (a) => a.date >= weekStartDate && a.date <= weekEndDate,
+      );
+
+      // 5. Get workout labels for actual activities
+      const settings = await fetchSettings(athleteId);
+      const zones = settings?.zones as UserSettings['zones'] | undefined;
+      const activityIds = weekActivities.map((a) => Number(a.id));
+      const labels = zones
+        ? await fetchOrComputeLabels(activityIds, zones)
+        : new Map<number, WorkoutLabel>();
+
+      // 6. Match by date and build comparison table
+      const plannedDates = new Set(weekSessions.map((s) => s.date));
+      const actualByDate = new Map<string, typeof weekActivities>();
+      for (const a of weekActivities) {
+        const existing = actualByDate.get(a.date) ?? [];
+        existing.push(a);
+        actualByDate.set(a.date, existing);
+      }
+
+      const lines = [
+        `Week Review: ${weekStartDate} to ${weekEndDate}`,
+        '',
+        '| Date | Planned | Actual | Status |',
+        '|------|---------|--------|--------|',
+      ];
+
+      let hitCount = 0;
+      let missCount = 0;
+      let modifiedCount = 0;
+
+      // Process each planned session
+      for (const session of weekSessions) {
+        const date = session.date!;
+        const actuals = actualByDate.get(date) ?? [];
+
+        if (actuals.length === 0) {
+          if (session.type === 'rest') {
+            lines.push(`| ${date} | ${session.type}: ${session.description} | Rest day | Hit |`);
+            hitCount++;
+          } else {
+            lines.push(`| ${date} | ${session.type}: ${session.description} | -- | Missed |`);
+            missCount++;
+          }
+          continue;
+        }
+
+        // Match the best activity
+        const actual = actuals[0];
+        const label = labels.get(Number(actual.id));
+        const actualStr = label
+          ? formatLabelForAI(label)
+          : `${actual.name} | ${actual.distance.toFixed(1)}km ${formatPace(actual.avgPace)}/km`;
+
+        // Determine status
+        const plannedType = session.type.toLowerCase();
+        const actualCategory = label?.category ?? '';
+        const typeMatch =
+          plannedType === actualCategory ||
+          (plannedType === 'easy' && actualCategory === 'recovery') ||
+          (plannedType === 'recovery' && actualCategory === 'easy');
+
+        let status: string;
+        if (typeMatch) {
+          status = 'Hit';
+          hitCount++;
+        } else if (actuals.length > 0) {
+          status = 'Modified';
+          modifiedCount++;
+        } else {
+          status = 'Missed';
+          missCount++;
+        }
+
+        // Add pace/zone comparison if available
+        let paceNote = '';
+        if (label && session.targetPace) {
+          paceNote = ` (target: ${session.targetPace}, actual: ${formatPace(label.mainWork.avgPace)}/km)`;
+        }
+
+        lines.push(
+          `| ${date} | ${session.type}: ${session.description} | ${actualStr}${paceNote} | ${status} |`,
+        );
+
+        // Remove matched activity from the date's list
+        actualByDate.set(
+          date,
+          actuals.filter((a) => a !== actual),
+        );
+      }
+
+      // 7. Flag unplanned activities
+      let unplannedCount = 0;
+      for (const [date, actuals] of actualByDate) {
+        for (const a of actuals) {
+          if (!plannedDates.has(date)) {
+            const label = labels.get(Number(a.id));
+            const actualStr = label
+              ? formatLabelForAI(label)
+              : `${a.name} | ${a.distance.toFixed(1)}km`;
+            lines.push(`| ${date} | -- | ${actualStr} | Unplanned |`);
+            unplannedCount++;
+          }
+        }
+      }
+
+      // 8. Summary
+      const totalPlanned = weekSessions.filter((s) => s.type !== 'rest').length;
+      const parts = [];
+      if (hitCount > 0) parts.push(`${hitCount}/${totalPlanned} planned sessions hit`);
+      if (modifiedCount > 0) parts.push(`${modifiedCount} modified`);
+      if (missCount > 0) parts.push(`${missCount} missed`);
+      if (unplannedCount > 0) parts.push(`${unplannedCount} unplanned`);
+
+      if (weekSessions.length === 0 && weekActivities.length === 0) {
+        return {
+          comparison:
+            'No planned sessions with dates in this week range, and no actual activities found. Make sure the plan includes ISO dates on each session.',
+        };
+      }
+
+      if (weekSessions.length === 0) {
+        lines.splice(
+          1,
+          0,
+          '(No planned sessions have dates in this week range. Showing actual activities only.)',
+        );
+        for (const a of weekActivities) {
+          const label = labels.get(Number(a.id));
+          const actualStr = label
+            ? formatLabelForAI(label)
+            : `${a.name} | ${a.distance.toFixed(1)}km`;
+          lines.push(`| ${a.date} | -- | ${actualStr} | No plan |`);
+        }
+      }
+
+      lines.push('', `Summary: ${parts.join(', ') || 'No data to compare.'}`);
+
+      return {comparison: lines.join('\n')};
     },
   }),
 });

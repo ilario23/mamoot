@@ -11,7 +11,7 @@ import {shareTrainingPlanSchema} from '@/lib/aiTools';
 import {createRetrievalTools} from '@/lib/aiRetrievalTools';
 import {db} from '@/db';
 import {coachPlans, userSettings} from '@/db/schema';
-import {eq, and} from 'drizzle-orm';
+import {eq} from 'drizzle-orm';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 
 // Allow streaming responses up to 60 seconds
@@ -183,6 +183,7 @@ export async function POST(req: Request) {
               durationWeeks?: number;
               sessions: Array<{
                 day: string;
+                date?: string;
                 type: string;
                 description: string;
                 duration?: string;
@@ -197,16 +198,7 @@ export async function POST(req: Request) {
 
               if (athleteId) {
                 try {
-                  await db
-                    .update(coachPlans)
-                    .set({isActive: false})
-                    .where(
-                      and(
-                        eq(coachPlans.athleteId, athleteId),
-                        eq(coachPlans.isActive, true),
-                      ),
-                    );
-
+                  // Save as inactive — the user must explicitly activate
                   await db.insert(coachPlans).values({
                     id: planId,
                     athleteId,
@@ -216,7 +208,7 @@ export async function POST(req: Request) {
                     durationWeeks: plan.durationWeeks ?? null,
                     sessions: plan.sessions,
                     content: plan.content,
-                    isActive: true,
+                    isActive: false,
                     sourceMessageId: null,
                     sourceSessionId: sessionId ?? null,
                     sharedAt: now,

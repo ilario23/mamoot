@@ -11,6 +11,7 @@ import {db} from '@/db';
 import {
   activities,
   activityDetails,
+  activityLabels,
   activityStreams,
   athleteStats,
   athleteZones,
@@ -69,6 +70,29 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .from(activityDetails)
           .where(eq(activityDetails.id, Number(pk)));
         return NextResponse.json(rows[0] ?? null);
+      }
+
+      case 'activity-labels': {
+        // Bulk fetch: GET /api/db/activity-labels?pks=1,2,3
+        const labelPks = req.nextUrl.searchParams.get('pks');
+        if (labelPks) {
+          const ids = labelPks.split(',').map(Number).filter(Boolean);
+          if (ids.length === 0)
+            return NextResponse.json([], {status: 200});
+          const rows = await db
+            .select()
+            .from(activityLabels)
+            .where(inArray(activityLabels.id, ids));
+          return NextResponse.json(rows);
+        }
+        // Single fetch: GET /api/db/activity-labels?pk=123
+        if (!pk)
+          return NextResponse.json({error: 'pk or pks required'}, {status: 400});
+        const labelRows = await db
+          .select()
+          .from(activityLabels)
+          .where(eq(activityLabels.id, Number(pk)));
+        return NextResponse.json(labelRows[0] ?? null);
       }
 
       case 'activity-streams': {
@@ -277,6 +301,19 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
             set: {
               data: sql`excluded.data`,
               fetchedAt: sql`excluded.fetched_at`,
+            },
+          });
+        break;
+
+      case 'activity-labels':
+        await db
+          .insert(activityLabels)
+          .values(records)
+          .onConflictDoUpdate({
+            target: activityLabels.id,
+            set: {
+              data: sql`excluded.data`,
+              computedAt: sql`excluded.computed_at`,
             },
           });
         break;

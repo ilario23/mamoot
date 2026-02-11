@@ -121,10 +121,23 @@ export interface CachedChatMessage {
   createdAt: number;
 }
 
+// ----- Activity label persistence -----
+
+export interface CachedActivityLabel {
+  /** Strava activity ID (primary key) */
+  id: number;
+  /** Structured workout label produced by the rule-based classifier */
+  label: import('./workoutLabel').WorkoutLabel;
+  /** Unix ms timestamp of when this label was computed */
+  computedAt: number;
+}
+
 // ----- Coach plan persistence -----
 
 export interface PlanSession {
   day: string;
+  /** ISO date for this session, e.g. "2026-02-10" */
+  date?: string;
   type: string;
   description: string;
   duration?: string;
@@ -173,6 +186,7 @@ const db = new Dexie('RunZoneAICache') as Dexie & {
   chatSessions: EntityTable<CachedChatSession, 'id'>;
   chatMessages: EntityTable<CachedChatMessage, 'id'>;
   coachPlans: EntityTable<CachedCoachPlan, 'id'>;
+  activityLabels: EntityTable<CachedActivityLabel, 'id'>;
 };
 
 db.version(1).stores({
@@ -228,6 +242,20 @@ db.version(5).stores({
   coachPlans: 'id, athleteId, isActive, sharedAt',
 });
 
+db.version(6).stores({
+  activities: 'id, date, fetchedAt',
+  activityDetails: 'id',
+  activityStreams: 'activityId',
+  athleteStats: 'athleteId',
+  athleteZones: 'key',
+  athleteGear: 'key',
+  zoneBreakdowns: 'activityId, settingsHash',
+  chatSessions: 'id, [athleteId+persona], updatedAt',
+  chatMessages: 'id, sessionId, createdAt',
+  coachPlans: 'id, athleteId, isActive, sharedAt',
+  activityLabels: 'id',
+});
+
 export {db};
 
 // ----- Cache size helper -----
@@ -264,5 +292,6 @@ export const clearAllCache = async (): Promise<void> => {
     db.chatSessions.clear(),
     db.chatMessages.clear(),
     db.coachPlans.clear(),
+    db.activityLabels.clear(),
   ]);
 };

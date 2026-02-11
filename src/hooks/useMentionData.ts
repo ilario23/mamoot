@@ -15,6 +15,8 @@ import type {ActivitySummary, UserSettings} from '@/lib/mockData';
 import type {StravaSummaryGear} from '@/lib/strava';
 import type {MentionReference, ResolvedMention} from '@/lib/mentionTypes';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
+import {classifyWorkout, formatLabelForAI} from '@/lib/workoutLabel';
+import {neonSyncActivityLabel} from '@/lib/neonSync';
 
 // ----- Helpers -----
 
@@ -180,22 +182,61 @@ const resolveFitness = (
   ].join('\n');
 };
 
-const resolveActivity = (
+/**
+ * Get or compute the workout label for a single activity.
+ * Checks Dexie cache first; computes from activity detail data if missing.
+ */
+const getOrComputeLabel = async (
+  activityId: number,
+  zones: UserSettings['zones'],
+): Promise<string | null> => {
+  // Check Dexie cache
+  const cached = await db.activityLabels.get(activityId);
+  if (cached) return formatLabelForAI(cached.label);
+
+  // Compute from activity detail
+  const detail = await db.activityDetails.get(activityId);
+  if (!detail) return null;
+
+  const label = classifyWorkout(detail.data, zones);
+  if (!label) return null;
+
+  // Cache in Dexie and fire-and-forget to Neon
+  const record = {id: activityId, label, computedAt: Date.now()};
+  await db.activityLabels.put(record);
+  neonSyncActivityLabel(record);
+
+  return formatLabelForAI(label);
+};
+
+const resolveActivity = async (
   activities: ActivitySummary[],
+  zones: UserSettings['zones'],
   itemId?: string,
-): string => {
+): Promise<string> => {
   if (itemId) {
     const a = activities.find((act) => String(act.id) === itemId);
     if (!a) return 'Activity not found.';
+    const labelStr = await getOrComputeLabel(Number(a.id), zones);
+    if (labelStr) {
+      return `Activity: ${a.date} | ${labelStr} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)}`;
+    }
     return `Activity: ${a.date} | ${a.name} | ${a.type} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)} | ${formatPace(a.avgPace)}/km | HR ${a.avgHr}`;
   }
   const recent = activities.slice(0, 10);
   if (recent.length === 0) return 'No activities found.';
   const lines = ['Recent Activities'];
   for (const a of recent) {
-    lines.push(
-      `- ${a.date} | ${a.name} | ${a.type} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)} | ${formatPace(a.avgPace)}/km | HR ${a.avgHr}`,
-    );
+    const labelStr = await getOrComputeLabel(Number(a.id), zones);
+    if (labelStr) {
+      lines.push(
+        `- ${a.date} | ${labelStr} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)}`,
+      );
+    } else {
+      lines.push(
+        `- ${a.date} | ${a.name} | ${a.type} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)} | ${formatPace(a.avgPace)}/km | HR ${a.avgHr}`,
+      );
+    }
   }
   return lines.join('\n');
 };
@@ -301,7 +342,7 @@ export const useMentionResolver = () => {
             data = resolveFitness(activities, settings);
             break;
           case 'activity':
-            data = resolveActivity(activities, mention.itemId);
+            data = await resolveActivity(activities, settings.zones, mention.itemId);
             break;
           case 'gear':
             data = await resolveGear(mention.itemId);

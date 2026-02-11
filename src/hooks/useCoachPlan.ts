@@ -11,7 +11,7 @@
 //   3. Neon PostgreSQL — cloud backup (fire-and-forget writes)
 
 import {useState, useEffect, useCallback, useRef} from 'react';
-import {db, type CachedCoachPlan, type PlanSession} from '@/lib/db';
+import {db, type CachedCoachPlan} from '@/lib/db';
 import {
   neonGetCoachPlans,
   neonSyncCoachPlan,
@@ -150,30 +150,20 @@ export const useCoachPlan = (athleteId: number | null): UseCoachPlanResult => {
 
   const savePlan = useCallback(
     (plan: Omit<CoachPlan, 'isActive'>) => {
-      const newPlan: CoachPlan = {...plan, isActive: true};
+      // New plans are saved as inactive — user must explicitly activate
+      const newPlan: CoachPlan = {...plan, isActive: false};
 
-      // Deactivate others in local state
       setPlans((prev) => {
-        const deactivated = prev.map((p) => ({...p, isActive: false}));
-        return [newPlan, ...deactivated];
+        // Skip if plan already exists (e.g. reloaded tool result from persisted messages)
+        if (prev.some((p) => p.id === newPlan.id)) return prev;
+        return [newPlan, ...prev];
       });
-
-      // localStorage (active plan ref)
-      writeActiveRef(newPlan);
 
       if (!athleteId) return;
 
-      // Dexie — deactivate others, then insert new
+      // Dexie — insert new plan (no need to deactivate others since new plan is inactive)
       (async () => {
         try {
-          const existing = await db.coachPlans
-            .where('athleteId')
-            .equals(athleteId)
-            .toArray();
-          const updates = existing
-            .filter((p) => p.isActive)
-            .map((p) => ({...p, isActive: false}));
-          if (updates.length > 0) await db.coachPlans.bulkPut(updates);
           await db.coachPlans.put(newPlan);
         } catch {
           // Silently ignore

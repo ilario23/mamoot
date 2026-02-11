@@ -333,8 +333,15 @@ const AITeamChat = () => {
   // Persist messages when they change (after streaming completes)
   const lastPersistedCount = useRef(0);
 
-  // Track which tool plan IDs we've already saved to Dexie
+  // Track which tool plan IDs we've already saved to Dexie.
+  // Seed from existing plans so reloaded tool results aren't re-saved.
   const savedPlanIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    for (const p of plans) {
+      savedPlanIds.current.add(p.id);
+    }
+  }, [plans]);
 
   useEffect(() => {
     if (!activeSession?.id) return;
@@ -671,7 +678,7 @@ const AITeamChat = () => {
     <div className='flex h-full min-w-0 overflow-hidden'>
       {/* Plan list sheet */}
       <Sheet open={planListOpen} onOpenChange={setPlanListOpen}>
-        <SheetContent side='right' className='p-0 w-[340px] sm:max-w-[340px]'>
+        <SheetContent side='right' className='p-0 w-[340px] sm:max-w-[340px]' aria-describedby={undefined}>
           <SheetTitle className='sr-only'>Training Plans</SheetTitle>
           <CoachPlanList
             plans={plans}
@@ -953,7 +960,7 @@ const AITeamChat = () => {
 
       {/* Mobile history drawer (right) */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetContent side='right' className='p-0 w-[280px] sm:max-w-[280px]'>
+        <SheetContent side='right' className='p-0 w-[280px] sm:max-w-[280px]' aria-describedby={undefined}>
           <SheetTitle className='sr-only'>Conversation History</SheetTitle>
           {sidebarContent}
         </SheetContent>

@@ -14,6 +14,12 @@ export const planSessionSchema = z.object({
   day: z
     .string()
     .describe('Day label, e.g. "Monday", "Tuesday", or "Day 1"'),
+  date: z
+    .string()
+    .optional()
+    .describe(
+      'ISO date for this session, e.g. "2026-02-10". Always include dates so planned workouts can be matched to actual activities.',
+    ),
   type: z
     .enum([
       'easy',

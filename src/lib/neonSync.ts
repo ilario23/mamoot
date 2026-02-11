@@ -11,6 +11,7 @@
 import type {
   CachedActivity,
   CachedActivityDetail,
+  CachedActivityLabel,
   CachedActivityStreams,
   CachedAthleteStats,
   CachedAthleteZones,
@@ -112,6 +113,45 @@ export const neonSyncActivityDetailsBulk = (
 ): void => {
   if (records.length === 0) return;
   postToNeon('activity-details', records);
+};
+
+// ---- Activity Labels (bulk) ----
+
+/** Fetch multiple activity labels from Neon in one (or few) round-trips. */
+export const neonGetActivityLabelsBulk = async (
+  ids: number[],
+): Promise<CachedActivityLabel[]> => {
+  if (ids.length === 0) return [];
+
+  const results: CachedActivityLabel[] = [];
+
+  for (let i = 0; i < ids.length; i += BULK_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
+    const pks = chunk.join(',');
+    try {
+      const res = await fetch(`${API}/activity-labels?pks=${pks}`);
+      if (!res.ok) continue;
+      const data: CachedActivityLabel[] = await res.json();
+      if (Array.isArray(data)) results.push(...data);
+    } catch {
+      // Neon is best-effort — skip this chunk on failure
+    }
+  }
+
+  return results;
+};
+
+/** Fire-and-forget bulk write of activity labels to Neon. */
+export const neonSyncActivityLabelsBulk = (
+  records: CachedActivityLabel[],
+): void => {
+  if (records.length === 0) return;
+  postToNeon('activity-labels', records);
+};
+
+/** Fire-and-forget write of a single activity label to Neon. */
+export const neonSyncActivityLabel = (record: CachedActivityLabel): void => {
+  postToNeon('activity-labels', record);
 };
 
 // ---- Activity Streams (single) ----
