@@ -1,7 +1,9 @@
 import { clsx, type ClassValue } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";
 
-const twMerge = extendTailwindMerge({
+const twMerge = extendTailwindMerge<
+  "safe-pt" | "safe-pb" | "safe-pl" | "safe-pr" | "safe-mb"
+>({
   extend: {
     classGroups: {
       // Prevent tailwind-merge from stripping safe-area custom utilities
