@@ -44,8 +44,8 @@ const AppShell = ({children}: {children: ReactNode}) => {
           {/* Mobile header */}
           <header className='border-b-3 border-border p-3 pt-safe md:hidden flex items-center'>
             <div className='flex items-center gap-2.5' role='banner' aria-label='RunTeam AI'>
-              <div className='w-8 h-8 bg-primary border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0'>
-                <span className='font-black text-sm text-primary-foreground leading-none select-none'>
+              <div className='w-8 h-8 bg-page border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300'>
+                <span className='font-black text-sm text-page-foreground leading-none select-none'>
                   R
                 </span>
               </div>

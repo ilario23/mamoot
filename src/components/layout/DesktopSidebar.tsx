@@ -47,8 +47,8 @@ const DesktopSidebar = () => {
         <div className='p-3 border-b-3 border-border'>
           <div className='flex items-center justify-between'>
             <div className={`flex items-center gap-3 overflow-hidden ${isCollapsed ? 'justify-center w-full' : ''}`}>
-              <div className='w-10 h-10 bg-primary border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0'>
-                <span className='font-black text-lg text-primary-foreground leading-none select-none'>
+              <div className='w-10 h-10 bg-page border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300'>
+                <span className='font-black text-lg text-page-foreground leading-none select-none'>
                   R
                 </span>
               </div>

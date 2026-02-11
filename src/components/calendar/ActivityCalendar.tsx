@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import {useMemo, useState} from 'react';
+import {useRouter} from 'next/navigation';
 import {
   startOfYear,
   endOfYear,
@@ -10,25 +10,17 @@ import {
   eachDayOfInterval,
   format,
   getDay,
-} from "date-fns";
-import { Footprints, Bike, Mountain, Waves } from "lucide-react";
-import { useIsMobile } from "@/hooks/use-mobile";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+} from 'date-fns';
+import {Footprints, Bike, Mountain, Waves} from 'lucide-react';
+import {useIsMobile} from '@/hooks/use-mobile';
+import {Tooltip, TooltipContent, TooltipTrigger} from '@/components/ui/tooltip';
+import {Popover, PopoverContent, PopoverTrigger} from '@/components/ui/popover';
 import {
   type ActivitySummary,
   type ActivityType,
   ACTIVITY_TYPE_CONFIG,
   formatDuration,
-} from "@/lib/mockData";
+} from '@/lib/mockData';
 
 // ----- Icon map -----
 
@@ -43,7 +35,7 @@ const ICON_MAP: Record<ActivityType, React.ElementType> = {
 
 const getIntensityLevel = (
   activity: ActivitySummary,
-  activitiesOfSameType: ActivitySummary[]
+  activitiesOfSameType: ActivitySummary[],
 ): number => {
   if (activitiesOfSameType.length <= 1) return 4;
 
@@ -62,10 +54,7 @@ const getIntensityLevel = (
   return 4;
 };
 
-const getActivityColor = (
-  type: ActivityType,
-  level: number
-): string => {
+const getActivityColor = (type: ActivityType, level: number): string => {
   const colors = ACTIVITY_TYPE_CONFIG[type].colors;
   return colors[Math.max(0, Math.min(3, level - 1))];
 };
@@ -79,12 +68,12 @@ interface ActivityCalendarProps {
 
 interface DayData {
   date: Date;
-  activities: Array<ActivitySummary & { level: number }>;
+  activities: Array<ActivitySummary & {level: number}>;
 }
 
 // ----- Component -----
 
-const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
+const ActivityCalendar = ({activities, year}: ActivityCalendarProps) => {
   const router = useRouter();
   const isMobile = useIsMobile();
   const [openPopoverDate, setOpenPopoverDate] = useState<string | null>(null);
@@ -103,34 +92,37 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
 
   // Build activity lookup by date string
   const activityMap = useMemo(() => {
-    const map: Record<string, Array<ActivitySummary & { level: number }>> = {};
+    const map: Record<string, Array<ActivitySummary & {level: number}>> = {};
     activities.forEach((activity) => {
       const dateKey = activity.date;
       if (!map[dateKey]) map[dateKey] = [];
-      const level = getIntensityLevel(activity, activitiesByType[activity.type]);
-      map[dateKey].push({ ...activity, level });
+      const level = getIntensityLevel(
+        activity,
+        activitiesByType[activity.type],
+      );
+      map[dateKey].push({...activity, level});
     });
     return map;
   }, [activities, activitiesByType]);
 
   // Build day grid (horizontal: full year)
-  const { weeks, monthLabels } = useMemo(() => {
+  const {weeks, monthLabels} = useMemo(() => {
     const yearStart = startOfYear(new Date(year, 0, 1));
     const yearEnd = endOfYear(new Date(year, 0, 1));
 
     // Grid starts on the Monday of the week containing Jan 1
-    const gridStart = startOfWeek(yearStart, { weekStartsOn: 1 });
+    const gridStart = startOfWeek(yearStart, {weekStartsOn: 1});
     // Grid ends on the Sunday of the week containing Dec 31
-    const gridEnd = endOfWeek(yearEnd, { weekStartsOn: 1 });
+    const gridEnd = endOfWeek(yearEnd, {weekStartsOn: 1});
 
-    const allDays = eachDayOfInterval({ start: gridStart, end: gridEnd });
+    const allDays = eachDayOfInterval({start: gridStart, end: gridEnd});
 
     // Group days into weeks (columns)
     const weeksArr: DayData[][] = [];
     let currentWeek: DayData[] = [];
 
     allDays.forEach((day) => {
-      const dateKey = format(day, "yyyy-MM-dd");
+      const dateKey = format(day, 'yyyy-MM-dd');
       const dayOfWeek = getDay(day); // 0=Sun
 
       // Monday = start of new week
@@ -150,7 +142,7 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
     }
 
     // Month labels: find the first week that starts in each month
-    const labels: { label: string; weekIndex: number }[] = [];
+    const labels: {label: string; weekIndex: number}[] = [];
     let lastMonth = -1;
 
     weeksArr.forEach((week, weekIdx) => {
@@ -159,40 +151,51 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
       const month = monday.date.getMonth();
       if (month !== lastMonth) {
         labels.push({
-          label: format(monday.date, "MMM"),
+          label: format(monday.date, 'MMM'),
           weekIndex: weekIdx,
         });
         lastMonth = month;
       }
     });
 
-    return { weeks: weeksArr, monthLabels: labels };
+    return {weeks: weeksArr, monthLabels: labels};
   }, [activityMap, year]);
 
   // Build continuous vertical grid for mobile — same weeks data as desktop,
   // but rendered top-to-bottom with month labels inserted between rows
   const mobileWeeks = useMemo(() => {
-    if (!isMobile) return { weekRows: [] as { week: DayData[]; weekIdx: number; monthLabel?: string }[] };
+    if (!isMobile)
+      return {
+        weekRows: [] as {
+          week: DayData[];
+          weekIdx: number;
+          monthLabel?: string;
+        }[],
+      };
 
-    const weekRows: { week: DayData[]; weekIdx: number; monthLabel?: string }[] = [];
+    const weekRows: {week: DayData[]; weekIdx: number; monthLabel?: string}[] =
+      [];
     let lastMonth = -1;
 
     weeks.forEach((week, weekIdx) => {
       // Determine which month this week belongs to (use Monday or first day)
       const monday = week.find((d) => getDay(d.date) === 1) || week[0];
       const month = monday.date.getMonth();
-      const monthLabel = month !== lastMonth ? format(monday.date, "MMM") : undefined;
+      const monthLabel =
+        month !== lastMonth ? format(monday.date, 'MMM') : undefined;
       if (month !== lastMonth) lastMonth = month;
 
-      weekRows.push({ week, weekIdx, monthLabel });
+      weekRows.push({week, weekIdx, monthLabel});
     });
 
-    return { weekRows };
+    return {weekRows};
   }, [isMobile, weeks]);
 
-  const DAY_LABELS = ["Mon", "", "Wed", "", "Fri", "", "Sun"];
-  const CELL_SIZE = isMobile ? 18 : 14;
-  const CELL_GAP = isMobile ? 2 : 3;
+  const DAY_LABELS = ['Mon', '', 'Wed', '', 'Fri', '', 'Sun'];
+  const CELL_GAP = isMobile ? 3 : 3;
+  const CELL_SIZE = 14; // Only used for desktop
+  const MONTH_LABEL_WIDTH = 30;
+  const MOBILE_ASPECT = '1 / 0.32'; // Slightly shorter than square
 
   const handleDayClick = (dayData: DayData) => {
     if (dayData.activities.length === 0) return;
@@ -203,7 +206,7 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
     }
 
     // Multiple activities — open popover
-    setOpenPopoverDate(format(dayData.date, "yyyy-MM-dd"));
+    setOpenPopoverDate(format(dayData.date, 'yyyy-MM-dd'));
   };
 
   const handleActivitySelect = (id: string) => {
@@ -212,20 +215,33 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
   };
 
   /** Render a single day cell with tooltips/popovers */
-  const renderDayCell = (dayData: DayData, isInYear: boolean) => {
+  const renderDayCell = (
+    dayData: DayData,
+    isInYear: boolean,
+    fluid = false,
+  ) => {
     const jsDay = getDay(dayData.date);
     const row = jsDay === 0 ? 6 : jsDay - 1;
-    const dateKey = format(dayData.date, "yyyy-MM-dd");
+    const dateKey = format(dayData.date, 'yyyy-MM-dd');
     const isPopoverOpen = openPopoverDate === dateKey;
     const hasActivities = dayData.activities.length > 0;
 
+    const cellStyle: React.CSSProperties = fluid
+      ? {aspectRatio: MOBILE_ASPECT, width: '100%'}
+      : {width: CELL_SIZE, height: CELL_SIZE, gridRow: row + 1};
+
     const cellContent = (
-      <DayCell dayData={dayData} isInYear={isInYear} size={CELL_SIZE} />
+      <DayCell
+        dayData={dayData}
+        isInYear={isInYear}
+        size={CELL_SIZE}
+        fluid={fluid}
+      />
     );
 
     if (!isInYear) {
       return (
-        <div key={dateKey} style={{ width: CELL_SIZE, height: CELL_SIZE, gridRow: row + 1 }}>
+        <div key={dateKey} style={cellStyle}>
           {cellContent}
         </div>
       );
@@ -233,45 +249,57 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
 
     if (hasActivities && dayData.activities.length > 1) {
       return (
-        <Popover key={dateKey} open={isPopoverOpen} onOpenChange={(open) => { if (!open) setOpenPopoverDate(null); }}>
+        <Popover
+          key={dateKey}
+          open={isPopoverOpen}
+          onOpenChange={(open) => {
+            if (!open) setOpenPopoverDate(null);
+          }}
+        >
           <Tooltip>
             <TooltipTrigger asChild>
               <PopoverTrigger asChild>
                 <button
                   onClick={() => handleDayClick(dayData)}
-                  className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring"
-                  aria-label={`${format(dayData.date, "MMM d")} - ${dayData.activities.length} activities`}
+                  className='cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring'
+                  aria-label={`${format(dayData.date, 'MMM d')} - ${dayData.activities.length} activities`}
                   tabIndex={0}
-                  style={{ width: CELL_SIZE, height: CELL_SIZE, gridRow: row + 1 }}
+                  style={cellStyle}
                 >
                   {cellContent}
                 </button>
               </PopoverTrigger>
             </TooltipTrigger>
-            <TooltipContent side="top" className="border-3 border-border bg-popover shadow-neo-sm p-3 max-w-xs">
+            <TooltipContent
+              side='top'
+              className='border-3 border-border bg-popover shadow-neo-sm p-3 max-w-xs'
+            >
               <TooltipBody dayData={dayData} />
             </TooltipContent>
           </Tooltip>
-          <PopoverContent side="top" className="border-3 border-border shadow-neo-sm p-0 w-auto min-w-[200px]">
-            <div className="p-3 border-b-3 border-border">
-              <p className="text-xs font-black uppercase tracking-wider">
-                {format(dayData.date, "MMM d, yyyy")}
+          <PopoverContent
+            side='top'
+            className='border-3 border-border shadow-neo-sm p-0 w-auto min-w-[200px]'
+          >
+            <div className='p-3 border-b-3 border-border'>
+              <p className='text-xs font-black uppercase tracking-wider'>
+                {format(dayData.date, 'MMM d, yyyy')}
               </p>
             </div>
-            <div className="p-1">
+            <div className='p-1'>
               {dayData.activities.map((a) => {
                 const Icon = ICON_MAP[a.type];
                 return (
                   <button
                     key={a.id}
                     onClick={() => handleActivitySelect(a.id)}
-                    className="flex items-center gap-2 w-full px-3 py-2 text-left text-sm font-bold hover:bg-muted transition-colors"
+                    className='flex items-center gap-2 w-full px-3 py-2 text-left text-sm font-bold hover:bg-muted transition-colors'
                     aria-label={`View ${a.name}`}
                     tabIndex={0}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{a.name}</span>
-                    <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                    <Icon className='h-4 w-4 shrink-0' />
+                    <span className='truncate'>{a.name}</span>
+                    <span className='ml-auto text-xs text-muted-foreground shrink-0'>
                       {a.distance.toFixed(1)} km
                     </span>
                   </button>
@@ -289,15 +317,18 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
           <TooltipTrigger asChild>
             <button
               onClick={() => handleDayClick(dayData)}
-              className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring"
-              aria-label={`${format(dayData.date, "MMM d")} - ${dayData.activities[0].name}`}
+              className='cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring'
+              aria-label={`${format(dayData.date, 'MMM d')} - ${dayData.activities[0].name}`}
               tabIndex={0}
-              style={{ width: CELL_SIZE, height: CELL_SIZE, gridRow: row + 1 }}
+              style={cellStyle}
             >
               {cellContent}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="top" className="border-3 border-border bg-popover shadow-neo-sm p-3 max-w-xs">
+          <TooltipContent
+            side='top'
+            className='border-3 border-border bg-popover shadow-neo-sm p-3 max-w-xs'
+          >
             <TooltipBody dayData={dayData} />
           </TooltipContent>
         </Tooltip>
@@ -305,7 +336,7 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
     }
 
     return (
-      <div key={dateKey} style={{ width: CELL_SIZE, height: CELL_SIZE, gridRow: row + 1 }}>
+      <div key={dateKey} style={cellStyle}>
         {cellContent}
       </div>
     );
@@ -313,112 +344,117 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
 
   /** Legend shared between mobile and desktop */
   const legend = (
-    <div className="flex flex-wrap gap-3 md:gap-4 mt-4 md:mt-5 pt-3 md:pt-4 border-t border-muted">
-      <span className="text-xs font-bold text-muted-foreground mr-1">Less</span>
+    <div className='flex flex-wrap gap-3 md:gap-4 mt-4 md:mt-5 pt-3 md:pt-4 border-t border-muted'>
+      <span className='text-xs font-bold text-muted-foreground mr-1'>Less</span>
       {(Object.keys(ACTIVITY_TYPE_CONFIG) as ActivityType[]).map((type) => {
         const config = ACTIVITY_TYPE_CONFIG[type];
         const Icon = ICON_MAP[type];
         return (
-          <div key={type} className="flex items-center gap-1.5">
-            <Icon className="h-3.5 w-3.5" />
-            <span className="text-xs font-bold">{config.label}</span>
-            <div className="flex gap-0.5">
+          <div key={type} className='flex items-center gap-1.5'>
+            <Icon className='h-3.5 w-3.5' />
+            <span className='text-xs font-bold'>{config.label}</span>
+            <div className='flex gap-0.5'>
               {config.colors.map((color, i) => (
                 <div
                   key={i}
-                  className="border border-border/20"
-                  style={{ width: 10, height: 10, backgroundColor: color }}
+                  className='border border-border/20'
+                  style={{width: 10, height: 10, backgroundColor: color}}
                 />
               ))}
             </div>
           </div>
         );
       })}
-      <span className="text-xs font-bold text-muted-foreground">More</span>
+      <span className='text-xs font-bold text-muted-foreground'>More</span>
     </div>
   );
 
-  const MOBILE_DAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+  const MOBILE_DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
   return (
-    <div className="border-3 border-border bg-background shadow-neo">
-      <div className="p-3 md:p-5 border-b-3 border-border">
-        <h3 className="font-black text-base md:text-lg uppercase tracking-wider">
+    <div className='border-3 border-border bg-background shadow-neo'>
+      <div className='p-3 md:p-5 border-b-3 border-border'>
+        <h3 className='font-black text-base md:text-lg uppercase tracking-wider'>
           Contribution Calendar
         </h3>
       </div>
 
       {/* Mobile: continuous vertical layout */}
       {isMobile ? (
-        <div className="p-3 flex flex-col items-center">
-          <div>
-            {/* Sticky day-of-week header */}
-            <div className="flex gap-0 mb-1">
-              <div style={{ width: 32 }} className="shrink-0" />
-              <div className="flex" style={{ gap: CELL_GAP }}>
-                {MOBILE_DAY_LABELS.map((label, i) => (
-                  <div
-                    key={i}
-                    className="text-[9px] font-bold text-muted-foreground text-center"
-                    style={{ width: CELL_SIZE }}
-                  >
-                    {label}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Week rows with inline month labels */}
-            {mobileWeeks.weekRows.map(({ week, weekIdx, monthLabel }) => (
-              <div key={weekIdx} className="flex items-center" style={{ marginTop: CELL_GAP }}>
-                {/* Month label column */}
+        <div className='p-3'>
+          {/* Day-of-week header */}
+          <div className='flex mb-1'>
+            <div style={{width: MONTH_LABEL_WIDTH}} className='shrink-0' />
+            <div
+              className='flex-1 grid'
+              style={{gridTemplateColumns: 'repeat(7, 1fr)', gap: CELL_GAP}}
+            >
+              {MOBILE_DAY_LABELS.map((label, i) => (
                 <div
-                  style={{ width: 32 }}
-                  className="shrink-0 text-[9px] font-black uppercase tracking-wider text-muted-foreground"
+                  key={i}
+                  className='text-[10px] font-bold text-muted-foreground text-center'
                 >
-                  {monthLabel ?? ""}
+                  {label}
                 </div>
-                <div className="flex" style={{ gap: CELL_GAP }}>
-                  {weekIdx === 0 && (() => {
+              ))}
+            </div>
+          </div>
+
+          {/* Week rows with inline month labels */}
+          {mobileWeeks.weekRows.map(({week, weekIdx, monthLabel}) => (
+            <div key={weekIdx} className='flex' style={{marginTop: CELL_GAP}}>
+              {/* Month label column */}
+              <div
+                style={{width: MONTH_LABEL_WIDTH}}
+                className='shrink-0 text-[9px] font-black uppercase tracking-wider text-muted-foreground flex items-center'
+              >
+                {monthLabel ?? ''}
+              </div>
+              <div
+                className='flex-1 grid'
+                style={{gridTemplateColumns: 'repeat(7, 1fr)', gap: CELL_GAP}}
+              >
+                {weekIdx === 0 &&
+                  (() => {
                     const firstDayJs = getDay(week[0].date);
                     const firstDayIdx = firstDayJs === 0 ? 6 : firstDayJs - 1;
-                    return Array.from({ length: firstDayIdx }).map((_, i) => (
-                      <div key={`pad-${i}`} style={{ width: CELL_SIZE, height: CELL_SIZE }} />
+                    return Array.from({length: firstDayIdx}).map((_, i) => (
+                      <div key={`pad-${i}`} />
                     ));
                   })()}
-                  {week.map((dayData) => {
-                    const isInYear = dayData.date.getFullYear() === year;
-                    return renderDayCell(dayData, isInYear);
-                  })}
-                  {weekIdx === weeks.length - 1 && (() => {
+                {week.map((dayData) => {
+                  const isInYear = dayData.date.getFullYear() === year;
+                  return renderDayCell(dayData, isInYear, true);
+                })}
+                {weekIdx === weeks.length - 1 &&
+                  (() => {
                     const lastDayJs = getDay(week[week.length - 1].date);
                     const lastDayIdx = lastDayJs === 0 ? 6 : lastDayJs - 1;
                     const padCount = 6 - lastDayIdx;
-                    return Array.from({ length: padCount }).map((_, i) => (
-                      <div key={`pad-end-${i}`} style={{ width: CELL_SIZE, height: CELL_SIZE }} />
+                    return Array.from({length: padCount}).map((_, i) => (
+                      <div key={`pad-end-${i}`} />
                     ));
                   })()}
-                </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
 
           {legend}
         </div>
       ) : (
         /* Desktop: original horizontal layout */
-        <div className="p-5 overflow-x-auto touch-pan-x scrollbar-hide">
+        <div className='p-5 overflow-x-auto touch-pan-x scrollbar-hide'>
           {/* Month labels */}
-          <div className="flex" style={{ paddingLeft: 36 }}>
+          <div className='flex' style={{paddingLeft: 36}}>
             {monthLabels.map((ml) => (
               <div
                 key={`${ml.label}-${ml.weekIndex}`}
-                className="text-xs font-bold text-muted-foreground"
+                className='text-xs font-bold text-muted-foreground'
                 style={{
-                  position: "relative",
+                  position: 'relative',
                   left: ml.weekIndex * (CELL_SIZE + CELL_GAP),
                   width: 0,
-                  whiteSpace: "nowrap",
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {ml.label}
@@ -427,14 +463,17 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
           </div>
 
           {/* Grid */}
-          <div className="flex gap-0 mt-2">
+          <div className='flex gap-0 mt-2'>
             {/* Day labels column */}
-            <div className="flex flex-col shrink-0" style={{ width: 36, gap: CELL_GAP }}>
+            <div
+              className='flex flex-col shrink-0'
+              style={{width: 36, gap: CELL_GAP}}
+            >
               {DAY_LABELS.map((label, i) => (
                 <div
                   key={i}
-                  className="text-xs font-bold text-muted-foreground flex items-center"
-                  style={{ height: CELL_SIZE }}
+                  className='text-xs font-bold text-muted-foreground flex items-center'
+                  style={{height: CELL_SIZE}}
                 >
                   {label}
                 </div>
@@ -442,9 +481,13 @@ const ActivityCalendar = ({ activities, year }: ActivityCalendarProps) => {
             </div>
 
             {/* Week columns */}
-            <div className="flex" style={{ gap: CELL_GAP }}>
+            <div className='flex' style={{gap: CELL_GAP}}>
               {weeks.map((week, wIdx) => (
-                <div key={wIdx} className="flex flex-col" style={{ gap: CELL_GAP }}>
+                <div
+                  key={wIdx}
+                  className='flex flex-col'
+                  style={{gap: CELL_GAP}}
+                >
                   {week.map((dayData) => {
                     const isInYear = dayData.date.getFullYear() === year;
                     return renderDayCell(dayData, isInYear);
@@ -467,29 +510,26 @@ const DayCell = ({
   dayData,
   isInYear,
   size,
+  fluid = false,
 }: {
   dayData: DayData;
   isInYear: boolean;
   size: number;
+  fluid?: boolean;
 }) => {
+  const sizeStyle: React.CSSProperties = fluid
+    ? {width: '100%', aspectRatio: '1 / 0.32'}
+    : {width: size, height: size};
+
   if (!isInYear) {
-    return (
-      <div
-        style={{ width: size, height: size }}
-        className="opacity-0"
-      />
-    );
+    return <div style={sizeStyle} className='opacity-0' />;
   }
 
   if (dayData.activities.length === 0) {
     return (
       <div
-        style={{
-          width: size,
-          height: size,
-          backgroundColor: "var(--activity-empty)",
-        }}
-        className="border border-border/10"
+        style={{...sizeStyle, backgroundColor: 'var(--activity-empty)'}}
+        className='border border-border/10'
       />
     );
   }
@@ -499,33 +539,22 @@ const DayCell = ({
     const color = getActivityColor(a.type, a.level);
     return (
       <div
-        style={{
-          width: size,
-          height: size,
-          backgroundColor: color,
-        }}
-        className="border border-border/20"
+        style={{...sizeStyle, backgroundColor: color}}
+        className='border border-border/20'
       />
     );
   }
 
-  // Multiple activities — horizontal stripes
-  const stripeHeight = size / dayData.activities.length;
+  // Multiple activities — vertical stripes
   return (
     <div
-      style={{ width: size, height: size, overflow: "hidden" }}
-      className="border border-border/20 flex flex-col"
+      style={{...sizeStyle, overflow: 'hidden'}}
+      className='border border-border/20 flex flex-row'
     >
       {dayData.activities.map((a) => {
         const color = getActivityColor(a.type, a.level);
         return (
-          <div
-            key={a.id}
-            style={{
-              height: stripeHeight,
-              backgroundColor: color,
-            }}
-          />
+          <div key={a.id} className='flex-1' style={{backgroundColor: color}} />
         );
       })}
     </div>
@@ -534,24 +563,24 @@ const DayCell = ({
 
 // ----- TooltipBody sub-component -----
 
-const TooltipBody = ({ dayData }: { dayData: DayData }) => (
-  <div className="space-y-1.5">
-    <p className="text-xs font-black uppercase tracking-wider">
-      {format(dayData.date, "EEEE, MMM d")}
+const TooltipBody = ({dayData}: {dayData: DayData}) => (
+  <div className='space-y-1.5'>
+    <p className='text-xs font-black uppercase tracking-wider'>
+      {format(dayData.date, 'EEEE, MMM d')}
     </p>
     {dayData.activities.map((a) => {
       const Icon = ICON_MAP[a.type];
       return (
-        <div key={a.id} className="flex items-center gap-2 text-xs">
+        <div key={a.id} className='flex items-center gap-2 text-xs'>
           <div
-            className="w-2.5 h-2.5 shrink-0 border border-border/20"
+            className='w-2.5 h-2.5 shrink-0 border border-border/20'
             style={{
               backgroundColor: getActivityColor(a.type, a.level),
             }}
           />
-          <Icon className="h-3 w-3 shrink-0" />
-          <span className="font-bold truncate">{a.name}</span>
-          <span className="text-muted-foreground ml-auto shrink-0">
+          <Icon className='h-3 w-3 shrink-0' />
+          <span className='font-bold truncate'>{a.name}</span>
+          <span className='text-muted-foreground ml-auto shrink-0'>
             {a.distance.toFixed(1)} km &middot; {formatDuration(a.duration)}
           </span>
         </div>
