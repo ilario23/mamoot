@@ -115,7 +115,18 @@ export const buildAthleteSummary = (params: {
   retiredGearIds: string[];
   zoneBreakdowns: AggregatedZoneTotals | null;
 }): AthleteSummary => {
-  const {athleteName, settings, goal, allergies, foodPreferences, injuries, activities, gear, retiredGearIds, zoneBreakdowns} = params;
+  const {
+    athleteName,
+    settings,
+    goal,
+    allergies,
+    foodPreferences,
+    injuries,
+    activities,
+    gear,
+    retiredGearIds,
+    zoneBreakdowns,
+  } = params;
 
   // Zone definitions
   const zones = ([1, 2, 3, 4, 5, 6] as const).map((z) => {
@@ -195,32 +206,29 @@ export const buildAthleteSummary = (params: {
   if (zoneBreakdowns && zoneBreakdowns.totalTime > 0) {
     zoneDistribution = ([1, 2, 3, 4, 5, 6] as const).map((z) => {
       const zt = zoneBreakdowns.zones[z];
-      const timePct =
-        zt ? Number(((zt.time / zoneBreakdowns.totalTime) * 100).toFixed(1)) : 0;
+      const timePct = zt
+        ? Number(((zt.time / zoneBreakdowns.totalTime) * 100).toFixed(1))
+        : 0;
       return {zone: z, name: ZONE_NAMES[z], timePct};
     });
   }
 
   // Training metrics — COROS EvoLab–style (BF, LI, IT, ACWR)
   let fitness: AthleteSummary['fitness'] = null;
-  const fitnessData = calcFitnessData(
+  const fitnessResult = calcFitnessData(
     activities,
     settings.restingHr,
     settings.maxHr,
     42, // 6 weeks for trend calculation
     settings.zones,
   );
+  const fitnessData = fitnessResult.data;
 
   if (fitnessData.length > 0) {
     const latest = fitnessData[fitnessData.length - 1];
-    const acwrData = calcACWRData(
-      activities,
-      settings.restingHr,
-      settings.maxHr,
-      42,
-      settings.zones,
-    );
-    const latestAcwr = acwrData.length > 0 ? acwrData[acwrData.length - 1].acwr : 0;
+    const acwrData = calcACWRData(fitnessData);
+    const latestAcwr =
+      acwrData.length > 0 ? acwrData[acwrData.length - 1].acwr : 0;
 
     // Determine BF trend: compare last 7 days of Base Fitness
     const recentBf = fitnessData.slice(-7);
@@ -241,17 +249,15 @@ export const buildAthleteSummary = (params: {
   }
 
   // Recent activities (last 10)
-  const recentActivities = activities
-    .slice(0, 10)
-    .map((a) => ({
-      name: a.name,
-      date: a.date,
-      type: a.type,
-      distanceKm: Number(a.distance.toFixed(1)),
-      durationFormatted: formatDuration(a.duration),
-      pace: formatPace(a.avgPace),
-      avgHr: a.avgHr,
-    }));
+  const recentActivities = activities.slice(0, 10).map((a) => ({
+    name: a.name,
+    date: a.date,
+    type: a.type,
+    distanceKm: Number(a.distance.toFixed(1)),
+    durationFormatted: formatDuration(a.duration),
+    pace: formatPace(a.avgPace),
+    avgHr: a.avgHr,
+  }));
 
   return {
     name: athleteName,
@@ -333,7 +339,9 @@ export const serializeAthleteSummary = (summary: AthleteSummary): string => {
     `- Avg: ${t.avgRunsPerWeek} runs/week, ${t.avgDistancePerWeek} km/week, ${formatPace(t.avgPace)}/km pace`,
   );
   const trendSign = t.volumeTrendPct >= 0 ? '+' : '';
-  lines.push(`- Volume trend: ${trendSign}${t.volumeTrendPct}% vs prior 4 weeks`);
+  lines.push(
+    `- Volume trend: ${trendSign}${t.volumeTrendPct}% vs prior 4 weeks`,
+  );
 
   // Weekly breakdown
   if (summary.weeklyBreakdown.length > 0) {

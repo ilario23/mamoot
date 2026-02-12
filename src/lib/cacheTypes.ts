@@ -88,6 +88,36 @@ export interface CachedZoneBreakdown {
   computedAt: number;
 }
 
+// ----- Dashboard cache persistence -----
+
+export interface CachedDashboardContinuationState {
+  /** Last BF (Base Fitness) EWMA value */
+  bf: number;
+  /** Last LI (Load Impact) EWMA value */
+  li: number;
+}
+
+export interface CachedDashboardCache {
+  /** Cache key, e.g. "fitness:{athleteId}" */
+  key: string;
+  /** Strava athlete ID */
+  athleteId: number;
+  /** Hash of (zones + maxHr + restingHr) — mismatch triggers full recompute */
+  settingsHash: string;
+  /** Most recent activity ID — detects new activities for incremental append */
+  lastActivityId: number;
+  /** Activity count — detects deletions */
+  lastActivityCount: number;
+  /** Last processed date (YYYY-MM-DD) for EWMA resumption */
+  lastDate: string;
+  /** EWMA state to resume from */
+  continuationState: CachedDashboardContinuationState;
+  /** FitnessDataPoint[] — the full 365-day computed result */
+  data: import('@/utils/trainingLoad').FitnessDataPoint[];
+  /** Unix ms timestamp */
+  computedAt: number;
+}
+
 // ----- Chat persistence -----
 
 export interface CachedChatSession {

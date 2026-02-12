@@ -17,6 +17,7 @@ import type {
   CachedAthleteZones,
   CachedAthleteGear,
   CachedZoneBreakdown,
+  CachedDashboardCache,
 } from './cacheTypes';
 
 const API = '/api/db';
@@ -62,7 +63,9 @@ const getFromNeon = async <T>(
 export const neonGetActivities = async (): Promise<CachedActivity[] | null> =>
   getFromNeon<CachedActivity[]>('activities');
 
-export const neonSyncActivities = async (records: CachedActivity[]): Promise<void> => {
+export const neonSyncActivities = async (
+  records: CachedActivity[],
+): Promise<void> => {
   await postToNeon('activities', records);
 };
 
@@ -73,7 +76,9 @@ export const neonGetActivityDetail = async (
 ): Promise<CachedActivityDetail | null> =>
   getFromNeon<CachedActivityDetail>('activity-details', id);
 
-export const neonSyncActivityDetail = async (record: CachedActivityDetail): Promise<void> => {
+export const neonSyncActivityDetail = async (
+  record: CachedActivityDetail,
+): Promise<void> => {
   await postToNeon('activity-details', record);
 };
 
@@ -155,7 +160,9 @@ export const neonSyncActivityLabelsBulk = async (
 };
 
 /** Awaitable write of a single activity label to Neon. */
-export const neonSyncActivityLabel = async (record: CachedActivityLabel): Promise<void> => {
+export const neonSyncActivityLabel = async (
+  record: CachedActivityLabel,
+): Promise<void> => {
   await postToNeon('activity-labels', record);
 };
 
@@ -179,7 +186,9 @@ export const neonGetAthleteStats = async (
 ): Promise<CachedAthleteStats | null> =>
   getFromNeon<CachedAthleteStats>('athlete-stats', athleteId);
 
-export const neonSyncAthleteStats = async (record: CachedAthleteStats): Promise<void> => {
+export const neonSyncAthleteStats = async (
+  record: CachedAthleteStats,
+): Promise<void> => {
   await postToNeon('athlete-stats', record);
 };
 
@@ -190,7 +199,9 @@ export const neonGetAthleteZones = async (
 ): Promise<CachedAthleteZones | null> =>
   getFromNeon<CachedAthleteZones>('athlete-zones', key);
 
-export const neonSyncAthleteZones = async (record: CachedAthleteZones): Promise<void> => {
+export const neonSyncAthleteZones = async (
+  record: CachedAthleteZones,
+): Promise<void> => {
   await postToNeon('athlete-zones', record);
 };
 
@@ -201,7 +212,9 @@ export const neonGetAthleteGear = async (
 ): Promise<CachedAthleteGear | null> =>
   getFromNeon<CachedAthleteGear>('athlete-gear', key);
 
-export const neonSyncAthleteGear = async (record: CachedAthleteGear): Promise<void> => {
+export const neonSyncAthleteGear = async (
+  record: CachedAthleteGear,
+): Promise<void> => {
   await postToNeon('athlete-gear', record);
 };
 
@@ -212,14 +225,18 @@ export const neonGetZoneBreakdown = async (
 ): Promise<CachedZoneBreakdown | null> =>
   getFromNeon<CachedZoneBreakdown>('zone-breakdowns', activityId);
 
-export const neonSyncZoneBreakdown = async (record: CachedZoneBreakdown): Promise<void> => {
+export const neonSyncZoneBreakdown = async (
+  record: CachedZoneBreakdown,
+): Promise<void> => {
   await postToNeon('zone-breakdowns', record);
 };
 
 // ---- Zone Breakdowns (bulk) ----
 
 /** Fetch all zone breakdowns from Neon. */
-export const neonGetAllZoneBreakdowns = async (): Promise<CachedZoneBreakdown[]> => {
+export const neonGetAllZoneBreakdowns = async (): Promise<
+  CachedZoneBreakdown[]
+> => {
   try {
     const res = await fetch(`${API}/zone-breakdowns`);
     if (!res.ok) return [];
@@ -228,6 +245,19 @@ export const neonGetAllZoneBreakdowns = async (): Promise<CachedZoneBreakdown[]>
   } catch {
     return [];
   }
+};
+
+// ---- Dashboard Cache (single by key) ----
+
+export const neonGetDashboardCache = async (
+  key: string,
+): Promise<CachedDashboardCache | null> =>
+  getFromNeon<CachedDashboardCache>('dashboard-cache', key);
+
+export const neonSyncDashboardCache = async (
+  record: CachedDashboardCache,
+): Promise<void> => {
+  await postToNeon('dashboard-cache', record);
 };
 
 // ---- Activity Labels (single) ----

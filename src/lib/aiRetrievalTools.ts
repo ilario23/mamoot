@@ -23,7 +23,11 @@ import type {ActivitySummary, UserSettings} from './mockData';
 import {formatPace, formatDuration, ZONE_NAMES} from './mockData';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
 import type {StravaDetailedActivity} from './strava';
-import {classifyWorkout, formatLabelForAI, type WorkoutLabel} from './workoutLabel';
+import {
+  classifyWorkout,
+  formatLabelForAI,
+  type WorkoutLabel,
+} from './workoutLabel';
 
 // ----- Helpers -----
 
@@ -132,7 +136,11 @@ const fetchOrComputeLabels = async (
       .from(activityDetailsTable)
       .where(inArray(activityDetailsTable.id, missingIds));
 
-    const newLabels: Array<{id: number; data: WorkoutLabel; computedAt: number}> = [];
+    const newLabels: Array<{
+      id: number;
+      data: WorkoutLabel;
+      computedAt: number;
+    }> = [];
 
     for (const row of details) {
       const detail = row.data as StravaDetailedActivity;
@@ -388,13 +396,14 @@ export const createRetrievalTools = (athleteId: number) => ({
       const allActivities = await fetchActivities();
       const zones = settings.zones as UserSettings['zones'];
 
-      const fitnessData = calcFitnessData(
+      const fitnessResult = calcFitnessData(
         allActivities,
         settings.restingHr,
         settings.maxHr,
         42,
         zones,
       );
+      const fitnessData = fitnessResult.data;
 
       if (fitnessData.length === 0) {
         return {
@@ -403,13 +412,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       }
 
       const latest = fitnessData[fitnessData.length - 1];
-      const acwrData = calcACWRData(
-        allActivities,
-        settings.restingHr,
-        settings.maxHr,
-        42,
-        zones,
-      );
+      const acwrData = calcACWRData(fitnessData);
       const latestAcwr =
         acwrData.length > 0 ? acwrData[acwrData.length - 1].acwr : 0;
 
@@ -627,9 +630,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       const todayMs = now.getTime();
       const dayOfWeek = (now.getDay() + 6) % 7; // 0=Mon, 6=Sun
       const mondayMs =
-        todayMs -
-        dayOfWeek * 86400000 +
-        weekOffset * 7 * 86400000;
+        todayMs - dayOfWeek * 86400000 + weekOffset * 7 * 86400000;
       const sundayMs = mondayMs + 6 * 86400000;
 
       const weekStartDate = new Date(mondayMs).toISOString().slice(0, 10);
@@ -682,10 +683,14 @@ export const createRetrievalTools = (athleteId: number) => ({
 
         if (actuals.length === 0) {
           if (session.type === 'rest') {
-            lines.push(`| ${date} | ${session.type}: ${session.description} | Rest day | Hit |`);
+            lines.push(
+              `| ${date} | ${session.type}: ${session.description} | Rest day | Hit |`,
+            );
             hitCount++;
           } else {
-            lines.push(`| ${date} | ${session.type}: ${session.description} | -- | Missed |`);
+            lines.push(
+              `| ${date} | ${session.type}: ${session.description} | -- | Missed |`,
+            );
             missCount++;
           }
           continue;
@@ -753,7 +758,8 @@ export const createRetrievalTools = (athleteId: number) => ({
       // 8. Summary
       const totalPlanned = weekSessions.filter((s) => s.type !== 'rest').length;
       const parts = [];
-      if (hitCount > 0) parts.push(`${hitCount}/${totalPlanned} planned sessions hit`);
+      if (hitCount > 0)
+        parts.push(`${hitCount}/${totalPlanned} planned sessions hit`);
       if (modifiedCount > 0) parts.push(`${modifiedCount} modified`);
       if (missCount > 0) parts.push(`${missCount} missed`);
       if (unplannedCount > 0) parts.push(`${unplannedCount} unplanned`);

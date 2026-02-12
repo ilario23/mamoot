@@ -132,23 +132,18 @@ const resolveFitness = (
   activities: ActivitySummary[],
   settings: UserSettings,
 ): string => {
-  const fitnessData = calcFitnessData(
+  const fitnessResult = calcFitnessData(
     activities,
     settings.restingHr,
     settings.maxHr,
     42,
     settings.zones,
   );
+  const fitnessData = fitnessResult.data;
   if (fitnessData.length === 0) return 'Insufficient data for fitness metrics.';
 
   const latest = fitnessData[fitnessData.length - 1];
-  const acwrData = calcACWRData(
-    activities,
-    settings.restingHr,
-    settings.maxHr,
-    42,
-    settings.zones,
-  );
+  const acwrData = calcACWRData(fitnessData);
   const acwr = acwrData.length > 0 ? acwrData[acwrData.length - 1].acwr : 0;
 
   const recentBf = fitnessData.slice(-7);
@@ -326,7 +321,11 @@ export const useMentionResolver = () => {
             data = resolveFitness(activities, settings);
             break;
           case 'activity':
-            data = await resolveActivity(activities, settings.zones, mention.itemId);
+            data = await resolveActivity(
+              activities,
+              settings.zones,
+              mention.itemId,
+            );
             break;
           case 'gear':
             data = await resolveGear(mention.itemId);

@@ -36,6 +36,13 @@
       "when": 1770844447872,
       "tag": "0004_keen_shadowcat",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1770889166932,
+      "tag": "0005_striped_ikaris",
+      "breakpoints": true
     }
   ]
 }

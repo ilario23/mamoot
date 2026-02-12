@@ -17,6 +17,7 @@ import {
   athleteZones,
   athleteGear,
   zoneBreakdowns,
+  dashboardCache,
   userSettings,
   chatSessions,
   chatMessages,
@@ -54,8 +55,7 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         const pks = req.nextUrl.searchParams.get('pks');
         if (pks) {
           const ids = pks.split(',').map(Number).filter(Boolean);
-          if (ids.length === 0)
-            return NextResponse.json([], {status: 200});
+          if (ids.length === 0) return NextResponse.json([], {status: 200});
           const rows = await db
             .select()
             .from(activityDetails)
@@ -64,7 +64,10 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         }
         // Single fetch: GET /api/db/activity-details?pk=123
         if (!pk)
-          return NextResponse.json({error: 'pk or pks required'}, {status: 400});
+          return NextResponse.json(
+            {error: 'pk or pks required'},
+            {status: 400},
+          );
         const rows = await db
           .select()
           .from(activityDetails)
@@ -77,8 +80,7 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         const labelPks = req.nextUrl.searchParams.get('pks');
         if (labelPks) {
           const ids = labelPks.split(',').map(Number).filter(Boolean);
-          if (ids.length === 0)
-            return NextResponse.json([], {status: 200});
+          if (ids.length === 0) return NextResponse.json([], {status: 200});
           const rows = await db
             .select()
             .from(activityLabels)
@@ -87,7 +89,10 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         }
         // Single fetch: GET /api/db/activity-labels?pk=123
         if (!pk)
-          return NextResponse.json({error: 'pk or pks required'}, {status: 400});
+          return NextResponse.json(
+            {error: 'pk or pks required'},
+            {status: 400},
+          );
         const labelRows = await db
           .select()
           .from(activityLabels)
@@ -145,9 +150,21 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         return NextResponse.json(rows[0] ?? null);
       }
 
+      case 'dashboard-cache': {
+        // GET /api/db/dashboard-cache?pk=fitness:12345 → single cache entry by key
+        if (!pk)
+          return NextResponse.json({error: 'pk required'}, {status: 400});
+        const dcRows = await db
+          .select()
+          .from(dashboardCache)
+          .where(eq(dashboardCache.key, pk));
+        return NextResponse.json(dcRows[0] ?? null);
+      }
+
       case 'user-settings': {
         // GET /api/db/user-settings?athleteId=123 → settings for athlete
-        const settingsAthleteId = req.nextUrl.searchParams.get('athleteId') ?? pk;
+        const settingsAthleteId =
+          req.nextUrl.searchParams.get('athleteId') ?? pk;
         if (!settingsAthleteId)
           return NextResponse.json(
             {error: 'athleteId or pk required'},
@@ -387,6 +404,25 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
+      case 'dashboard-cache':
+        await db
+          .insert(dashboardCache)
+          .values(records)
+          .onConflictDoUpdate({
+            target: dashboardCache.key,
+            set: {
+              athleteId: sql`excluded.athlete_id`,
+              settingsHash: sql`excluded.settings_hash`,
+              lastActivityId: sql`excluded.last_activity_id`,
+              lastActivityCount: sql`excluded.last_activity_count`,
+              lastDate: sql`excluded.last_date`,
+              continuationState: sql`excluded.continuation_state`,
+              data: sql`excluded.data`,
+              computedAt: sql`excluded.computed_at`,
+            },
+          });
+        break;
+
       case 'user-settings':
         await db
           .insert(userSettings)
@@ -518,10 +554,7 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         // DELETE /api/db/chat-sessions?id=uuid → delete session, its messages, and linked plans
         const sessionId = req.nextUrl.searchParams.get('id');
         if (!sessionId)
-          return NextResponse.json(
-            {error: 'id required'},
-            {status: 400},
-          );
+          return NextResponse.json({error: 'id required'}, {status: 400});
         // Delete messages belonging to this session
         await db
           .delete(chatMessages)
@@ -532,7 +565,10 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
             .delete(coachPlans)
             .where(eq(coachPlans.sourceSessionId, sessionId));
         } catch (e) {
-          console.warn('[DB DELETE /chat-sessions] Could not cascade-delete coach_plans:', (e as Error).message);
+          console.warn(
+            '[DB DELETE /chat-sessions] Could not cascade-delete coach_plans:',
+            (e as Error).message,
+          );
         }
         // Delete the session itself (includes memory/summary)
         await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
@@ -557,10 +593,7 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         // DELETE /api/db/coach-plans?id=uuid → delete a specific plan
         const planId = req.nextUrl.searchParams.get('id');
         if (!planId)
-          return NextResponse.json(
-            {error: 'id required'},
-            {status: 400},
-          );
+          return NextResponse.json({error: 'id required'}, {status: 400});
         await db.delete(coachPlans).where(eq(coachPlans.id, planId));
         return NextResponse.json({success: true});
       }

@@ -190,7 +190,9 @@ const ChatInput = ({onSend, isStreaming, placeholder}: ChatInputProps) => {
     setFilterText('');
     setMentionStart(-1);
     setPopupOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 50);
+    // Don't refocus the textarea here — the MentionPopup will focus its own
+    // search input. Focusing the textarea would move focus outside the Radix
+    // Popover, causing it to immediately close via onOpenChange.
   }, []);
 
   return (

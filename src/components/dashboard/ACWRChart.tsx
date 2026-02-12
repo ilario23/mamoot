@@ -12,9 +12,8 @@ import {
   ReferenceArea,
   ReferenceLine,
 } from 'recharts';
-import {useActivities} from '@/hooks/useStrava';
+import {useFitnessData} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
-import {useSettings} from '@/contexts/SettingsContext';
 import {calcACWRData} from '@/utils/trainingLoad';
 import {useIsMobile} from '@/hooks/use-mobile';
 import {Loader2} from 'lucide-react';
@@ -27,27 +26,27 @@ const PERIOD_OPTIONS = [
 
 const ACWRChart = ({embedded = false}: {embedded?: boolean}) => {
   const {isAuthenticated} = useStravaAuth();
-  const {settings} = useSettings();
-  const {data: activities, isLoading} = useActivities();
+  const {data: fitnessData, isLoading} = useFitnessData();
   const isMobile = useIsMobile();
   const [daysBack, setDaysBack] = useState(90);
 
+  // Derive ACWR from cached fitness data, sliced to selected period
   const chartData = useMemo(() => {
-    if (!activities || activities.length === 0) return [];
-    return calcACWRData(
-      activities,
-      settings.restingHr,
-      settings.maxHr,
-      daysBack,
-      settings.zones,
-    );
-  }, [activities, settings.restingHr, settings.maxHr, settings.zones, daysBack]);
+    if (!fitnessData || fitnessData.length === 0) return [];
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - daysBack);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const sliced = fitnessData.filter((d) => d.date >= cutoffStr);
+    return calcACWRData(sliced);
+  }, [fitnessData, daysBack]);
 
   if (!isAuthenticated) return null;
 
   if (isLoading) {
     return (
-      <div className={`${embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'} flex items-center justify-center min-h-[220px] md:min-h-[300px]`}>
+      <div
+        className={`${embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'} flex items-center justify-center min-h-[220px] md:min-h-[300px]`}
+      >
         <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
       </div>
     );
@@ -92,19 +91,23 @@ const ACWRChart = ({embedded = false}: {embedded?: boolean}) => {
   );
 
   return (
-    <div className={embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'}>
+    <div
+      className={
+        embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'
+      }
+    >
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4'>
         <div>
           {!embedded && (
-            <h3 className="font-black text-lg uppercase tracking-wider">
+            <h3 className='font-black text-lg uppercase tracking-wider'>
               Workload Ratio
-              <span className="text-xs font-bold text-muted-foreground ml-2 normal-case">
+              <span className='text-xs font-bold text-muted-foreground ml-2 normal-case'>
                 (ACWR)
               </span>
             </h3>
           )}
-          <p className="text-xs font-bold text-muted-foreground mt-0.5">
+          <p className='text-xs font-bold text-muted-foreground mt-0.5'>
             Current:{' '}
             <span className={`font-black ${statusColor}`}>
               {latestACWR.toFixed(2)} — {statusLabel}
@@ -114,8 +117,8 @@ const ACWRChart = ({embedded = false}: {embedded?: boolean}) => {
         <select
           value={daysBack}
           onChange={handlePeriodChange}
-          className="px-3 py-1.5 border-3 border-border font-bold text-xs uppercase tracking-wider bg-background focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-          aria-label="Select time period"
+          className='px-3 py-1.5 border-3 border-border font-bold text-xs uppercase tracking-wider bg-background focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer'
+          aria-label='Select time period'
         >
           {PERIOD_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -126,7 +129,10 @@ const ACWRChart = ({embedded = false}: {embedded?: boolean}) => {
       </div>
 
       {/* Chart */}
-      <ResponsiveContainer width="100%" height={embedded ? (isMobile ? 220 : 260) : (isMobile ? 250 : 300)}>
+      <ResponsiveContainer
+        width='100%'
+        height={embedded ? (isMobile ? 220 : 260) : isMobile ? 250 : 300}
+      >
         <AreaChart data={chartData}>
           <defs>
             <linearGradient id='acwrGradient' x1='0' y1='0' x2='0' y2='1'>

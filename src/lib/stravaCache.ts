@@ -30,6 +30,12 @@ import type {ActivitySummary, StreamPoint, UserSettings} from './mockData';
 import {computeZoneBreakdown, hashZoneSettings} from './zoneCompute';
 import type {ZoneBreakdown} from './zoneCompute';
 import {
+  calcFitnessData,
+  appendFitnessData,
+  hashTrainingSettings,
+} from '@/utils/trainingLoad';
+import type {FitnessDataPoint} from '@/utils/trainingLoad';
+import {
   neonGetActivities,
   neonSyncActivities,
   neonGetActivityDetail,
@@ -44,6 +50,8 @@ import {
   neonSyncAthleteGear,
   neonGetZoneBreakdown,
   neonSyncZoneBreakdown,
+  neonGetDashboardCache,
+  neonSyncDashboardCache,
 } from './neonSync';
 
 // ----- Staleness thresholds (ms) -----
@@ -84,7 +92,9 @@ export const cachedGetAllActivities = async (): Promise<ActivitySummary[]> => {
     );
 
     if (isFresh(newestNeon.fetchedAt, STALE.activities)) {
-      const sorted = [...neonData].sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0));
+      const sorted = [...neonData].sort((a, b) =>
+        b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
+      );
       return sorted.map((record) => transformActivity(record.data));
     }
   }
@@ -103,7 +113,9 @@ export const cachedGetAllActivities = async (): Promise<ActivitySummary[]> => {
   // Write to Neon
   await neonSyncActivities(records);
 
-  const sorted = [...records].sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0));
+  const sorted = [...records].sort((a, b) =>
+    b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
+  );
   return sorted.map((record) => transformActivity(record.data));
 };
 
@@ -228,7 +240,11 @@ export const cachedGetAthleteGear = async (): Promise<{
   if (neonData && isFresh(neonData.fetchedAt, STALE.athleteGear)) {
     // Ensure retiredGearIds is populated (backward compat with old records)
     if (!neonData.retiredGearIds) neonData.retiredGearIds = [];
-    return {bikes: neonData.bikes, shoes: neonData.shoes, retiredGearIds: neonData.retiredGearIds};
+    return {
+      bikes: neonData.bikes,
+      shoes: neonData.shoes,
+      retiredGearIds: neonData.retiredGearIds,
+    };
   }
 
   // ── Tier 2: Strava API ──
@@ -237,7 +253,13 @@ export const cachedGetAthleteGear = async (): Promise<{
   const profile = await fetchAthleteWithGear();
   const bikes = profile.bikes ?? [];
   const shoes = profile.shoes ?? [];
-  const record = {key: GEAR_KEY, bikes, shoes, retiredGearIds: existingRetiredIds, fetchedAt: Date.now()};
+  const record = {
+    key: GEAR_KEY,
+    bikes,
+    shoes,
+    retiredGearIds: existingRetiredIds,
+    fetchedAt: Date.now(),
+  };
 
   await neonSyncAthleteGear(record);
 
@@ -320,6 +342,145 @@ export const batchGetZoneBreakdowns = async (
   return results;
 };
 
+// ----- Dashboard Fitness Cache (3-way: hit / append / recompute) -----
+
+/** Maximum computation window — UI components slice as needed */
+const FITNESS_DAYS_BACK = 365;
+
+/**
+ * Returns cached fitness data (BF/LI/IT) for the dashboard.
+ *
+ * Three-way strategy:
+ *   1. CACHE HIT:    settingsHash matches + no new activities → instant return
+ *   2. APPEND:       settingsHash matches + new activities    → resume EWMA, append
+ *   3. RECOMPUTE:    settingsHash mismatch or no cache        → full recalculation
+ *
+ * Always computes the full 365-day window. UI slices by daysBack client-side.
+ */
+export const cachedCalcFitnessData = async (
+  athleteId: number,
+  activities: ActivitySummary[],
+  settings: UserSettings,
+): Promise<FitnessDataPoint[]> => {
+  const currentHash = hashTrainingSettings(
+    settings.zones,
+    settings.maxHr,
+    settings.restingHr,
+  );
+  const latestId = activities[0]?.id ? Number(activities[0].id) : 0;
+  const actCount = activities.length;
+  const cacheKey = `fitness:${athleteId}`;
+
+  // ── Load existing cache from Neon ──
+  const cached = await neonGetDashboardCache(cacheKey);
+
+  if (cached) {
+    // PATH 1: Cache hit — nothing changed
+    if (
+      cached.settingsHash === currentHash &&
+      cached.lastActivityId === latestId &&
+      cached.lastActivityCount === actCount
+    ) {
+      // Still extend rest days to today if needed
+      const todayStr = new Date().toISOString().slice(0, 10);
+      if (cached.lastDate === todayStr) {
+        return cached.data;
+      }
+
+      // Need to fill rest days from lastDate+1 to today (no new activities)
+      const prevState = {
+        ...cached.continuationState,
+        lastDate: cached.lastDate,
+      };
+      const result = appendFitnessData(
+        [], // no new activities
+        prevState,
+        cached.data,
+        settings.restingHr,
+        settings.maxHr,
+        FITNESS_DAYS_BACK,
+        settings.zones,
+      );
+
+      // Persist updated cache (store only bf/li in continuationState; lastDate is a separate column)
+      const {bf, li} = result.continuation;
+      await neonSyncDashboardCache({
+        key: cacheKey,
+        athleteId,
+        settingsHash: currentHash,
+        lastActivityId: latestId,
+        lastActivityCount: actCount,
+        lastDate: result.continuation.lastDate,
+        continuationState: {bf, li},
+        data: result.data,
+        computedAt: Date.now(),
+      });
+
+      return result.data;
+    }
+
+    // PATH 2: Incremental append — same settings, new activities
+    if (cached.settingsHash === currentHash) {
+      const newActivities = activities.filter((a) => a.date > cached.lastDate);
+      const prevState = {
+        ...cached.continuationState,
+        lastDate: cached.lastDate,
+      };
+
+      const result = appendFitnessData(
+        newActivities,
+        prevState,
+        cached.data,
+        settings.restingHr,
+        settings.maxHr,
+        FITNESS_DAYS_BACK,
+        settings.zones,
+      );
+
+      // Persist updated cache
+      const {bf, li} = result.continuation;
+      await neonSyncDashboardCache({
+        key: cacheKey,
+        athleteId,
+        settingsHash: currentHash,
+        lastActivityId: latestId,
+        lastActivityCount: actCount,
+        lastDate: result.continuation.lastDate,
+        continuationState: {bf, li},
+        data: result.data,
+        computedAt: Date.now(),
+      });
+
+      return result.data;
+    }
+  }
+
+  // PATH 3: Full recompute — no cache or settings changed
+  const result = calcFitnessData(
+    activities,
+    settings.restingHr,
+    settings.maxHr,
+    FITNESS_DAYS_BACK,
+    settings.zones,
+  );
+
+  // Persist full result
+  const {bf, li} = result.continuation;
+  await neonSyncDashboardCache({
+    key: cacheKey,
+    athleteId,
+    settingsHash: currentHash,
+    lastActivityId: latestId,
+    lastActivityCount: actCount,
+    lastDate: result.continuation.lastDate,
+    continuationState: {bf, li},
+    data: result.data,
+    computedAt: Date.now(),
+  });
+
+  return result.data;
+};
+
 // ----- Force refresh helpers -----
 
 /**
@@ -339,6 +500,8 @@ export const forceRefreshActivities = async (): Promise<ActivitySummary[]> => {
 
   await neonSyncActivities(records);
 
-  const sorted = [...records].sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0));
+  const sorted = [...records].sort((a, b) =>
+    b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
+  );
   return sorted.map((record) => transformActivity(record.data));
 };

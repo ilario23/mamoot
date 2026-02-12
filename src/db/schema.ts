@@ -123,6 +123,29 @@ export const activityLabels = pgTable('activity_labels', {
   computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
 });
 
+// ----- Dashboard Cache -----
+// Stores pre-computed dashboard metrics (fitness EWMA, etc.) with
+// continuation state for incremental append on new activities.
+// Full recompute is triggered when settingsHash changes (zone/HR changes).
+export const dashboardCache = pgTable('dashboard_cache', {
+  /** Cache key, e.g. "fitness:{athleteId}" */
+  key: text('key').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  /** Hash of (zones + maxHr + restingHr) — mismatch triggers full recompute */
+  settingsHash: text('settings_hash').notNull(),
+  /** Most recent activity ID — detects new activities for incremental append */
+  lastActivityId: bigint('last_activity_id', {mode: 'number'}).notNull(),
+  /** Activity count — detects deletions */
+  lastActivityCount: integer('last_activity_count').notNull(),
+  /** Last processed date (YYYY-MM-DD) for EWMA resumption */
+  lastDate: text('last_date').notNull(),
+  /** { bf: number, li: number } — EWMA state to resume from */
+  continuationState: jsonb('continuation_state').notNull(),
+  /** FitnessDataPoint[] — the full 365-day computed result */
+  data: jsonb('data').notNull(),
+  computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
+});
+
 // ----- Coach Plans -----
 // Maps to CachedCoachPlan (src/lib/db.ts)
 // Multiple plans per athlete with an active flag for plan history.

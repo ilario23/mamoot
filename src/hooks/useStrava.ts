@@ -8,10 +8,12 @@ import {
   cachedGetAthleteStats,
   cachedGetAthleteZones,
   cachedGetAthleteGear,
+  cachedCalcFitnessData,
   forceRefreshActivities,
   batchGetZoneBreakdowns,
 } from '@/lib/stravaCache';
 import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
+import type {FitnessDataPoint} from '@/utils/trainingLoad';
 import {fetchStarredSegments, fetchSegmentDetail} from '@/lib/strava';
 import {aggregateZoneBreakdowns} from '@/lib/zoneCompute';
 import type {AggregatedZoneTotals, ZoneBreakdown} from '@/lib/zoneCompute';
@@ -130,10 +132,40 @@ export const useSegmentDetail = (segmentId: number | null) => {
 export const useAthleteGear = () => {
   const {isAuthenticated} = useStravaAuth();
 
-  return useQuery<{bikes: StravaSummaryGear[]; shoes: StravaSummaryGear[]; retiredGearIds: string[]}>({
+  return useQuery<{
+    bikes: StravaSummaryGear[];
+    shoes: StravaSummaryGear[];
+    retiredGearIds: string[];
+  }>({
     queryKey: ['strava', 'gear'],
     queryFn: cachedGetAthleteGear,
     enabled: isAuthenticated,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_DAY,
+    refetchOnWindowFocus: false,
+  });
+};
+
+// ----- Fitness Data (cached, 365-day window) -----
+
+/**
+ * Returns the full 365-day fitness dataset (BF/LI/IT) backed by the
+ * Neon dashboard cache. On first load it computes from scratch; after
+ * that it incrementally appends new days. Settings changes trigger a
+ * full recompute.
+ *
+ * Components should slice the returned array by their own `daysBack`.
+ */
+export const useFitnessData = () => {
+  const {isAuthenticated, athlete} = useStravaAuth();
+  const {settings} = useSettings();
+  const {data: activities} = useActivities();
+
+  return useQuery<FitnessDataPoint[]>({
+    queryKey: ['dashboard', 'fitness', athlete?.id],
+    queryFn: () => cachedCalcFitnessData(athlete!.id, activities!, settings),
+    enabled:
+      isAuthenticated && !!athlete?.id && !!activities && activities.length > 0,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
@@ -164,9 +196,14 @@ export const useZoneBreakdowns = (weeks: number): UseZoneBreakdownsResult => {
   const {settings} = useSettings();
   const {data: activities, isLoading: activitiesLoading} = useActivities();
 
-  const [result, setResult] = useState<AggregatedZoneTotals | undefined>(undefined);
+  const [result, setResult] = useState<AggregatedZoneTotals | undefined>(
+    undefined,
+  );
   const [isLoading, setIsLoading] = useState(true);
-  const [progress, setProgress] = useState<ZoneBreakdownProgress>({done: 0, total: 0});
+  const [progress, setProgress] = useState<ZoneBreakdownProgress>({
+    done: 0,
+    total: 0,
+  });
 
   // Track the current computation so we can abort stale ones
   const abortRef = useRef(0);
@@ -238,7 +275,14 @@ export const useZoneBreakdowns = (weeks: number): UseZoneBreakdownsResult => {
     };
 
     compute();
-  }, [isAuthenticated, activitiesLoading, activities, weeks, settings.zones, handleProgress]);
+  }, [
+    isAuthenticated,
+    activitiesLoading,
+    activities,
+    weeks,
+    settings.zones,
+    handleProgress,
+  ]);
 
   return {data: result, isLoading, progress};
 };
@@ -256,14 +300,21 @@ interface UsePerActivityZoneBreakdownsResult {
  * Returns per-activity zone breakdowns (not aggregated) for activities
  * within a time window. Useful for charts that need to group by week/date.
  */
-export const usePerActivityZoneBreakdowns = (weeks: number): UsePerActivityZoneBreakdownsResult => {
+export const usePerActivityZoneBreakdowns = (
+  weeks: number,
+): UsePerActivityZoneBreakdownsResult => {
   const {isAuthenticated} = useStravaAuth();
   const {settings} = useSettings();
   const {data: activities, isLoading: activitiesLoading} = useActivities();
 
-  const [result, setResult] = useState<Map<string, ZoneBreakdown> | undefined>(undefined);
+  const [result, setResult] = useState<Map<string, ZoneBreakdown> | undefined>(
+    undefined,
+  );
   const [isLoading, setIsLoading] = useState(true);
-  const [progress, setProgress] = useState<ZoneBreakdownProgress>({done: 0, total: 0});
+  const [progress, setProgress] = useState<ZoneBreakdownProgress>({
+    done: 0,
+    total: 0,
+  });
 
   const abortRef = useRef(0);
 
@@ -334,7 +385,14 @@ export const usePerActivityZoneBreakdowns = (weeks: number): UsePerActivityZoneB
     };
 
     compute();
-  }, [isAuthenticated, activitiesLoading, activities, weeks, settings.zones, handleProgress]);
+  }, [
+    isAuthenticated,
+    activitiesLoading,
+    activities,
+    weeks,
+    settings.zones,
+    handleProgress,
+  ]);
 
   return {data: result, isLoading, progress};
 };

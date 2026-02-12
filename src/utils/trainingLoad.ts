@@ -7,6 +7,7 @@
 
 import type {ActivitySummary, UserSettings} from '@/lib/mockData';
 import {getZoneForHr} from '@/lib/mockData';
+import {hashZoneSettings} from '@/lib/zoneCompute';
 
 // ----- Types -----
 
@@ -28,6 +29,19 @@ export interface ACWRDataPoint {
   acwr: number; // Acute:Chronic Workload Ratio
   bf: number;
   li: number;
+}
+
+/** EWMA state stored for incremental resumption */
+export interface ContinuationState {
+  bf: number;
+  li: number;
+  lastDate: string; // YYYY-MM-DD — last day processed
+}
+
+/** Result of a fitness computation, including continuation state for caching */
+export interface FitnessResult {
+  data: FitnessDataPoint[];
+  continuation: ContinuationState;
 }
 
 // ----- Constants -----
@@ -134,10 +148,26 @@ const fillDailyGaps = (
 };
 
 /**
+ * Hash training settings that affect the TL formula.
+ * A change in any of these values means all historical TL values are wrong
+ * and cached fitness data must be fully recomputed.
+ */
+export const hashTrainingSettings = (
+  zones: UserSettings['zones'],
+  maxHr: number,
+  restingHr: number,
+): string => {
+  return `${hashZoneSettings(zones)}:${maxHr}:${restingHr}`;
+};
+
+/**
  * Calculate COROS EvoLab–style fitness time series:
  *   BF (Base Fitness)   — ~42-day EWMA of daily TL
  *   LI (Load Impact)    — ~7-day  EWMA of daily TL
  *   IT (Intensity Trend) — LI - BF
+ *
+ * Returns both the data points and the continuation state so results
+ * can be cached and incrementally extended when new activities arrive.
  *
  * IT > 0  → training above your fitness (stimulus / overreaching)
  * IT < 0  → training below your fitness (recovery / detraining)
@@ -148,9 +178,12 @@ export const calcFitnessData = (
   maxHR: number,
   daysBack = 180,
   zones?: UserSettings['zones'],
-): FitnessDataPoint[] => {
+): FitnessResult => {
   const rawLoads = buildDailyLoads(activities, restHR, maxHR, zones);
-  if (rawLoads.length === 0) return [];
+  if (rawLoads.length === 0) {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return {data: [], continuation: {bf: 0, li: 0, lastDate: todayStr}};
+  }
 
   const today = new Date();
   const todayStr = today.toISOString().slice(0, 10);
@@ -196,7 +229,87 @@ export const calcFitnessData = (
     }
   }
 
-  return result;
+  return {
+    data: result,
+    continuation: {bf, li, lastDate: todayStr},
+  };
+};
+
+/**
+ * Incrementally extend cached fitness data with new activities.
+ * Resumes EWMA from the stored continuation state and processes only
+ * the days between lastDate + 1 and today.
+ *
+ * @param newActivities — only activities with date > continuation.lastDate
+ * @param continuation  — stored EWMA state (bf, li) to resume from
+ * @param existingData  — cached FitnessDataPoint[] to append to
+ * @param restHR        — resting heart rate
+ * @param maxHR         — maximum heart rate
+ * @param daysBack      — output window size (for trimming old points)
+ * @param zones         — HR zone boundaries
+ */
+export const appendFitnessData = (
+  newActivities: ActivitySummary[],
+  continuation: ContinuationState,
+  existingData: FitnessDataPoint[],
+  restHR: number,
+  maxHR: number,
+  daysBack = 365,
+  zones?: UserSettings['zones'],
+): FitnessResult => {
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+
+  // Nothing new to process — just extend rest days to today
+  const nextDate = new Date(continuation.lastDate + 'T00:00:00');
+  nextDate.setDate(nextDate.getDate() + 1);
+  const nextDateStr = nextDate.toISOString().slice(0, 10);
+
+  if (nextDateStr > todayStr) {
+    // Already up to date
+    return {data: existingData, continuation};
+  }
+
+  // Build daily loads for ONLY the new activities
+  const rawLoads = buildDailyLoads(newActivities, restHR, maxHR, zones);
+
+  // Fill gaps from the day after lastDate through today
+  const dailyLoads = fillDailyGaps(rawLoads, nextDateStr, todayStr);
+
+  const bfDecay = 1 - Math.exp(-1 / BF_DAYS);
+  const liDecay = 1 - Math.exp(-1 / LI_DAYS);
+
+  let bf = continuation.bf;
+  let li = continuation.li;
+  const newPoints: FitnessDataPoint[] = [];
+
+  for (const day of dailyLoads) {
+    bf = bf + bfDecay * (day.tl - bf);
+    li = li + liDecay * (day.tl - li);
+    const it = li - bf;
+
+    newPoints.push({
+      date: day.date,
+      bf: Number(bf.toFixed(1)),
+      li: Number(li.toFixed(1)),
+      it: Number(it.toFixed(1)),
+      tl: Number(day.tl.toFixed(1)),
+    });
+  }
+
+  // Combine existing + new, then trim to the daysBack window
+  const combined = [...existingData, ...newPoints];
+
+  const cutoffDate = new Date(today);
+  cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+  const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+
+  const trimmed = combined.filter((d) => d.date >= cutoffStr);
+
+  return {
+    data: trimmed,
+    continuation: {bf, li, lastDate: todayStr},
+  };
 };
 
 /**
@@ -210,14 +323,8 @@ export const calcFitnessData = (
  *   > 1.5  = high injury risk
  */
 export const calcACWRData = (
-  activities: ActivitySummary[],
-  restHR: number,
-  maxHR: number,
-  daysBack = 90,
-  zones?: UserSettings['zones'],
+  fitnessData: FitnessDataPoint[],
 ): ACWRDataPoint[] => {
-  const fitnessData = calcFitnessData(activities, restHR, maxHR, daysBack, zones);
-
   return fitnessData.map((d) => ({
     date: d.date,
     acwr: d.bf > 0 ? Number((d.li / d.bf).toFixed(2)) : 0,

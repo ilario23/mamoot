@@ -272,13 +272,19 @@ export async function POST(req: Request) {
       if (Array.isArray(calls) && calls.length > 0) {
         for (const tc of calls) {
           console.log(`[AI]   Tool call: ${tc.toolName}`);
-          console.log(`[AI]     Args: ${JSON.stringify('args' in tc ? tc.args : undefined)}`);
+          // AI SDK v6: property is `input` (not `args`)
+          const argsVal =
+            'input' in tc ? tc.input : 'args' in tc ? tc.args : undefined;
+          console.log(`[AI]     Args: ${JSON.stringify(argsVal)}`);
         }
       }
       const results = event.toolResults;
       if (Array.isArray(results) && results.length > 0) {
         for (const tr of results) {
-          const resultStr = JSON.stringify('result' in tr ? tr.result : undefined) ?? '(empty)';
+          // AI SDK v6: property is `output` (not `result`)
+          const resultVal =
+            'output' in tr ? tr.output : 'result' in tr ? tr.result : undefined;
+          const resultStr = JSON.stringify(resultVal) ?? '(empty)';
           const preview =
             resultStr.length > 300
               ? resultStr.slice(0, 300) + '...'
@@ -301,7 +307,9 @@ export async function POST(req: Request) {
     onFinish(event) {
       console.log(`[AI] ========== Request Complete ==========`);
       console.log(`[AI] Final reason: ${event.finishReason}`);
-      console.log(`[AI] Total steps: ${Array.isArray(event.steps) ? event.steps.length : '?'}`);
+      console.log(
+        `[AI] Total steps: ${Array.isArray(event.steps) ? event.steps.length : '?'}`,
+      );
       const u = event.usage;
       if (u && typeof u === 'object') {
         console.log(
