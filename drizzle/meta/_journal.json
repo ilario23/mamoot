@@ -43,6 +43,13 @@
       "when": 1770889166932,
       "tag": "0005_striped_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1770930312664,
+      "tag": "0006_broad_dragon_lord",
+      "breakpoints": true
     }
   ]
 }

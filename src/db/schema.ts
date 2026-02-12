@@ -146,6 +146,20 @@ export const dashboardCache = pgTable('dashboard_cache', {
   computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
 });
 
+// ----- Best Efforts Cache -----
+// Stores the athlete's 6-month personal bests per standard distance.
+// Used by the activity-report route to conditionally include best efforts
+// only when the current activity is close to these bests.
+// Invalidated when the activity_details row count changes (new sync / deletion).
+export const bestEffortsCache = pgTable('best_efforts_cache', {
+  athleteId: bigint('athlete_id', {mode: 'number'}).primaryKey(),
+  /** { "400m": 68, "1k": 195, "5k": 1200, ... } — elapsed_time in seconds */
+  bests: jsonb('bests').notNull(),
+  /** Total activity_details count when last computed — triggers recompute on mismatch */
+  activityCount: integer('activity_count').notNull(),
+  computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
+});
+
 // ----- Coach Plans -----
 // Maps to CachedCoachPlan (src/lib/db.ts)
 // Multiple plans per athlete with an active flag for plan history.
