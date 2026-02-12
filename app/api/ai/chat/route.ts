@@ -272,19 +272,13 @@ export async function POST(req: Request) {
       if (Array.isArray(calls) && calls.length > 0) {
         for (const tc of calls) {
           console.log(`[AI]   Tool call: ${tc.toolName}`);
-          // AI SDK v6: property is `input` (not `args`)
-          const argsVal =
-            'input' in tc ? tc.input : 'args' in tc ? tc.args : undefined;
-          console.log(`[AI]     Args: ${JSON.stringify(argsVal)}`);
+          console.log(`[AI]     Args: ${JSON.stringify(tc.input)}`);
         }
       }
       const results = event.toolResults;
       if (Array.isArray(results) && results.length > 0) {
         for (const tr of results) {
-          // AI SDK v6: property is `output` (not `result`)
-          const resultVal =
-            'output' in tr ? tr.output : 'result' in tr ? tr.result : undefined;
-          const resultStr = JSON.stringify(resultVal) ?? '(empty)';
+          const resultStr = JSON.stringify(tr.output) ?? '(empty)';
           const preview =
             resultStr.length > 300
               ? resultStr.slice(0, 300) + '...'

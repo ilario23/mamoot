@@ -129,10 +129,25 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        "neo-pulse-border": {
+          "0%, 100%": { borderColor: "hsl(var(--border))" },
+          "50%": { borderColor: "hsl(var(--primary))" },
+        },
+        "neo-indeterminate": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(200%)" },
+        },
+        "neo-blink": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "neo-pulse": "neo-pulse-border 2s ease-in-out infinite",
+        "neo-progress": "neo-indeterminate 1.5s ease-in-out infinite",
+        "neo-blink": "neo-blink 1s step-end infinite",
       },
     },
   },

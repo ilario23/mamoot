@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import CoachPlanList from '@/components/layout/CoachPlanList';
 import ChatInput from '@/components/chat/ChatInput';
+import StreamingIndicator from '@/components/chat/StreamingIndicator';
 
 // ----- Personas -----
 
@@ -89,9 +90,9 @@ const MarkdownContent = ({content}: {content: string}) => (
     remarkPlugins={[remarkGfm]}
     components={{
       p: ({children}) => <p className='mb-2 last:mb-0'>{children}</p>,
-      ul: ({children}) => <ul className='list-disc ml-4 mb-2'>{children}</ul>,
+      ul: ({children}) => <ul className='list-disc pl-4 mb-2'>{children}</ul>,
       ol: ({children}) => (
-        <ol className='list-decimal ml-4 mb-2'>{children}</ol>
+        <ol className='list-decimal pl-4 mb-2'>{children}</ol>
       ),
       li: ({children}) => <li className='mb-0.5'>{children}</li>,
       strong: ({children}) => (
@@ -122,7 +123,7 @@ const MarkdownContent = ({content}: {content: string}) => (
         );
       },
       table: ({children}) => (
-        <div className='overflow-x-auto mb-2'>
+        <div className='overflow-x-auto mb-2 max-w-full'>
           <table className='w-full text-xs border-3 border-border'>
             {children}
           </table>
@@ -153,9 +154,9 @@ const PlanCard = ({
   plan: ShareTrainingPlanInput;
   isSaved: boolean;
 }) => (
-  <div className='mt-2 border-3 border-primary bg-primary/5 p-3 space-y-2'>
-    <div className='flex items-start justify-between gap-2'>
-      <div>
+  <div className='mt-2 border-3 border-primary bg-primary/5 p-3 space-y-2 overflow-hidden'>
+    <div className='flex items-start justify-between gap-2 min-w-0'>
+      <div className='min-w-0'>
         <span className='font-black text-xs uppercase tracking-wider text-primary flex items-center gap-1'>
           <ClipboardList className='h-3 w-3' />
           Training Plan
@@ -318,12 +319,18 @@ const AITeamChat = () => {
     load();
   }, [activeSession?.id, loadMessages, getMemorySummary, activeChat]);
 
-  // Auto-scroll on new messages or streaming
+  // Auto-scroll on new messages and while tokens stream in
+  const lastMsg = activeChat.messages[activeChat.messages.length - 1];
+  const lastMsgText = lastMsg?.parts
+    ?.filter((p): p is {type: 'text'; text: string} => p.type === 'text')
+    .map((p) => p.text)
+    .join('') ?? '';
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [activeChat.messages.length, activeChat.status]);
+  }, [activeChat.messages.length, activeChat.status, lastMsgText.length]);
 
   // Persist messages when they change (after streaming completes)
   const lastPersistedCount = useRef(0);
@@ -683,7 +690,7 @@ const AITeamChat = () => {
       {/* Chat area */}
       <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
         {/* Mobile header — persona + new chat + history */}
-        <div className='md:hidden px-3 py-2 border-b-3 border-border flex items-center gap-2 bg-background'>
+        <div className='md:hidden px-2 py-2 border-b border-border flex items-center gap-2 bg-background'>
           <div className='flex items-center gap-1.5 flex-1 min-w-0'>
             <PersonaAvatar persona={currentPersona} size='sm' />
             <span className='font-bold text-xs truncate'>
@@ -775,7 +782,7 @@ const AITeamChat = () => {
         )}
 
         {/* Messages */}
-        <div ref={scrollRef} className='flex-1 overflow-y-auto p-3 space-y-3'>
+        <div ref={scrollRef} className='flex-1 overflow-y-auto overflow-x-hidden p-2 md:p-3 space-y-3 md:space-y-4'>
           {activeChat.messages.length === 0 && !isStreaming && (
             <div className='flex items-center justify-center h-full text-muted-foreground text-sm font-medium'>
               <div className='text-center space-y-2'>
@@ -793,8 +800,10 @@ const AITeamChat = () => {
             </div>
           )}
 
-          {activeChat.messages.map((msg) => {
+          {activeChat.messages.map((msg, msgIdx) => {
             const isUser = msg.role === 'user';
+            const prevRole = msgIdx > 0 ? activeChat.messages[msgIdx - 1]?.role : null;
+            const isRoleSwitch = prevRole !== null && prevRole !== msg.role;
 
             // Collect text content
             const textContent =
@@ -817,17 +826,18 @@ const AITeamChat = () => {
             return (
               <div
                 key={msg.id}
-                className={`flex gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+                className={`flex gap-2 min-w-0 ${isUser ? 'flex-row-reverse' : 'flex-row'} ${isRoleSwitch ? 'mt-2' : ''}`}
               >
                 {!isUser && (
                   <PersonaAvatar persona={currentPersona} size='md' />
                 )}
                 <div
-                  className={`flex-1 p-3 border-3 border-border text-sm font-medium overflow-hidden break-words ${
+                  className={`p-2 md:p-3 border-2 md:border-3 border-border text-sm font-medium overflow-hidden break-words min-w-0 ${
                     isUser
-                      ? 'bg-muted ml-4 md:ml-10'
-                      : 'bg-accent/20 mr-4 md:mr-10'
+                      ? 'bg-muted ml-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm'
+                      : 'bg-accent/20 mr-auto max-w-[85%] md:max-w-[75%]'
                   }`}
+                  style={{overflowWrap: 'anywhere'}}
                 >
                   <span className='font-black text-xs uppercase mb-1 block'>
                     {isUser ? 'You' : currentPersona.label}
@@ -861,8 +871,14 @@ const AITeamChat = () => {
                   ) : (
                     <>
                       {textContent && (
-                        <div className='prose-sm overflow-hidden'>
+                        <div className='prose-sm overflow-hidden max-w-full'>
                           <MarkdownContent content={textContent} />
+                          {/* Blinking block cursor while streaming */}
+                          {isStreaming &&
+                            msgIdx === activeChat.messages.length - 1 &&
+                            msg.role === 'assistant' && (
+                              <span className='inline-block w-2 h-4 bg-primary animate-neo-blink ml-0.5 align-middle' />
+                            )}
                         </div>
                       )}
                       {/* Render tool call results as plan cards */}
@@ -895,33 +911,16 @@ const AITeamChat = () => {
             );
           })}
 
-          {/* Streaming indicator */}
+          {/* Streaming indicator — "Thinking" state before first AI token */}
           {isStreaming &&
             activeChat.messages.length > 0 &&
             activeChat.messages[activeChat.messages.length - 1]?.role ===
               'user' && (
-              <div className='flex gap-2 flex-row'>
-                <PersonaAvatar persona={currentPersona} size='md' />
-                <div className='p-3 border-3 border-border text-sm font-medium bg-accent/20 mr-4 md:mr-10'>
-                  <span className='font-black text-xs uppercase mb-1 block'>
-                    {currentPersona.label}
-                  </span>
-                  <div className='flex items-center gap-1'>
-                    <span
-                      className='w-1.5 h-1.5 bg-foreground rounded-full animate-bounce'
-                      style={{animationDelay: '0ms'}}
-                    />
-                    <span
-                      className='w-1.5 h-1.5 bg-foreground rounded-full animate-bounce'
-                      style={{animationDelay: '150ms'}}
-                    />
-                    <span
-                      className='w-1.5 h-1.5 bg-foreground rounded-full animate-bounce'
-                      style={{animationDelay: '300ms'}}
-                    />
-                  </div>
-                </div>
-              </div>
+              <StreamingIndicator
+                label={currentPersona.label}
+                icon={currentPersona.icon}
+                color={currentPersona.color}
+              />
             )}
         </div>
 
@@ -939,6 +938,7 @@ const AITeamChat = () => {
         {/* Input with @-mention support */}
         <ChatInput
           onSend={handleSend}
+          onStop={activeChat.stop}
           isStreaming={isStreaming}
         />
       </div>

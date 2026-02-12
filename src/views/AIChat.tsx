@@ -26,9 +26,9 @@ const AIChat = () => {
   };
 
   return (
-    <div className='flex flex-col h-full w-full overflow-hidden'>
+    <div className='flex flex-col h-full w-full overflow-hidden -mx-4 px-0 md:mx-0'>
       {/* Top bar: Title (desktop) + Collapsible info */}
-      <div className='flex items-start gap-3 mb-2 md:mb-3'>
+      <div className='flex items-start gap-3 mb-0 md:mb-3 px-4 md:px-0'>
         {/* Page title — hidden on mobile */}
         <h1 className='hidden md:block text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3 shrink-0 leading-none py-1'>
           AI Team
@@ -152,7 +152,7 @@ const AIChat = () => {
       </div>
 
       {/* Chat area with integrated sidebar */}
-      <div className='flex-1 border-3 border-border bg-background shadow-neo overflow-hidden'>
+      <div className='flex-1 md:border-3 md:border-border bg-background md:shadow-neo overflow-hidden'>
         <AITeamChat />
       </div>
     </div>

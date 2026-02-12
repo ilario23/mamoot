@@ -15,7 +15,7 @@ import {
   type KeyboardEvent,
   type ChangeEvent,
 } from 'react';
-import {X, Send, Loader2, AtSign} from 'lucide-react';
+import {X, Send, Square, AtSign} from 'lucide-react';
 import MentionPopup, {type MentionPopupHandle} from './MentionPopup';
 import {getMentionCategory, type MentionReference} from '@/lib/mentionTypes';
 import {useSidebarCollapse} from '@/contexts/SidebarContext';
@@ -23,6 +23,8 @@ import {useSidebarCollapse} from '@/contexts/SidebarContext';
 interface ChatInputProps {
   /** Called when the user sends a message. */
   onSend: (text: string, mentions: MentionReference[]) => void;
+  /** Called when the user wants to stop the current generation. */
+  onStop?: () => void;
   /** Whether the AI is currently streaming a response. */
   isStreaming: boolean;
   /** Placeholder text for the input. */
@@ -56,7 +58,7 @@ const detectMentionAtCursor = (
   return null;
 };
 
-const ChatInput = ({onSend, isStreaming, placeholder}: ChatInputProps) => {
+const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) => {
   const [text, setText] = useState('');
   const [mentions, setMentions] = useState<MentionReference[]>([]);
   const [popupOpen, setPopupOpen] = useState(false);
@@ -196,7 +198,7 @@ const ChatInput = ({onSend, isStreaming, placeholder}: ChatInputProps) => {
   }, []);
 
   return (
-    <div className='relative p-3 border-t-3 border-border'>
+    <div className='relative p-2 md:p-3 border-t md:border-t-3 border-border overflow-hidden'>
       {/* Mention pills */}
       {mentions.length > 0 && (
         <div className='flex flex-wrap gap-1.5 mb-2'>
@@ -225,7 +227,7 @@ const ChatInput = ({onSend, isStreaming, placeholder}: ChatInputProps) => {
       )}
 
       {/* Input row */}
-      <div className='flex gap-2'>
+      <div className='flex gap-2 min-w-0'>
         {/* @ button */}
         <button
           onClick={handleAtButtonClick}
@@ -262,23 +264,29 @@ const ChatInput = ({onSend, isStreaming, placeholder}: ChatInputProps) => {
           }}
         />
 
-        {/* Send button */}
-        <button
-          onClick={handleSend}
-          disabled={isStreaming || !text.trim()}
-          aria-label='Send message'
-          tabIndex={0}
-          className='px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-border hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0'
-        >
-          {isStreaming ? (
-            <Loader2 className='h-4 w-4 animate-spin' />
-          ) : (
+        {/* Send / Stop button */}
+        {isStreaming ? (
+          <button
+            onClick={onStop}
+            aria-label='Stop generating'
+            tabIndex={0}
+            className='px-4 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-border hover:bg-destructive/80 transition-colors flex items-center gap-2 shrink-0'
+          >
+            <Square className='h-4 w-4' />
+            <span className='hidden sm:inline'>Stop</span>
+          </button>
+        ) : (
+          <button
+            onClick={handleSend}
+            disabled={!text.trim()}
+            aria-label='Send message'
+            tabIndex={0}
+            className='px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-border hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0'
+          >
             <Send className='h-4 w-4' />
-          )}
-          <span className='hidden sm:inline'>
-            {isStreaming ? '...' : 'Send'}
-          </span>
-        </button>
+            <span className='hidden sm:inline'>Send</span>
+          </button>
+        )}
       </div>
 
       {/* Mention popup — floats above via Popover */}
