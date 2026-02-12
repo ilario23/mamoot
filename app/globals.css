@@ -231,9 +231,23 @@
     display: none;
   }
 
+  /* More stable viewport sizing for iOS/PWA chrome transitions */
+  .h-app-screen {
+    min-height: 100svh;
+    height: 100dvh;
+  }
+
   /* Safe area padding for notched devices */
   .pt-safe {
     padding-top: env(safe-area-inset-top, 0px);
+  }
+  .pt-safe-ios {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  @supports (-webkit-touch-callout: none) {
+    .pt-safe-ios {
+      padding-top: max(env(safe-area-inset-top, 0px), 12px);
+    }
   }
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom, 0px);

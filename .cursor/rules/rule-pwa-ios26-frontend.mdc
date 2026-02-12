@@ -1,0 +1,33 @@
+---
+description: Frontend PWA best practices for iOS 26 and notched iPhones
+globs: app/**/*.{ts,tsx,js,jsx,css},src/**/*.{ts,tsx,js,jsx,css}
+alwaysApply: false
+---
+
+# PWA + iOS 26 Frontend Guardrails
+
+When changing frontend code in this project, prioritize resilient iPhone PWA behavior (especially Dynamic Island/notch devices).
+
+## Safe Areas and Header Positioning
+
+- Always protect top UI with safe-area insets: use `env(safe-area-inset-top)` and existing safe utilities (`pt-safe-ios`, `pl-safe`, `pr-safe`, `pb-safe`).
+- For mobile headers, avoid shorthand that can override safe area (avoid `p-*` with safe top); prefer explicit `px-* pb-* pt-safe-ios`.
+- Keep top bars visually clear of notch/Dynamic Island even during route transitions and scroll restore.
+
+## Viewport and Scrolling
+
+- Prefer dynamic viewport units for app shells (`100dvh` with `100svh` fallback), not only `100vh`/`h-screen`.
+- Ensure PWA layouts keep independent scroll containers stable on iOS (no content hidden under top/bottom system areas).
+- Preserve bottom navigation clearance with safe-area-aware padding.
+
+## PWA Metadata and Platform Support
+
+- Keep `viewport-fit=cover` enabled for standalone PWA layouts.
+- Preserve Apple web app metadata (`appleWebApp`, icons, status bar settings) when editing layout/metadata files.
+- Do not remove manifest/offline hooks without validating standalone install behavior on iPhone.
+
+## Change Quality Bar
+
+- When touching layout/header/navigation, verify both current and legacy frontend shells that might still render on some routes.
+- Prefer shared utilities over one-off per-page fixes so iOS behavior is consistent across app screens.
+- If a proposed UI change can overlap with notch/safe areas, proactively include safe-area and viewport handling in the same PR.

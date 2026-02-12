@@ -9,9 +9,9 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
       <DesktopSidebar />
 
       {/* Main Content */}
-      <div className='flex-1 flex flex-col min-h-screen min-w-0 pb-16 md:pb-0'>
+      <div className='flex-1 flex flex-col h-app-screen min-w-0 pb-16 md:pb-0'>
         {/* Mobile header */}
-        <header className='border-b-3 border-border p-3 md:hidden flex items-center'>
+        <header className='border-b-3 border-border px-3 pb-3 pt-safe-ios md:hidden flex items-center'>
           <div className='flex items-center gap-2.5' role='banner' aria-label='RunTeam AI'>
               <div className='w-8 h-8 bg-page border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300'>
                 <span className='font-black text-sm text-page-foreground leading-none select-none'>

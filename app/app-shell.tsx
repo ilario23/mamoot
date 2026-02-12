@@ -38,14 +38,14 @@ const AppShell = ({children}: {children: ReactNode}) => {
 
   return (
     <SidebarProvider>
-      <div className='min-h-screen flex w-full bg-background overflow-x-hidden pl-safe pr-safe' style={themeStyle}>
+      <div className='h-app-screen flex w-full bg-background overflow-x-hidden pl-safe pr-safe' style={themeStyle}>
         {/* Desktop Sidebar */}
         <DesktopSidebar />
 
         {/* Main Content */}
-        <div className='flex-1 flex flex-col h-screen pb-bottom-nav md:pb-0'>
+        <div className='flex-1 flex flex-col h-app-screen pb-bottom-nav md:pb-0'>
           {/* Mobile header */}
-          <header className='border-b-3 border-border p-3 pt-safe md:hidden flex items-center'>
+          <header className='border-b-3 border-border px-3 pb-3 pt-safe-ios md:hidden flex items-center'>
             <div className='flex items-center gap-2.5' role='banner' aria-label='RunTeam AI'>
               <div className='w-8 h-8 bg-page border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300'>
                 <span className='font-black text-sm text-page-foreground leading-none select-none'>
