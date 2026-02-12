@@ -10,12 +10,12 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "RunTeam AI",
+  title: "Mamoot",
   description: "AI-powered running analytics with Strava integration",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "RunTeam AI",
+    title: "Mamoot",
   },
   formatDetection: {
     telephone: false,

@@ -228,7 +228,7 @@ User settings (HR zones, training goal, injuries, allergies, food preferences, A
 ### Sync path
 
 ```
-localStorage (runteam-settings)
+localStorage (mamoot-settings)
   ─── awaitable POST /api/db/user-settings ───►  Neon (user_settings table)
 ```
 

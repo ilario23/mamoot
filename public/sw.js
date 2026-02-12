@@ -1,4 +1,4 @@
-const CACHE_NAME = "runteam-v1";
+const CACHE_NAME = "mamoot-v1";
 const OFFLINE_URL = "/offline";
 
 const PRECACHE_ASSETS = [OFFLINE_URL];

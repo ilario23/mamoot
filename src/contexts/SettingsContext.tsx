@@ -77,7 +77,7 @@ const pushSettingsToNeon = (
 export function SettingsProvider({children}: {children: ReactNode}) {
   const [settings, setSettings] = useState<UserSettings>(() => {
     try {
-      const saved = localStorage.getItem('runteam-settings');
+      const saved = localStorage.getItem('mamoot-settings');
       if (!saved) return defaultSettings;
       return migrateSettings(JSON.parse(saved));
     } catch {
@@ -91,7 +91,7 @@ export function SettingsProvider({children}: {children: ReactNode}) {
 
   const updateSettings = useCallback((newSettings: UserSettings) => {
     setSettings(newSettings);
-    localStorage.setItem('runteam-settings', JSON.stringify(newSettings));
+    localStorage.setItem('mamoot-settings', JSON.stringify(newSettings));
 
     // Fire-and-forget sync to Neon
     if (athleteIdRef.current) {

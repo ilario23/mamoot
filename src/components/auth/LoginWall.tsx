@@ -80,14 +80,16 @@ const LoginWallContent = () => {
       <div className='w-full max-w-md flex flex-col items-center gap-8'>
         {/* Logo */}
         <div className='flex items-center gap-3'>
-          <div className='w-14 h-14 bg-primary border-3 border-border shadow-neo flex items-center justify-center shrink-0'>
-            <span className='font-black text-2xl text-primary-foreground leading-none select-none'>
-              R
-            </span>
+          <div className='w-14 h-14 border-3 border-border shadow-neo flex items-center justify-center shrink-0 overflow-hidden bg-white'>
+            <img
+              src='/icons/icon-192x192.png'
+              alt='Mamoot logo'
+              className='w-full h-full object-contain'
+            />
           </div>
           <div>
             <h1 className='font-black text-3xl tracking-tight leading-none'>
-              RunTeam
+              Mamoot
             </h1>
             <span className='inline-block mt-1 bg-foreground text-background text-xs font-black px-2 py-0.5 uppercase tracking-widest select-none'>
               AI

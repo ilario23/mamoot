@@ -18,7 +18,7 @@ import {
   neonActivateCoachPlan,
 } from '@/lib/chatSync';
 
-const STORAGE_KEY = 'runzone-coach-plan-active';
+const STORAGE_KEY = 'mamoot-coach-plan-active';
 
 /** Lightweight active plan data stored in localStorage for cross-tab sync. */
 interface ActivePlanRef {

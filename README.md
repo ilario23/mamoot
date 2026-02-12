@@ -1,4 +1,4 @@
-# RunTeam AI
+# Mamoot
 
 AI-powered running analytics dashboard with real-time Strava integration, built with a bold Neo-Brutalist design system.
 
@@ -11,7 +11,7 @@ AI-powered running analytics dashboard with real-time Strava integration, built 
 
 ## Overview
 
-RunTeam AI connects to your Strava account to pull activity data and present it through rich, interactive charts and analytics. It features per-kilometer splits, heart rate zone distribution, segment tracking, personal records, and an AI coaching team — all wrapped in a distinctive Neo-Brutalist UI with thick borders, flat colors, and bold typography.
+Mamoot connects to your Strava account to pull activity data and present it through rich, interactive charts and analytics. It features per-kilometer splits, heart rate zone distribution, segment tracking, personal records, and an AI coaching team — all wrapped in a distinctive Neo-Brutalist UI with thick borders, flat colors, and bold typography.
 
 ---
 
@@ -87,7 +87,7 @@ The app will be available at **http://localhost:3000**.
 ## Project Structure
 
 ```
-run-zone-ai/
+mamoot/
 ├── app/                    # Next.js App Router pages & API routes
 │   ├── api/strava/token/   # Server-side OAuth token exchange
 │   ├── activities/         # Activities list page

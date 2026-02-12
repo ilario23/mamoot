@@ -1,6 +1,6 @@
 
 
-# RunTeam AI — V2 Advanced Dashboard & Settings
+# Mamoot — V2 Advanced Dashboard & Settings
 
 A bold, multi-page running analytics app with a Neo-Brutalist visual identity, featuring data visualization, synced activity charts, and a mock AI coaching team.
 

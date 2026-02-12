@@ -12,15 +12,15 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
       <div className='flex-1 flex flex-col h-app-screen min-w-0 pb-16 md:pb-0'>
         {/* Mobile header */}
         <header className='border-b-3 border-border px-3 pb-3 pt-safe-ios md:hidden flex items-center'>
-          <div className='flex items-center gap-2.5' role='banner' aria-label='RunTeam AI'>
+          <div className='flex items-center gap-2.5' role='banner' aria-label='Mamoot'>
               <div className='w-8 h-8 bg-page border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300'>
                 <span className='font-black text-sm text-page-foreground leading-none select-none'>
-                  R
+                  M
                 </span>
               </div>
               <div className='flex flex-col overflow-hidden'>
                 <h1 className='font-black text-lg tracking-tight leading-none'>
-                  RunTeam
+                  Mamoot
                 </h1>
                 <span className='inline-block mt-0.5 w-fit bg-foreground text-background text-[10px] font-black px-1.5 py-px uppercase tracking-widest select-none'>
                   AI

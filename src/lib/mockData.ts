@@ -1,5 +1,5 @@
 // ============================================================
-// RunTeam AI — Types, Utilities & Constants
+// Mamoot — Types, Utilities & Constants
 // Activity data is fetched from Strava API (see src/lib/strava.ts)
 // ============================================================
 

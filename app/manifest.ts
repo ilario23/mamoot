@@ -1,8 +1,8 @@
 import type { MetadataRoute } from "next";
 
 const manifest = (): MetadataRoute.Manifest => ({
-  name: "RunTeam AI",
-  short_name: "RunTeam",
+  name: "Mamoot",
+  short_name: "Mamoot",
   description: "AI-powered running analytics with Strava integration",
   start_url: "/",
   display: "standalone",

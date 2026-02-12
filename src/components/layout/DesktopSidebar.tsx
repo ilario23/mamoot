@@ -53,15 +53,17 @@ const DesktopSidebar = () => {
         <div className='p-3 border-b-3 border-border'>
           <div className='flex items-center justify-between'>
             <div className={`flex items-center gap-3 overflow-hidden ${isCollapsed ? 'justify-center w-full' : ''}`}>
-              <div className='w-10 h-10 bg-page border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300'>
-                <span className='font-black text-lg text-page-foreground leading-none select-none'>
-                  R
-                </span>
+              <div className='w-10 h-10 border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300 overflow-hidden bg-white'>
+                <img
+                  src='/icons/icon-192x192.png'
+                  alt='Mamoot logo'
+                  className='w-full h-full object-contain'
+                />
               </div>
               {!isCollapsed && (
                 <div className='overflow-hidden whitespace-nowrap'>
                   <h1 className='font-black text-xl tracking-tight leading-none'>
-                    RunTeam
+                    Mamoot
                   </h1>
                   <span className='inline-block mt-1 bg-foreground text-background text-[10px] font-black px-1.5 py-px uppercase tracking-widest select-none'>
                     AI

@@ -39,7 +39,7 @@ export interface StravaAthlete {
   profile: string;
 }
 
-const STORAGE_KEY = "runteam-strava-tokens";
+const STORAGE_KEY = "mamoot-strava-tokens";
 
 export const getStoredTokens = (): StravaTokens | null => {
   try {

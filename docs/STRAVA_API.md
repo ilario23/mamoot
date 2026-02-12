@@ -1,4 +1,4 @@
-# Strava API Reference — RunZone AI
+# Strava API Reference — Mamoot
 
 > Quick-reference for the Strava V3 API endpoints and models used by this app.
 > Full docs: https://developers.strava.com/docs/reference/
