@@ -161,67 +161,51 @@ const StatCards = () => {
 
   if (cards.length === 0) return null;
 
-  const topRow = cards.slice(0, 3);
-  const bottomRow = cards.slice(3);
-  const showBottomRow = !isMobile || showAll;
+  // Show cards in multiples of the column count so every row is full
+  // Mobile: 2 cols → show 4 initially, Desktop: show all
+  const mobileInitialCount = 2;
+  const visibleCards =
+    isMobile && !showAll ? cards.slice(0, mobileInitialCount) : cards;
+  const hasMore = isMobile && cards.length > mobileInitialCount;
 
   const handleToggleShowAll = () => {
     setShowAll((prev) => !prev);
   };
 
   return (
-    <div className="space-y-3 md:space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-        {topRow.map((card, i) => (
+    <div className='space-y-3 md:space-y-4'>
+      <div className='grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4'>
+        {visibleCards.map((card, i) => (
           <div
             key={i}
-            className="border-3 border-border p-3 md:p-5 bg-background shadow-neo"
+            className='border-3 border-border p-3 md:p-5 bg-background shadow-neo'
           >
-            <p className="text-[10px] md:text-xs font-black uppercase tracking-wider mb-1.5 md:mb-2">
+            <p className='text-[10px] md:text-xs font-black uppercase tracking-wider mb-1.5 md:mb-2'>
               {card.label}
             </p>
-            <p className="text-2xl md:text-3xl lg:text-2xl xl:text-3xl font-black leading-tight">
+            <p className='text-2xl md:text-3xl lg:text-2xl xl:text-3xl font-black leading-tight'>
               {card.value}
             </p>
-            <p className="text-xs md:text-sm font-bold text-muted-foreground mt-1">
+            <p className='text-xs md:text-sm font-bold text-muted-foreground mt-1'>
               {card.sub}
             </p>
-            <div className={`h-1.5 md:h-2 w-12 md:w-16 mt-2 md:mt-3 ${card.accentClass}`} />
+            <div
+              className={`h-1.5 md:h-2 w-12 md:w-16 mt-2 md:mt-3 ${card.accentClass}`}
+            />
           </div>
         ))}
       </div>
-      {showBottomRow && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-          {bottomRow.map((card, i) => (
-            <div
-              key={i + 4}
-              className="border-3 border-border p-3 md:p-5 bg-background shadow-neo"
-            >
-              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider mb-1.5 md:mb-2">
-                {card.label}
-              </p>
-              <p className="text-2xl md:text-3xl lg:text-2xl xl:text-3xl font-black leading-tight">
-                {card.value}
-              </p>
-              <p className="text-xs md:text-sm font-bold text-muted-foreground mt-1">
-                {card.sub}
-              </p>
-              <div className={`h-1.5 md:h-2 w-12 md:w-16 mt-2 md:mt-3 ${card.accentClass}`} />
-            </div>
-          ))}
-        </div>
-      )}
-      {isMobile && (
+      {hasMore && (
         <button
           onClick={handleToggleShowAll}
-          className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-black uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+          className='w-full flex items-center justify-center gap-1.5 py-2 text-xs font-black uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors'
           aria-label={showAll ? 'Show fewer stats' : 'Show all stats'}
           tabIndex={0}
         >
           {showAll ? 'Show less' : 'Show all stats'}
           <ChevronDown
             className={`h-3.5 w-3.5 transition-transform duration-200 ${showAll ? 'rotate-180' : ''}`}
-            aria-hidden="true"
+            aria-hidden='true'
           />
         </button>
       )}
