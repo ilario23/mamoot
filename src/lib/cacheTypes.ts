@@ -203,3 +203,47 @@ export interface CachedCoachPlan {
   /** Unix ms timestamp when the plan was shared */
   sharedAt: number;
 }
+
+// ----- Physio plan persistence -----
+
+export interface PhysioExercise {
+  name: string;
+  sets?: string;
+  reps?: string;
+  tempo?: string;
+  notes?: string;
+}
+
+export interface PhysioPlanSession {
+  day: string;
+  date?: string;
+  type: string;
+  exercises: PhysioExercise[];
+  duration?: string;
+  notes?: string;
+}
+
+export interface CachedPhysioPlan {
+  /** UUID primary key */
+  id: string;
+  /** Strava athlete ID */
+  athleteId: number;
+  /** Short title for the plan */
+  title: string;
+  /** Brief overview */
+  summary: string | null;
+  /** Training phase: "base", "build", "taper", etc. */
+  phase: string | null;
+  /** How many strength sessions per week */
+  strengthSessionsPerWeek: number | null;
+  /** Structured array of physio sessions */
+  sessions: PhysioPlanSession[];
+  /** Full markdown rendering for display */
+  content: string;
+  /** Whether this is the currently active plan */
+  isActive: boolean;
+  /** FK to chat_sessions.id where the plan was created */
+  sourceSessionId: string | null;
+  /** Unix ms timestamp when the plan was shared */
+  sharedAt: number;
+}

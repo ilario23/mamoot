@@ -21,6 +21,7 @@ import {DefaultChatTransport} from 'ai';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {useCoachPlan} from '@/hooks/useCoachPlan';
+import {usePhysioPlan} from '@/hooks/usePhysioPlan';
 import {useChatSessions} from '@/hooks/useChatSessions';
 import {
   useChatPersistence,
@@ -31,9 +32,9 @@ import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/mockData';
 import type {PersonaId} from '@/lib/aiPrompts';
-import type {ShareTrainingPlanInput} from '@/lib/aiTools';
+import type {ShareTrainingPlanInput, SharePhysioPlanInput} from '@/lib/aiTools';
 import {getMentionCategory, parseMentionMeta, type MentionReference} from '@/lib/mentionTypes';
-import type {PlanSession} from '@/lib/cacheTypes';
+import type {PlanSession, PhysioPlanSession} from '@/lib/cacheTypes';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import {
   AlertDialog,
@@ -46,8 +47,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import CoachPlanList from '@/components/layout/CoachPlanList';
+import PhysioPlanList from '@/components/layout/PhysioPlanList';
 import ChatInput from '@/components/chat/ChatInput';
 import StreamingIndicator from '@/components/chat/StreamingIndicator';
+import SuggestionChips from '@/components/chat/SuggestionChips';
+import ToolCallChip from '@/components/chat/ToolCallChip';
+import type {SuggestFollowUpsInput} from '@/lib/aiTools';
 
 // ----- Personas -----
 
@@ -56,12 +61,18 @@ interface Persona {
   label: string;
   icon: LucideIcon;
   color: string;
+  /** Colored left-border class for AI chat bubbles */
+  bubbleBorder: string;
+  /** Text color class for the persona label inside bubbles */
+  labelColor: string;
+  /** Light tinted bg for banners / empty-state */
+  tintBg: string;
 }
 
 const personas: Persona[] = [
-  {id: 'coach', label: 'Coach', icon: Dumbbell, color: 'bg-secondary'},
-  {id: 'nutritionist', label: 'Nutrition', icon: Apple, color: 'bg-zone-1'},
-  {id: 'physio', label: 'Physio', icon: Stethoscope, color: 'bg-destructive'},
+  {id: 'coach', label: 'Coach', icon: Dumbbell, color: 'bg-secondary', bubbleBorder: 'border-l-secondary', labelColor: 'text-secondary', tintBg: 'bg-secondary/10'},
+  {id: 'nutritionist', label: 'Nutrition', icon: Apple, color: 'bg-zone-1', bubbleBorder: 'border-l-zone-1', labelColor: 'text-zone-1', tintBg: 'bg-zone-1/10'},
+  {id: 'physio', label: 'Physio', icon: Stethoscope, color: 'bg-destructive', bubbleBorder: 'border-l-destructive', labelColor: 'text-destructive', tintBg: 'bg-destructive/10'},
 ];
 
 const PersonaAvatar = ({
@@ -81,6 +92,31 @@ const PersonaAvatar = ({
       <persona.icon className={`${iconSize} text-foreground`} />
     </div>
   );
+};
+
+// ----- Tool call labels (shown as status chips while tools execute) -----
+
+const TOOL_LABELS: Record<string, string> = {
+  // Retrieval tools
+  getTrainingGoal: 'Checking your training goal',
+  getInjuries: 'Reviewing injury history',
+  getDietaryInfo: 'Checking dietary preferences',
+  getTrainingSummary: 'Analyzing training summary',
+  getWeeklyBreakdown: 'Looking at weekly breakdown',
+  getZoneDistribution: 'Reviewing HR zone distribution',
+  getFitnessMetrics: 'Calculating fitness metrics',
+  getRecentActivities: 'Looking at recent activities',
+  getGearStatus: 'Checking your gear',
+  getCoachPlan: 'Reviewing the training plan',
+  getPhysioPlan: 'Reviewing the physio plan',
+  comparePlanVsActual: 'Comparing plan vs actual',
+  getActivityDetail: 'Analyzing activity details',
+  getPersonalRecords: 'Looking at your personal records',
+  getWeatherForecast: 'Checking the weather forecast',
+  // Action tools
+  shareTrainingPlan: 'Creating your training plan',
+  sharePhysioPlan: 'Creating your physio plan',
+  suggestFollowUps: 'Preparing suggestions',
 };
 
 // ----- Markdown renderer for AI messages -----
@@ -111,31 +147,31 @@ const MarkdownContent = ({content}: {content: string}) => (
         const isInline = !className;
         if (isInline) {
           return (
-            <code className='bg-muted px-1 py-0.5 rounded text-xs font-mono'>
+            <code className='bg-background/20 px-1 py-0.5 rounded text-xs font-mono'>
               {children}
             </code>
           );
         }
         return (
-          <pre className='bg-muted border-2 border-border p-2 rounded text-xs font-mono overflow-x-auto mb-2'>
+          <pre className='bg-background/10 border-2 border-background/20 p-2 rounded text-xs font-mono overflow-x-auto mb-2'>
             <code>{children}</code>
           </pre>
         );
       },
       table: ({children}) => (
         <div className='overflow-x-auto mb-2 max-w-full'>
-          <table className='w-full text-xs border-3 border-border'>
+          <table className='w-full text-xs border-3 border-background/20'>
             {children}
           </table>
         </div>
       ),
       th: ({children}) => (
-        <th className='border-2 border-border px-2 py-1 bg-muted font-black text-left'>
+        <th className='border-2 border-background/20 px-2 py-1 bg-background/10 font-black text-left'>
           {children}
         </th>
       ),
       td: ({children}) => (
-        <td className='border-2 border-border px-2 py-1'>{children}</td>
+        <td className='border-2 border-background/20 px-2 py-1'>{children}</td>
       ),
     }}
   >
@@ -218,7 +254,80 @@ const PlanCard = ({
 const PlanSaving = () => (
   <div className='mt-2 border-3 border-border bg-muted/50 p-3 flex items-center gap-2 text-xs font-medium text-muted-foreground'>
     <Loader2 className='h-3 w-3 animate-spin' />
-    Saving training plan...
+    Saving plan...
+  </div>
+);
+
+// ----- Physio plan card displayed inline when the AI calls sharePhysioPlan -----
+
+const PhysioPlanCard = ({
+  plan,
+  isSaved,
+}: {
+  plan: SharePhysioPlanInput;
+  isSaved: boolean;
+}) => (
+  <div className='mt-2 border-3 border-destructive bg-destructive/5 p-3 space-y-2 overflow-hidden'>
+    <div className='flex items-start justify-between gap-2 min-w-0'>
+      <div className='min-w-0'>
+        <span className='font-black text-xs uppercase tracking-wider text-destructive flex items-center gap-1'>
+          <Stethoscope className='h-3 w-3' />
+          Physio Plan
+        </span>
+        <h4 className='font-black text-sm mt-0.5'>{plan.title}</h4>
+        {plan.summary && (
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            {plan.summary}
+          </p>
+        )}
+      </div>
+      {isSaved && (
+        <span className='inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-destructive shrink-0'>
+          <Check className='h-3 w-3' />
+          Saved
+        </span>
+      )}
+    </div>
+
+    {(plan.phase || plan.strengthSessionsPerWeek) && (
+      <div className='flex flex-wrap gap-2 text-[10px] font-bold'>
+        {plan.phase && (
+          <span className='px-1.5 py-0.5 border-2 border-border bg-muted uppercase'>
+            {plan.phase}
+          </span>
+        )}
+        {plan.strengthSessionsPerWeek && (
+          <span className='px-1.5 py-0.5 border-2 border-border bg-muted flex items-center gap-1'>
+            <Dumbbell className='h-2.5 w-2.5' />
+            {plan.strengthSessionsPerWeek}x/wk
+          </span>
+        )}
+      </div>
+    )}
+
+    {plan.sessions.length > 0 && (
+      <div className='space-y-1'>
+        {plan.sessions.map((session, i) => (
+          <div
+            key={i}
+            className='flex items-center gap-2 text-[11px] font-medium'
+          >
+            <span className='w-16 shrink-0 font-bold text-muted-foreground truncate'>
+              {session.day}
+            </span>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${SESSION_TYPE_COLORS[session.type] ?? 'bg-muted text-foreground'}`}
+            >
+              {session.type}
+            </span>
+            <span className='truncate text-muted-foreground'>
+              {session.exercises.length} exercises
+              {session.duration ? ` — ${session.duration}` : ''}
+            </span>
+          </div>
+        ))}
+      </div>
+    )}
   </div>
 );
 
@@ -248,6 +357,7 @@ const AITeamChat = () => {
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [planListOpen, setPlanListOpen] = useState(false);
+  const [physioPlanListOpen, setPhysioPlanListOpen] = useState(false);
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -258,6 +368,11 @@ const AITeamChat = () => {
   const athleteId = athlete?.id ?? null;
   const {plans, activePlan, savePlan, activatePlan, deletePlan} =
     useCoachPlan(athleteId);
+  const {
+    plans: physioPlans,
+    savePlan: savePhysioPlan,
+    deletePlan: deletePhysioPlan,
+  } = usePhysioPlan(athleteId);
 
   // Session management per persona
   const coachSessions = useChatSessions(athleteId, 'coach');
@@ -338,12 +453,19 @@ const AITeamChat = () => {
   // Track which tool plan IDs we've already saved to Neon.
   // Seed from existing plans so reloaded tool results aren't re-saved.
   const savedPlanIds = useRef<Set<string>>(new Set());
+  const savedPhysioPlanIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     for (const p of plans) {
       savedPlanIds.current.add(p.id);
     }
   }, [plans]);
+
+  useEffect(() => {
+    for (const p of physioPlans) {
+      savedPhysioPlanIds.current.add(p.id);
+    }
+  }, [physioPlans]);
 
   useEffect(() => {
     if (!activeSession?.id) return;
@@ -398,6 +520,39 @@ const AITeamChat = () => {
                 });
               }
             }
+
+            // Detect tool results from sharePhysioPlan and save to Neon
+            if (
+              part.type === 'tool-sharePhysioPlan' &&
+              'state' in part &&
+              part.state === 'output-available' &&
+              'output' in part &&
+              part.output &&
+              typeof part.output === 'object' &&
+              'planId' in part.output &&
+              'input' in part &&
+              part.input &&
+              typeof part.input === 'object'
+            ) {
+              const output = part.output as {planId: string; title: string; sharedAt: number};
+              const planInput = part.input as SharePhysioPlanInput;
+
+              if (!savedPhysioPlanIds.current.has(output.planId)) {
+                savedPhysioPlanIds.current.add(output.planId);
+                savePhysioPlan({
+                  id: output.planId,
+                  athleteId: athleteId ?? 0,
+                  title: planInput.title,
+                  summary: planInput.summary ?? null,
+                  phase: planInput.phase ?? null,
+                  strengthSessionsPerWeek: planInput.strengthSessionsPerWeek ?? null,
+                  sessions: planInput.sessions as PhysioPlanSession[],
+                  content: planInput.content,
+                  sourceSessionId: sessionId,
+                  sharedAt: output.sharedAt,
+                });
+              }
+            }
           }
         }
       }
@@ -436,6 +591,7 @@ const AITeamChat = () => {
     activeSM,
     maybeTriggerSummary,
     savePlan,
+    savePhysioPlan,
     athleteId,
   ]);
 
@@ -555,13 +711,33 @@ const AITeamChat = () => {
   const isStreaming = activeChat.status === 'streaming';
   const hasError = activeChat.error;
 
+  // Extract follow-up suggestions from the last assistant message's tool parts
+  const followUpSuggestions = useMemo(() => {
+    if (isStreaming) return [];
+    const messages = activeChat.messages;
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistant?.parts) return [];
+    for (const part of lastAssistant.parts) {
+      if (
+        part.type === 'tool-suggestFollowUps' &&
+        'state' in part &&
+        (part as {state: string}).state === 'output-available' &&
+        'input' in part
+      ) {
+        const input = (part as {input: SuggestFollowUpsInput}).input;
+        return input?.suggestions ?? [];
+      }
+    }
+    return [];
+  }, [activeChat.messages, isStreaming]);
+
   // ----- Sidebar content (shared between desktop and mobile drawer) -----
 
   const sidebarContent = (
     <div className='flex flex-col h-full'>
       {/* History header */}
-      <div className='px-3 py-2 border-b-3 border-border flex items-center justify-between'>
-        <span className='font-black text-xs uppercase tracking-wider'>
+      <div className='px-3 py-2 border-b-3 border-border flex items-center justify-between bg-muted/30'>
+        <span className='font-black text-xs uppercase tracking-wider text-muted-foreground'>
           History
         </span>
         <button
@@ -571,7 +747,7 @@ const AITeamChat = () => {
           }}
           aria-label='New conversation'
           tabIndex={0}
-          className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-foreground text-background hover:bg-primary hover:text-primary-foreground transition-colors shrink-0'
+          className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground hover:bg-primary/80 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
         >
           <Plus className='h-3 w-3' />
           New
@@ -597,8 +773,8 @@ const AITeamChat = () => {
             key={session.id}
             className={`group flex items-center gap-2 px-3 py-2.5 text-xs border-b border-border/50 cursor-pointer transition-colors ${
               session.id === activeSession?.id
-                ? 'bg-primary/10 font-black'
-                : 'hover:bg-muted font-medium'
+                ? `${currentPersona.tintBg} font-black border-l-4 ${currentPersona.bubbleBorder}`
+                : 'hover:bg-muted font-medium border-l-4 border-l-transparent'
             }`}
           >
             <button
@@ -647,19 +823,19 @@ const AITeamChat = () => {
               }}
               aria-label={`Switch to ${p.label}`}
               tabIndex={0}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs transition-all ${
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs transition-all border-l-4 ${
                 isActive
-                  ? 'font-black text-foreground bg-primary/10'
-                  : 'font-medium text-muted-foreground/40 hover:text-muted-foreground/70 hover:bg-muted/50'
+                  ? `font-black text-foreground ${p.tintBg} ${p.bubbleBorder}`
+                  : 'font-medium text-muted-foreground/40 hover:text-muted-foreground/70 hover:bg-muted/50 border-l-transparent'
               }`}
             >
               <div className={isActive ? '' : 'opacity-30 grayscale'}>
                 <PersonaAvatar persona={p} size='sm' />
               </div>
-              <span>{p.label}</span>
+              <span className={isActive ? p.labelColor : ''}>{p.label}</span>
               {isActive && (
                 <div
-                  className={`ml-auto w-2 h-2 rounded-full ${p.color} border border-border`}
+                  className={`ml-auto w-2.5 h-2.5 ${p.color} border-2 border-border shadow-neo-sm`}
                 />
               )}
             </button>
@@ -673,7 +849,7 @@ const AITeamChat = () => {
 
   return (
     <div className='flex h-full min-w-0 overflow-hidden'>
-      {/* Plan list sheet */}
+      {/* Coach plan list sheet */}
       <Sheet open={planListOpen} onOpenChange={setPlanListOpen}>
         <SheetContent side='right' className='p-0 w-[340px] sm:max-w-[340px]' aria-describedby={undefined}>
           <SheetTitle className='sr-only'>Training Plans</SheetTitle>
@@ -687,13 +863,25 @@ const AITeamChat = () => {
         </SheetContent>
       </Sheet>
 
+      {/* Physio plan list sheet */}
+      <Sheet open={physioPlanListOpen} onOpenChange={setPhysioPlanListOpen}>
+        <SheetContent side='right' className='p-0 w-[340px] sm:max-w-[340px]' aria-describedby={undefined}>
+          <SheetTitle className='sr-only'>Physio Plans</SheetTitle>
+          <PhysioPlanList
+            plans={physioPlans}
+            onDelete={deletePhysioPlan}
+            onClose={() => setPhysioPlanListOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
+
       {/* Chat area */}
       <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
         {/* Mobile header — persona + new chat + history */}
-        <div className='md:hidden px-2 py-2 border-b border-border flex items-center gap-2 bg-background'>
+        <div className={`md:hidden px-2 py-2 border-b border-border flex items-center gap-2 ${currentPersona.tintBg}`}>
           <div className='flex items-center gap-1.5 flex-1 min-w-0'>
             <PersonaAvatar persona={currentPersona} size='sm' />
-            <span className='font-bold text-xs truncate'>
+            <span className={`font-black text-xs truncate ${currentPersona.labelColor}`}>
               {activeSession?.title ?? currentPersona.label}
             </span>
           </div>
@@ -716,10 +904,10 @@ const AITeamChat = () => {
         </div>
 
         {/* Desktop header — new chat button top-right */}
-        <div className='hidden md:flex items-center justify-between px-3 py-1.5 border-b-3 border-border bg-background'>
+        <div className={`hidden md:flex items-center justify-between px-3 py-1.5 border-b-3 border-border ${currentPersona.tintBg}`}>
           <div className='flex items-center gap-1.5 min-w-0'>
             <PersonaAvatar persona={currentPersona} size='sm' />
-            <span className='font-bold text-xs truncate'>
+            <span className={`font-black text-xs truncate ${currentPersona.labelColor}`}>
               {activeSession?.title ?? currentPersona.label}
             </span>
           </div>
@@ -729,17 +917,28 @@ const AITeamChat = () => {
                 onClick={() => setPlanListOpen(true)}
                 aria-label='View training plans'
                 tabIndex={0}
-                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background hover:bg-muted transition-colors shrink-0'
+                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-secondary/15 text-secondary hover:bg-secondary/25 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
               >
                 <ClipboardList className='h-3 w-3' />
                 Plans ({plans.length})
+              </button>
+            )}
+            {physioPlans.length > 0 && (
+              <button
+                onClick={() => setPhysioPlanListOpen(true)}
+                aria-label='View physio plans'
+                tabIndex={0}
+                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
+              >
+                <Stethoscope className='h-3 w-3' />
+                Physio ({physioPlans.length})
               </button>
             )}
             <button
               onClick={handleNewConversation}
               aria-label='New conversation'
               tabIndex={0}
-              className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-foreground text-background hover:bg-primary hover:text-primary-foreground transition-colors shrink-0'
+              className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground hover:bg-primary/80 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
             >
               <Plus className='h-3 w-3' />
               New
@@ -749,7 +948,7 @@ const AITeamChat = () => {
 
         {/* Memory indicator */}
         {memory && (
-          <div className='px-3 py-1.5 bg-secondary/10 border-b-3 border-border flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground'>
+          <div className='px-3 py-1.5 bg-primary/15 border-b-3 border-border flex items-center gap-1.5 text-[10px] font-black text-primary uppercase tracking-wider'>
             <MessageSquare className='h-3 w-3 shrink-0' />
             Memory active — past conversations remembered
           </div>
@@ -784,11 +983,19 @@ const AITeamChat = () => {
         {/* Messages */}
         <div ref={scrollRef} className='flex-1 overflow-y-auto overflow-x-hidden p-2 md:p-3 space-y-3 md:space-y-4'>
           {activeChat.messages.length === 0 && !isStreaming && (
-            <div className='flex items-center justify-center h-full text-muted-foreground text-sm font-medium'>
-              <div className='text-center space-y-2'>
-                <PersonaAvatar persona={currentPersona} size='md' />
-                <p className='font-bold'>{currentPersona.label}</p>
-                <p className='text-xs max-w-[200px]'>
+            <div className='flex items-center justify-center h-full'>
+              <div className={`text-center space-y-3 p-6 border-3 border-border shadow-neo ${currentPersona.tintBg}`}>
+                <div className='flex justify-center'>
+                  <div
+                    className={`w-14 h-14 ${currentPersona.color} rounded-full border-3 border-border flex items-center justify-center shadow-neo-sm`}
+                  >
+                    <currentPersona.icon className='h-7 w-7 text-foreground' />
+                  </div>
+                </div>
+                <p className={`font-black text-lg uppercase tracking-wider ${currentPersona.labelColor}`}>
+                  {currentPersona.label}
+                </p>
+                <p className='text-xs font-bold text-muted-foreground max-w-[220px]'>
                   {activePersona === 'coach' &&
                     'Ask about training plans, workouts, and race strategy'}
                   {activePersona === 'nutritionist' &&
@@ -819,9 +1026,32 @@ const AITeamChat = () => {
             const toolParts = msg.parts?.filter(
               (part) => part.type === 'tool-shareTrainingPlan',
             ) ?? [];
+            const physioToolParts = msg.parts?.filter(
+              (part) => part.type === 'tool-sharePhysioPlan',
+            ) ?? [];
 
-            // Skip if no content at all
-            if (!textContent && toolParts.length === 0) return null;
+            // Skip suggestFollowUps tool parts — rendered separately as chips
+            const hasSuggestionTool = msg.parts?.some(
+              (part) => part.type === 'tool-suggestFollowUps',
+            ) ?? false;
+
+            // Collect ALL tool parts for status chips (any part whose type starts with 'tool-')
+            const allToolChipParts = (msg.parts ?? [])
+              .filter((part) => part.type.startsWith('tool-') && 'state' in part)
+              .map((part) => {
+                const toolName = part.type.replace(/^tool-/, '');
+                const state = (part as unknown as {state: string}).state;
+                return {
+                  toolName,
+                  label: TOOL_LABELS[toolName] ?? toolName,
+                  done: state === 'output-available',
+                };
+              });
+
+            // Skip if no content at all (suggestFollowUps-only messages are hidden)
+            if (!textContent && toolParts.length === 0 && physioToolParts.length === 0 && !hasSuggestionTool && allToolChipParts.length === 0) return null;
+            // If the only parts are suggestFollowUps with no text or other tools, skip the bubble
+            if (!textContent && toolParts.length === 0 && physioToolParts.length === 0 && hasSuggestionTool && allToolChipParts.length <= 1) return null;
 
             return (
               <div
@@ -834,12 +1064,12 @@ const AITeamChat = () => {
                 <div
                   className={`p-2 md:p-3 border-2 md:border-3 border-border text-sm font-medium overflow-hidden break-words min-w-0 ${
                     isUser
-                      ? 'bg-muted ml-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm'
-                      : 'bg-accent/20 mr-auto max-w-[85%] md:max-w-[75%]'
+                      ? 'bg-accent text-accent-foreground ml-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm'
+                      : `bg-foreground text-background mr-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm border-l-[5px] ${currentPersona.bubbleBorder}`
                   }`}
                   style={{overflowWrap: 'anywhere'}}
                 >
-                  <span className='font-black text-xs uppercase mb-1 block'>
+                  <span className={`font-black text-xs uppercase mb-1 block ${isUser ? '' : currentPersona.labelColor}`}>
                     {isUser ? 'You' : currentPersona.label}
                   </span>
                   {isUser ? (
@@ -870,6 +1100,18 @@ const AITeamChat = () => {
                     })()
                   ) : (
                     <>
+                      {/* Tool call status chips */}
+                      {allToolChipParts.length > 0 && (
+                        <div className='flex flex-wrap gap-1 mb-1.5'>
+                          {allToolChipParts.map((chip) => (
+                            <ToolCallChip
+                              key={chip.toolName}
+                              label={chip.label}
+                              done={chip.done}
+                            />
+                          ))}
+                        </div>
+                      )}
                       {textContent && (
                         <div className='prose-sm overflow-hidden max-w-full'>
                           <MarkdownContent content={textContent} />
@@ -891,14 +1133,37 @@ const AITeamChat = () => {
                           output?: {planId: string; title: string; sharedAt: number};
                         };
                         if (toolPart.state !== 'output-available' || !toolPart.input) {
-                          return <PlanSaving key={idx} />;
+                          return null; // Chip handles in-progress state
                         }
                         const isSaved = toolPart.output
                           ? savedPlanIds.current.has(toolPart.output.planId)
                           : false;
                         return (
                           <PlanCard
-                            key={idx}
+                            key={`coach-${idx}`}
+                            plan={toolPart.input}
+                            isSaved={isSaved || !!toolPart.output}
+                          />
+                        );
+                      })}
+                      {/* Render physio plan tool results */}
+                      {physioToolParts.map((part, idx) => {
+                        if (!('state' in part)) return null;
+                        const toolPart = part as {
+                          type: string;
+                          state: string;
+                          input?: SharePhysioPlanInput;
+                          output?: {planId: string; title: string; sharedAt: number};
+                        };
+                        if (toolPart.state !== 'output-available' || !toolPart.input) {
+                          return null; // Chip handles in-progress state
+                        }
+                        const isSaved = toolPart.output
+                          ? savedPhysioPlanIds.current.has(toolPart.output.planId)
+                          : false;
+                        return (
+                          <PhysioPlanCard
+                            key={`physio-${idx}`}
                             plan={toolPart.input}
                             isSaved={isSaved || !!toolPart.output}
                           />
@@ -920,6 +1185,8 @@ const AITeamChat = () => {
                 label={currentPersona.label}
                 icon={currentPersona.icon}
                 color={currentPersona.color}
+                bubbleBorder={currentPersona.bubbleBorder}
+                labelColor={currentPersona.labelColor}
               />
             )}
         </div>
@@ -933,6 +1200,14 @@ const AITeamChat = () => {
                 'Something went wrong. Please try again.'}
             </span>
           </div>
+        )}
+
+        {/* Follow-up suggestion chips */}
+        {followUpSuggestions.length > 0 && !isStreaming && (
+          <SuggestionChips
+            suggestions={followUpSuggestions}
+            onSelect={(text) => handleSend(text, [])}
+          />
         )}
 
         {/* Input with @-mention support */}

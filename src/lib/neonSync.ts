@@ -63,6 +63,24 @@ const getFromNeon = async <T>(
 export const neonGetActivities = async (): Promise<CachedActivity[] | null> =>
   getFromNeon<CachedActivity[]>('activities');
 
+/**
+ * Fetch activities from Neon with an optional date filter.
+ * @param afterDate  YYYY-MM-DD string — only activities on or after this date
+ */
+export const neonGetRecentActivities = async (
+  afterDate: string,
+): Promise<CachedActivity[] | null> => {
+  try {
+    const res = await fetch(`${API}/activities?after=${afterDate}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (Array.isArray(data) && data.length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
+};
+
 export const neonSyncActivities = async (
   records: CachedActivity[],
 ): Promise<void> => {
@@ -179,6 +197,35 @@ export const neonSyncActivityStreams = async (
   await postToNeon('activity-streams', record);
 };
 
+// ---- Activity Streams (bulk) ----
+
+/**
+ * Fetch multiple activity streams from Neon in one (or few) round-trips.
+ * Returns whatever Neon has — callers handle missing IDs.
+ */
+export const neonGetActivityStreamsBulk = async (
+  ids: number[],
+): Promise<CachedActivityStreams[]> => {
+  if (ids.length === 0) return [];
+
+  const results: CachedActivityStreams[] = [];
+
+  for (let i = 0; i < ids.length; i += BULK_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
+    const pks = chunk.join(',');
+    try {
+      const res = await fetch(`${API}/activity-streams?pks=${pks}`);
+      if (!res.ok) continue;
+      const data: CachedActivityStreams[] = await res.json();
+      if (Array.isArray(data)) results.push(...data);
+    } catch {
+      // Skip this chunk on failure
+    }
+  }
+
+  return results;
+};
+
 // ---- Athlete Stats (single) ----
 
 export const neonGetAthleteStats = async (
@@ -247,6 +294,33 @@ export const neonGetAllZoneBreakdowns = async (): Promise<
   }
 };
 
+/**
+ * Fetch multiple zone breakdowns from Neon in one (or few) round-trips.
+ * Returns whatever Neon has — callers handle missing IDs.
+ */
+export const neonGetZoneBreakdownsBulk = async (
+  ids: number[],
+): Promise<CachedZoneBreakdown[]> => {
+  if (ids.length === 0) return [];
+
+  const results: CachedZoneBreakdown[] = [];
+
+  for (let i = 0; i < ids.length; i += BULK_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
+    const pks = chunk.join(',');
+    try {
+      const res = await fetch(`${API}/zone-breakdowns?pks=${pks}`);
+      if (!res.ok) continue;
+      const data: CachedZoneBreakdown[] = await res.json();
+      if (Array.isArray(data)) results.push(...data);
+    } catch {
+      // Skip this chunk on failure
+    }
+  }
+
+  return results;
+};
+
 // ---- Dashboard Cache (single by key) ----
 
 export const neonGetDashboardCache = async (
@@ -267,3 +341,33 @@ export const neonGetActivityLabel = async (
   id: number,
 ): Promise<CachedActivityLabel | null> =>
   getFromNeon<CachedActivityLabel>('activity-labels', id);
+
+// ---- User Settings — partial update (weight + city from Strava profile) ----
+
+/**
+ * Update only the weight and city fields on an existing user_settings row.
+ * Uses PATCH for partial update. If no row exists yet, this is a no-op
+ * (the full settings sync from SettingsLoader will create the row first).
+ */
+export const neonSyncAthleteProfile = async (
+  athleteId: number,
+  weight: number | null,
+  city: string | null,
+): Promise<void> => {
+  try {
+    const res = await fetch(`${API}/user-settings`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        athleteId,
+        weight: weight ?? null,
+        city: city ?? null,
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`[neonSync] PATCH /user-settings (profile) failed: ${res.status}`);
+    }
+  } catch (err) {
+    console.warn('[neonSync] PATCH /user-settings (profile) error:', err);
+  }
+};

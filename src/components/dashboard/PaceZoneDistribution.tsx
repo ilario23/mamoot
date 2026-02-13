@@ -68,7 +68,7 @@ const PaceZoneDistribution = () => {
     return (
       <div className="border-3 border-border p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[300px] gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        {showProgress && (
+        {showProgress ? (
           <div className="text-center">
             <p className="text-sm font-bold text-muted-foreground">
               Analyzing activities: {progress.done} / {progress.total}
@@ -80,6 +80,10 @@ const PaceZoneDistribution = () => {
               />
             </div>
           </div>
+        ) : (
+          <p className="text-sm font-bold text-muted-foreground">
+            Loading zone data…
+          </p>
         )}
       </div>
     );

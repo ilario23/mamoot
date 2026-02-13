@@ -234,7 +234,7 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
           disabled={isStreaming}
           aria-label='Attach data with @-mention'
           tabIndex={0}
-          className='px-2 py-2 border-3 border-border bg-background hover:bg-muted transition-colors disabled:opacity-50 shrink-0 flex items-center'
+          className='px-2 py-2 border-3 border-border bg-secondary/10 text-secondary hover:bg-secondary/20 transition-colors disabled:opacity-50 shrink-0 flex items-center shadow-neo-sm hover:shadow-none'
         >
           <AtSign className='h-4 w-4' />
         </button>
@@ -270,7 +270,7 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
             onClick={onStop}
             aria-label='Stop generating'
             tabIndex={0}
-            className='px-4 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-border hover:bg-destructive/80 transition-colors flex items-center gap-2 shrink-0'
+            className='px-4 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-border hover:bg-destructive/80 transition-colors flex items-center gap-2 shrink-0 shadow-neo-sm hover:shadow-none'
           >
             <Square className='h-4 w-4' />
             <span className='hidden sm:inline'>Stop</span>
@@ -281,7 +281,7 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
             disabled={!text.trim()}
             aria-label='Send message'
             tabIndex={0}
-            className='px-4 py-2 bg-foreground text-background font-black text-sm border-3 border-border hover:bg-primary hover:text-primary-foreground transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0'
+            className='px-4 py-2 bg-primary text-primary-foreground font-black text-sm border-3 border-border hover:bg-primary/80 transition-colors flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed shrink-0 shadow-neo-sm hover:shadow-none disabled:shadow-none'
           >
             <Send className='h-4 w-4' />
             <span className='hidden sm:inline'>Send</span>

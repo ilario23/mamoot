@@ -2,7 +2,7 @@
 // AI Retrieval Tools — Server-side tools the LLM calls on demand
 // ============================================================
 //
-// Factory function that creates 13 fine-grained retrieval tools
+// Factory function that creates fine-grained retrieval tools
 // bound to a specific athleteId. All tools query Neon directly
 // and return compact text summaries for the LLM.
 
@@ -17,6 +17,7 @@ import {
   zoneBreakdowns as zoneBreakdownsTable,
   athleteGear,
   coachPlans,
+  physioPlans,
 } from '@/db/schema';
 import {eq, desc, and, inArray} from 'drizzle-orm';
 import type {ActivitySummary, UserSettings} from './mockData';
@@ -768,6 +769,78 @@ export const createRetrievalTools = (athleteId: number) => ({
     },
   }),
 
+  // ---- 10b. Physio Plan ----
+  getPhysioPlan: tool({
+    description:
+      'Get the active strength/mobility plan shared by the Physio persona. Includes training phase, strength sessions per week, and per-day exercises. The Coach uses this to leave room for gym days; the Nutritionist uses it to adjust macros for combined run+strength days.',
+    inputSchema: z.object({}),
+    execute: async () => {
+      const plans = await db
+        .select()
+        .from(physioPlans)
+        .where(
+          and(
+            eq(physioPlans.athleteId, athleteId),
+            eq(physioPlans.isActive, true),
+          ),
+        )
+        .orderBy(desc(physioPlans.sharedAt))
+        .limit(1);
+
+      const plan = plans[0];
+      if (!plan) {
+        return {plan: 'No active physio plan.'};
+      }
+
+      const sessions = plan.sessions as Array<{
+        day: string;
+        date?: string;
+        type: string;
+        exercises: Array<{
+          name: string;
+          sets?: string;
+          reps?: string;
+          tempo?: string;
+          notes?: string;
+        }>;
+        duration?: string;
+        notes?: string;
+      }>;
+
+      const lines = [
+        `Physio Plan: ${plan.title}`,
+        plan.phase ? `Phase: ${plan.phase}` : null,
+        plan.strengthSessionsPerWeek
+          ? `Strength sessions/week: ${plan.strengthSessionsPerWeek}`
+          : null,
+        plan.summary ? `Summary: ${plan.summary}` : null,
+        '',
+      ].filter(Boolean) as string[];
+
+      for (const s of sessions) {
+        const dateStr = s.date ? ` (${s.date})` : '';
+        const durStr = s.duration ? ` — ${s.duration}` : '';
+        lines.push(`### ${s.day}${dateStr} — ${s.type}${durStr}`);
+        if (s.notes) lines.push(`  Note: ${s.notes}`);
+        for (const ex of s.exercises) {
+          const parts = [ex.name];
+          if (ex.sets && ex.reps) parts.push(`${ex.sets}x${ex.reps}`);
+          else if (ex.reps) parts.push(ex.reps);
+          if (ex.tempo) parts.push(ex.tempo);
+          if (ex.notes) parts.push(`(${ex.notes})`);
+          lines.push(`- ${parts.join(' | ')}`);
+        }
+      }
+
+      // Include full plan content
+      if (plan.content) {
+        lines.push('', '### Full Plan Details', '', plan.content);
+      }
+
+      return {plan: lines.join('\n')};
+    },
+  }),
+
   // ---- 11. Plan vs Actual Comparison ----
   comparePlanVsActual: tool({
     description:
@@ -1213,6 +1286,137 @@ export const createRetrievalTools = (athleteId: number) => ({
       }
 
       return {records: lines.join('\n')};
+    },
+  }),
+
+  // ---- 14. Weather Forecast (Open-Meteo — free, no API key) ----
+  getWeatherForecast: tool({
+    description:
+      'Get the weather forecast for the athlete\'s city using Open-Meteo. Returns daily temperature, apparent temperature, humidity, conditions, precipitation, and wind for up to 16 days. Use to adjust hydration and electrolyte recommendations.',
+    inputSchema: z.object({
+      days: z
+        .number()
+        .optional()
+        .describe('Number of forecast days (1-16). Default 5.'),
+    }),
+    execute: async ({days = 5}: {days?: number}) => {
+      // Get athlete city from user settings
+      const settings = await fetchSettings(athleteId);
+      const city = (settings as Record<string, unknown> | null)?.city as string | null;
+      if (!city) {
+        return {weather: 'No city set for this athlete. Ask the athlete where they train.'};
+      }
+
+      try {
+        // 1. Geocode city → lat/lon via Open-Meteo geocoding API
+        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
+        const geoRes = await fetch(geoUrl);
+        if (!geoRes.ok) {
+          return {weather: `Geocoding API error (${geoRes.status}). City: "${city}" may not be recognized.`};
+        }
+        const geoData = await geoRes.json();
+        const geo = geoData.results?.[0] as {name: string; latitude: number; longitude: number; country?: string} | undefined;
+        if (!geo) {
+          return {weather: `City "${city}" not found. Ask the athlete to update their city in settings.`};
+        }
+
+        // 2. Fetch daily forecast from Open-Meteo
+        const limitedDays = Math.min(Math.max(days, 1), 16);
+        const dailyVars = [
+          'temperature_2m_max',
+          'temperature_2m_min',
+          'apparent_temperature_max',
+          'apparent_temperature_min',
+          'weather_code',
+          'precipitation_sum',
+          'wind_speed_10m_max',
+          'relative_humidity_2m_max',
+          'relative_humidity_2m_min',
+        ].join(',');
+
+        const forecastUrl =
+          `https://api.open-meteo.com/v1/forecast` +
+          `?latitude=${geo.latitude}&longitude=${geo.longitude}` +
+          `&daily=${dailyVars}` +
+          `&wind_speed_unit=ms` +
+          `&timezone=auto` +
+          `&forecast_days=${limitedDays}`;
+
+        const res = await fetch(forecastUrl);
+        if (!res.ok) {
+          return {weather: `Open-Meteo API error (${res.status}).`};
+        }
+
+        const data = await res.json();
+        if (data.error) {
+          return {weather: `Open-Meteo error: ${data.reason ?? 'unknown'}`};
+        }
+
+        const daily = data.daily as {
+          time: string[];
+          temperature_2m_max: number[];
+          temperature_2m_min: number[];
+          apparent_temperature_max: number[];
+          apparent_temperature_min: number[];
+          weather_code: number[];
+          precipitation_sum: number[];
+          wind_speed_10m_max: number[];
+          relative_humidity_2m_max: number[];
+          relative_humidity_2m_min: number[];
+        };
+
+        if (!daily?.time || daily.time.length === 0) {
+          return {weather: 'No forecast data available.'};
+        }
+
+        // WMO weather code → human label
+        const wmoLabel = (code: number): string => {
+          const WMO: Record<number, string> = {
+            0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+            45: 'Fog', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Drizzle', 55: 'Dense drizzle',
+            61: 'Slight rain', 63: 'Rain', 65: 'Heavy rain',
+            66: 'Light freezing rain', 67: 'Heavy freezing rain',
+            71: 'Slight snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+            80: 'Light showers', 81: 'Showers', 82: 'Heavy showers',
+            85: 'Light snow showers', 86: 'Heavy snow showers',
+            95: 'Thunderstorm', 96: 'Thunderstorm w/ hail', 99: 'Thunderstorm w/ heavy hail',
+          };
+          return WMO[code] ?? `WMO ${code}`;
+        };
+
+        // 3. Build formatted output
+        const location = `${geo.name}${geo.country ? `, ${geo.country}` : ''}`;
+        const lines = [`Weather Forecast — ${location} (${geo.latitude.toFixed(2)}, ${geo.longitude.toFixed(2)})`];
+
+        for (let i = 0; i < daily.time.length; i++) {
+          const date = daily.time[i];
+          const tMin = Math.round(daily.temperature_2m_min[i]);
+          const tMax = Math.round(daily.temperature_2m_max[i]);
+          const feelsMax = Math.round(daily.apparent_temperature_max[i]);
+          const condition = wmoLabel(daily.weather_code[i]);
+          const humMax = daily.relative_humidity_2m_max[i];
+          const wind = daily.wind_speed_10m_max[i];
+          const precip = daily.precipitation_sum[i];
+
+          // Hydration flag
+          let hydrationNote = '';
+          if (tMax >= 25 && humMax >= 70) {
+            hydrationNote = ' [HIGH heat+humidity — increase fluids + electrolytes significantly]';
+          } else if (tMax >= 25) {
+            hydrationNote = ' [WARM — increase fluid intake]';
+          } else if (humMax >= 70) {
+            hydrationNote = ' [HIGH humidity — extra electrolytes recommended]';
+          }
+
+          lines.push(
+            `- ${date}: ${tMin}–${tMax}C (feels ${feelsMax}C) | ${condition} | humidity ${humMax}% | wind ${wind.toFixed(1)} m/s | precip ${precip}mm${hydrationNote}`,
+          );
+        }
+
+        return {weather: lines.join('\n')};
+      } catch (err) {
+        return {weather: `Failed to fetch weather: ${err instanceof Error ? err.message : 'unknown error'}`};
+      }
     },
   }),
 });

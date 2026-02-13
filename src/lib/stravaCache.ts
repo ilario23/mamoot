@@ -37,6 +37,7 @@ import {
 import type {FitnessDataPoint} from '@/utils/trainingLoad';
 import {
   neonGetActivities,
+  neonGetRecentActivities,
   neonSyncActivities,
   neonGetActivityDetail,
   neonSyncActivityDetail,
@@ -50,8 +51,11 @@ import {
   neonSyncAthleteGear,
   neonGetZoneBreakdown,
   neonSyncZoneBreakdown,
+  neonGetZoneBreakdownsBulk,
+  neonGetActivityStreamsBulk,
   neonGetDashboardCache,
   neonSyncDashboardCache,
+  neonSyncAthleteProfile,
 } from './neonSync';
 
 // ----- Staleness thresholds (ms) -----
@@ -81,10 +85,20 @@ const isFresh = (fetchedAt: number, maxAge: number): boolean => {
 /**
  * Returns all activities, transformed to app format.
  * Two-tier: Neon → Strava API.
+ *
+ * @param afterDate  Optional YYYY-MM-DD cutoff — when provided, the Neon
+ *                   read only returns activities on or after this date,
+ *                   reducing payload size for dashboard views.
+ *                   The Strava sync always fetches everything so the full
+ *                   history is available for other views.
  */
-export const cachedGetAllActivities = async (): Promise<ActivitySummary[]> => {
+export const cachedGetAllActivities = async (
+  afterDate?: string,
+): Promise<ActivitySummary[]> => {
   // ── Tier 1: Neon (persistent, multi-device) ──
-  const neonData = await neonGetActivities();
+  const neonData = afterDate
+    ? await neonGetRecentActivities(afterDate)
+    : await neonGetActivities();
 
   if (neonData && neonData.length > 0) {
     const newestNeon = neonData.reduce((a, b) =>
@@ -110,10 +124,15 @@ export const cachedGetAllActivities = async (): Promise<ActivitySummary[]> => {
     fetchedAt: now,
   }));
 
-  // Write to Neon
+  // Write all to Neon (full history for other views)
   await neonSyncActivities(records);
 
-  const sorted = [...records].sort((a, b) =>
+  // Apply client-side date filter if requested (Strava returns everything)
+  const filtered = afterDate
+    ? records.filter((r) => r.date >= afterDate)
+    : records;
+
+  const sorted = [...filtered].sort((a, b) =>
     b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
   );
   return sorted.map((record) => transformActivity(record.data));
@@ -263,6 +282,13 @@ export const cachedGetAthleteGear = async (): Promise<{
 
   await neonSyncAthleteGear(record);
 
+  // Sync weight and city from Strava profile to user_settings (fire-and-forget)
+  neonSyncAthleteProfile(
+    profile.id,
+    profile.weight ?? null,
+    profile.city ?? null,
+  ).catch(() => {});
+
   return {bikes, shoes, retiredGearIds: existingRetiredIds};
 };
 
@@ -301,29 +327,124 @@ export const cachedGetZoneBreakdown = async (
   return breakdown;
 };
 
+// ----- In-flight deduplication for batch zone breakdowns -----
+// When multiple components request the same batch concurrently (e.g.
+// VolumeChart and PaceZoneDistribution both requesting 4-week zone data),
+// reuse the same underlying promise instead of doing the work twice.
+
+const inflight = new Map<string, Promise<Map<number, ZoneBreakdown>>>();
+
 /**
- * Processes multiple activity IDs with a concurrency limiter.
- * Returns a Map of activityId -> ZoneBreakdown.
- * Calls onProgress after each activity is processed.
+ * Processes multiple activity IDs with bulk Neon fetching + concurrency limiter
+ * for cache misses. Returns a Map of activityId -> ZoneBreakdown.
+ *
+ * Includes automatic request deduplication: concurrent calls with the same
+ * activity IDs + zone settings share a single in-flight request.
+ *
+ * Optimized flow:
+ *   1. Bulk-fetch ALL zone breakdowns from Neon in one request
+ *   2. Return cached entries whose settingsHash matches
+ *   3. Only compute (fetch streams + calculate) for missing/stale entries
  */
 export const batchGetZoneBreakdowns = async (
   activityIds: number[],
   zones: UserSettings['zones'],
   onProgress?: (done: number, total: number) => void,
 ): Promise<Map<number, ZoneBreakdown>> => {
+  const currentHash = hashZoneSettings(zones);
+  const dedupeKey = `${currentHash}:${[...activityIds].sort().join(',')}`;
+
+  // If there's already an in-flight request for the same data, reuse it
+  const existing = inflight.get(dedupeKey);
+  if (existing) {
+    const result = await existing;
+    // Still call onProgress to keep the UI in sync
+    onProgress?.(result.size, activityIds.length);
+    return result;
+  }
+
+  const promise = batchGetZoneBreakdownsInternal(
+    activityIds,
+    zones,
+    onProgress,
+  );
+  inflight.set(dedupeKey, promise);
+
+  try {
+    return await promise;
+  } finally {
+    inflight.delete(dedupeKey);
+  }
+};
+
+const batchGetZoneBreakdownsInternal = async (
+  activityIds: number[],
+  zones: UserSettings['zones'],
+  onProgress?: (done: number, total: number) => void,
+): Promise<Map<number, ZoneBreakdown>> => {
   const results = new Map<number, ZoneBreakdown>();
   const total = activityIds.length;
-  let done = 0;
+  const currentHash = hashZoneSettings(zones);
 
+  // ── Step 1: Bulk-fetch all zone breakdowns from Neon in one request ──
+  const cachedBreakdowns = await neonGetZoneBreakdownsBulk(activityIds);
+  const cachedMap = new Map(
+    cachedBreakdowns.map((b) => [b.activityId, b]),
+  );
+
+  // ── Step 2: Separate cache hits from misses ──
+  const missingIds: number[] = [];
+
+  for (const id of activityIds) {
+    const cached = cachedMap.get(id);
+    if (cached && cached.settingsHash === currentHash) {
+      results.set(id, {zones: cached.zones, settingsHash: cached.settingsHash});
+    } else {
+      missingIds.push(id);
+    }
+  }
+
+  // Report initial progress (cached entries are "done")
+  let done = results.size;
+  onProgress?.(done, total);
+
+  if (missingIds.length === 0) return results;
+
+  // ── Step 3: Bulk-fetch cached streams from Neon for all missing IDs ──
+  const cachedStreams = await neonGetActivityStreamsBulk(missingIds);
+  const streamMap = new Map(
+    cachedStreams.map((s) => [s.activityId, s]),
+  );
+
+  // ── Step 4: Compute missing zone breakdowns with concurrency limiter ──
+  // Activities with cached streams skip the Strava API call entirely.
   const MAX_CONCURRENCY = 5;
 
-  // Process in batches of MAX_CONCURRENCY
-  for (let i = 0; i < activityIds.length; i += MAX_CONCURRENCY) {
-    const batch = activityIds.slice(i, i + MAX_CONCURRENCY);
+  for (let i = 0; i < missingIds.length; i += MAX_CONCURRENCY) {
+    const batch = missingIds.slice(i, i + MAX_CONCURRENCY);
 
     const batchResults = await Promise.allSettled(
       batch.map(async (id) => {
-        const breakdown = await cachedGetZoneBreakdown(id, zones);
+        // Use pre-fetched stream from Neon if available, otherwise fall back
+        // to the full two-tier cachedGetActivityStreams (which hits Strava)
+        const cachedStream = streamMap.get(id);
+        let stream: StreamPoint[];
+        if (cachedStream) {
+          stream = transformStreams(cachedStream.data);
+        } else {
+          stream = await cachedGetActivityStreams(id);
+        }
+
+        const breakdown = computeZoneBreakdown(stream, zones);
+        const record = {
+          activityId: id,
+          settingsHash: breakdown.settingsHash,
+          zones: breakdown.zones,
+          computedAt: Date.now(),
+        };
+        // Fire-and-forget write to Neon (don't block progress)
+        neonSyncZoneBreakdown(record);
+
         return {id, breakdown};
       }),
     );

@@ -10,6 +10,10 @@ interface StreamingIndicatorProps {
   icon: LucideIcon;
   /** Persona color class, e.g. 'bg-secondary' */
   color: string;
+  /** Colored left-border class for the bubble, e.g. 'border-l-secondary' */
+  bubbleBorder?: string;
+  /** Text color class for the persona label, e.g. 'text-secondary' */
+  labelColor?: string;
 }
 
 const thinkingSteps = ['Thinking', 'Thinking.', 'Thinking..', 'Thinking...'];
@@ -18,6 +22,8 @@ const StreamingIndicator = ({
   label,
   icon: Icon,
   color,
+  bubbleBorder = '',
+  labelColor = '',
 }: StreamingIndicatorProps) => {
   const [stepIdx, setStepIdx] = useState(0);
 
@@ -38,20 +44,20 @@ const StreamingIndicator = ({
       </div>
 
       {/* Thinking bubble */}
-      <div className='p-2 md:p-3 border-2 md:border-3 border-border text-sm font-medium bg-accent/20 mr-auto max-w-[85%] md:max-w-[75%] animate-neo-pulse min-w-0'>
-        <span className='font-black text-xs uppercase mb-1 block'>
+      <div className={`p-2 md:p-3 border-2 md:border-3 border-border text-sm font-medium bg-foreground text-background mr-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm animate-neo-pulse min-w-0 ${bubbleBorder ? `border-l-[5px] ${bubbleBorder}` : ''}`}>
+        <span className={`font-black text-xs uppercase mb-1 block ${labelColor}`}>
           {label}
         </span>
         <div className='flex items-center gap-1.5'>
           {/* Block cursor */}
           <span className='inline-block w-2 h-4 bg-primary animate-neo-blink' />
-          <span className='text-muted-foreground text-xs font-bold tracking-wide'>
+          <span className='text-background/60 text-xs font-bold tracking-wide'>
             {thinkingSteps[stepIdx]}
           </span>
         </div>
 
         {/* Indeterminate progress bar */}
-        <div className='mt-2 h-0.5 bg-muted overflow-hidden border-t border-border'>
+        <div className='mt-2 h-0.5 bg-background/20 overflow-hidden border-t border-background/10'>
           <div className='h-full w-1/3 bg-primary animate-neo-progress' />
         </div>
       </div>

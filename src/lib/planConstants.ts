@@ -8,6 +8,9 @@ export const SESSION_TYPE_COLORS: Record<string, string> = {
   rest: 'bg-muted text-muted-foreground',
   strength: 'bg-secondary/20 text-secondary',
   recovery: 'bg-zone-1/20 text-zone-1',
+  mobility: 'bg-zone-2/20 text-zone-2',
+  warmup: 'bg-zone-3/20 text-zone-3',
+  cooldown: 'bg-zone-1/20 text-zone-1',
 };
 
 /** Border-left color per session type for card accent strips */

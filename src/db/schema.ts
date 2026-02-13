@@ -10,6 +10,7 @@ import {
   pgTable,
   bigint,
   integer,
+  real,
   text,
   jsonb,
   boolean,
@@ -88,6 +89,12 @@ export const userSettings = pgTable('user_settings', {
   foodPreferences: text('food_preferences'),
   injuries: jsonb('injuries').notNull().default([]),
   aiModel: text('ai_model'),
+  /** Athlete body weight in kg (from Strava profile). Used for g/kg nutrition dosing. */
+  weight: real('weight'),
+  /** Athlete city (from Strava profile). Used for weather-aware hydration advice. */
+  city: text('city'),
+  /** Training focus: 20 = run-centric, 80 = gym-centric, 50 = balanced. */
+  trainingBalance: integer('training_balance').notNull().default(50),
   updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
 });
 
@@ -174,6 +181,25 @@ export const coachPlans = pgTable('coach_plans', {
   content: text('content').notNull(),
   isActive: boolean('is_active').notNull().default(true),
   sourceMessageId: text('source_message_id'),
+  sourceSessionId: text('source_session_id'),
+  sharedAt: bigint('shared_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Physio Plans -----
+// Strength/mobility plans shared by the Physio persona.
+// Coach and Nutritionist read these to coordinate weekly programming.
+export const physioPlans = pgTable('physio_plans', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  title: text('title').notNull(),
+  summary: text('summary'),
+  /** Training phase: "base", "build", "taper", etc. */
+  phase: text('phase'),
+  /** How many strength sessions per week this plan prescribes */
+  strengthSessionsPerWeek: integer('strength_sessions_per_week'),
+  sessions: jsonb('sessions').notNull(),
+  content: text('content').notNull(),
+  isActive: boolean('is_active').notNull().default(true),
   sourceSessionId: text('source_session_id'),
   sharedAt: bigint('shared_at', {mode: 'number'}).notNull(),
 });

@@ -1,5 +1,5 @@
 import {useQuery, useQueryClient} from '@tanstack/react-query';
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {
   cachedGetAllActivities,
@@ -41,7 +41,7 @@ export const useActivities = () => {
 
   return useQuery<ActivitySummary[]>({
     queryKey: ['strava', 'activities'],
-    queryFn: cachedGetAllActivities,
+    queryFn: () => cachedGetAllActivities(),
     enabled: isAuthenticated,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
@@ -187,104 +187,22 @@ interface UseZoneBreakdownsResult {
 }
 
 /**
- * Fetches stream-based zone breakdowns for all activities within a time window.
- * On first load this may take a while as streams are fetched from Strava.
- * Once cached, subsequent loads are instant.
+ * Fetches stream-based zone breakdowns for all activities within a time window,
+ * returning aggregated totals. Derives from usePerActivityZoneBreakdowns so
+ * that when both hooks use the same `weeks` value, the underlying batch fetch
+ * is shared (no duplicate work).
  */
 export const useZoneBreakdowns = (weeks: number): UseZoneBreakdownsResult => {
-  const {isAuthenticated} = useStravaAuth();
-  const {settings} = useSettings();
-  const {data: activities, isLoading: activitiesLoading} = useActivities();
+  const {data: breakdownMap, isLoading, progress} =
+    usePerActivityZoneBreakdowns(weeks);
 
-  const [result, setResult] = useState<AggregatedZoneTotals | undefined>(
-    undefined,
-  );
-  const [isLoading, setIsLoading] = useState(true);
-  const [progress, setProgress] = useState<ZoneBreakdownProgress>({
-    done: 0,
-    total: 0,
-  });
+  const aggregated = useMemo(() => {
+    if (!breakdownMap || breakdownMap.size === 0) return undefined;
+    const breakdowns = Array.from(breakdownMap.values());
+    return aggregateZoneBreakdowns(breakdowns);
+  }, [breakdownMap]);
 
-  // Track the current computation so we can abort stale ones
-  const abortRef = useRef(0);
-
-  const handleProgress = useCallback((done: number, total: number) => {
-    setProgress({done, total});
-  }, []);
-
-  useEffect(() => {
-    if (!isAuthenticated || activitiesLoading || !activities) {
-      setIsLoading(activitiesLoading);
-      return;
-    }
-
-    const runId = ++abortRef.current;
-
-    const compute = async () => {
-      setIsLoading(true);
-      setProgress({done: 0, total: 0});
-
-      const now = new Date();
-      const cutoff = new Date(now.getTime() - weeks * 7 * 24 * 60 * 60 * 1000);
-
-      // Filter to activities in range that have HR data
-      const filtered = activities.filter((a) => {
-        const actDate = new Date(a.date);
-        return actDate >= cutoff && a.avgHr > 0;
-      });
-
-      if (filtered.length === 0) {
-        if (abortRef.current === runId) {
-          setResult(undefined);
-          setIsLoading(false);
-          setProgress({done: 0, total: 0});
-        }
-        return;
-      }
-
-      const activityIds = filtered.map((a) => Number(a.id));
-
-      try {
-        const breakdownMap = await batchGetZoneBreakdowns(
-          activityIds,
-          settings.zones,
-          (done, total) => {
-            if (abortRef.current === runId) {
-              handleProgress(done, total);
-            }
-          },
-        );
-
-        // Only apply if this is still the current computation
-        if (abortRef.current !== runId) return;
-
-        const breakdowns = Array.from(breakdownMap.values());
-        const aggregated = aggregateZoneBreakdowns(breakdowns);
-
-        setResult(aggregated);
-      } catch {
-        // On error, clear results
-        if (abortRef.current === runId) {
-          setResult(undefined);
-        }
-      } finally {
-        if (abortRef.current === runId) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    compute();
-  }, [
-    isAuthenticated,
-    activitiesLoading,
-    activities,
-    weeks,
-    settings.zones,
-    handleProgress,
-  ]);
-
-  return {data: result, isLoading, progress};
+  return {data: aggregated, isLoading, progress};
 };
 
 // ----- Per-Activity Zone Breakdowns (for charts that need per-activity data) -----

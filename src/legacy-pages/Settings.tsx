@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 const Settings = () => {
-  const {settings, updateSettings} = useSettings();
+  const {settings, updateSettings, isLoadingSettings} = useSettings();
   const {theme, setTheme} = useTheme();
   const {
     isAuthenticated,
@@ -37,8 +37,16 @@ const Settings = () => {
   );
   const [isExchangingCode, setIsExchangingCode] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const forceRefreshActivities = useForceRefreshActivities();
   const queryClient = useQueryClient();
+
+  // Sync formState when settings are loaded from Neon (source of truth)
+  useEffect(() => {
+    if (!isLoadingSettings) {
+      setFormState(JSON.parse(JSON.stringify(settings)));
+    }
+  }, [settings, isLoadingSettings]);
 
   const handleForceRefresh = async () => {
     setIsRefreshing(true);
@@ -127,12 +135,24 @@ const Settings = () => {
     }));
   };
 
-  const handleSave = () => {
-    updateSettings(formState);
-    toast({
-      title: 'Settings Saved',
-      description: 'Your HR zones have been updated successfully.',
-    });
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await updateSettings(formState);
+      toast({
+        title: 'Settings Saved',
+        description: 'Your HR zones have been updated successfully.',
+      });
+    } catch {
+      toast({
+        title: 'Save Failed',
+        description:
+          'Could not save settings. Please check your connection and try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleStravaConnect = () => {
@@ -424,9 +444,17 @@ const Settings = () => {
       {/* Save button */}
       <button
         onClick={handleSave}
-        className='px-8 py-4 rounded-full bg-primary text-primary-foreground font-black text-lg border-3 border-border shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px]'
+        disabled={isSaving || isLoadingSettings}
+        className='px-8 py-4 rounded-full bg-primary text-primary-foreground font-black text-lg border-3 border-border shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
       >
-        Save Configuration
+        {isSaving ? (
+          <span className='flex items-center justify-center gap-2'>
+            <Loader2 className='h-5 w-5 animate-spin' />
+            Saving…
+          </span>
+        ) : (
+          'Save Configuration'
+        )}
       </button>
     </div>
   );

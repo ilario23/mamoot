@@ -22,8 +22,9 @@ import {
   chatSessions,
   chatMessages,
   coachPlans,
+  physioPlans,
 } from '@/db/schema';
-import {eq, and, sql, desc, inArray} from 'drizzle-orm';
+import {eq, and, sql, desc, inArray, gte} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
 
 type RouteContext = {params: Promise<{table: string}>};
@@ -45,6 +46,15 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
             .from(activities)
             .where(eq(activities.id, Number(pk)));
           return NextResponse.json(rows[0] ?? null);
+        }
+        // Optional date filter: GET /api/db/activities?after=2025-01-01
+        const after = req.nextUrl.searchParams.get('after');
+        if (after) {
+          const rows = await db
+            .select()
+            .from(activities)
+            .where(gte(activities.date, after));
+          return NextResponse.json(rows);
         }
         const rows = await db.select().from(activities);
         return NextResponse.json(rows);
@@ -101,8 +111,20 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'activity-streams': {
+        // Bulk fetch: GET /api/db/activity-streams?pks=1,2,3
+        const streamPks = req.nextUrl.searchParams.get('pks');
+        if (streamPks) {
+          const ids = streamPks.split(',').map(Number).filter(Boolean);
+          if (ids.length === 0) return NextResponse.json([], {status: 200});
+          const rows = await db
+            .select()
+            .from(activityStreams)
+            .where(inArray(activityStreams.activityId, ids));
+          return NextResponse.json(rows);
+        }
+        // Single fetch: GET /api/db/activity-streams?pk=123
         if (!pk)
-          return NextResponse.json({error: 'pk required'}, {status: 400});
+          return NextResponse.json({error: 'pk or pks required'}, {status: 400});
         const rows = await db
           .select()
           .from(activityStreams)
@@ -141,8 +163,20 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'zone-breakdowns': {
+        // Bulk fetch: GET /api/db/zone-breakdowns?pks=1,2,3
+        const zbPks = req.nextUrl.searchParams.get('pks');
+        if (zbPks) {
+          const ids = zbPks.split(',').map(Number).filter(Boolean);
+          if (ids.length === 0) return NextResponse.json([], {status: 200});
+          const rows = await db
+            .select()
+            .from(zoneBreakdowns)
+            .where(inArray(zoneBreakdowns.activityId, ids));
+          return NextResponse.json(rows);
+        }
+        // Single fetch: GET /api/db/zone-breakdowns?pk=123
         if (!pk)
-          return NextResponse.json({error: 'pk required'}, {status: 400});
+          return NextResponse.json({error: 'pk or pks required'}, {status: 400});
         const rows = await db
           .select()
           .from(zoneBreakdowns)
@@ -264,6 +298,39 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           return NextResponse.json(planRows[0] ?? null);
         }
         return NextResponse.json(planRows);
+      }
+
+      case 'physio-plans': {
+        // GET /api/db/physio-plans?athleteId=123          → all plans for athlete
+        // GET /api/db/physio-plans?athleteId=123&active=true → active plan only
+        // GET /api/db/physio-plans?pk=uuid                → single plan by ID
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(physioPlans)
+            .where(eq(physioPlans.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const ppAthleteId = req.nextUrl.searchParams.get('athleteId');
+        if (!ppAthleteId)
+          return NextResponse.json(
+            {error: 'athleteId required'},
+            {status: 400},
+          );
+        const ppActiveOnly = req.nextUrl.searchParams.get('active') === 'true';
+        const ppConditions = [eq(physioPlans.athleteId, Number(ppAthleteId))];
+        if (ppActiveOnly) {
+          ppConditions.push(eq(physioPlans.isActive, true));
+        }
+        const ppRows = await db
+          .select()
+          .from(physioPlans)
+          .where(and(...ppConditions))
+          .orderBy(desc(physioPlans.sharedAt));
+        if (ppActiveOnly) {
+          return NextResponse.json(ppRows[0] ?? null);
+        }
+        return NextResponse.json(ppRows);
       }
 
       default:
@@ -438,6 +505,9 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
               foodPreferences: sql`excluded.food_preferences`,
               injuries: sql`excluded.injuries`,
               aiModel: sql`excluded.ai_model`,
+              weight: sql`excluded.weight`,
+              city: sql`excluded.city`,
+              trainingBalance: sql`excluded.training_balance`,
               updatedAt: sql`excluded.updated_at`,
             },
           });
@@ -491,6 +561,26 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
+      case 'physio-plans':
+        await db
+          .insert(physioPlans)
+          .values(records)
+          .onConflictDoUpdate({
+            target: physioPlans.id,
+            set: {
+              title: sql`excluded.title`,
+              summary: sql`excluded.summary`,
+              phase: sql`excluded.phase`,
+              strengthSessionsPerWeek: sql`excluded.strength_sessions_per_week`,
+              sessions: sql`excluded.sessions`,
+              content: sql`excluded.content`,
+              isActive: sql`excluded.is_active`,
+              sourceSessionId: sql`excluded.source_session_id`,
+              sharedAt: sql`excluded.shared_at`,
+            },
+          });
+        break;
+
       default:
         return NextResponse.json({error: 'Unknown table'}, {status: 404});
     }
@@ -509,6 +599,32 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
 
   try {
     switch (table) {
+      case 'user-settings': {
+        // PATCH /api/db/user-settings → partial update (weight, city from Strava profile)
+        const body = await req.json();
+        const athleteIdParam = body.athleteId;
+        if (!athleteIdParam)
+          return NextResponse.json(
+            {error: 'athleteId required'},
+            {status: 400},
+          );
+
+        const updates: Record<string, unknown> = {};
+        if (body.weight !== undefined) updates.weight = body.weight;
+        if (body.city !== undefined) updates.city = body.city;
+
+        if (Object.keys(updates).length === 0) {
+          return NextResponse.json({success: true, updated: 0});
+        }
+
+        await db
+          .update(userSettings)
+          .set(updates)
+          .where(eq(userSettings.athleteId, Number(athleteIdParam)));
+
+        return NextResponse.json({success: true});
+      }
+
       case 'coach-plans': {
         // PATCH /api/db/coach-plans?id=uuid&athleteId=123 → activate this plan (deactivate others)
         const planId = req.nextUrl.searchParams.get('id');
@@ -530,6 +646,29 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
           .update(coachPlans)
           .set({isActive: true})
           .where(eq(coachPlans.id, planId));
+
+        return NextResponse.json({success: true});
+      }
+
+      case 'physio-plans': {
+        // PATCH /api/db/physio-plans?id=uuid&athleteId=123 → activate this plan (deactivate others)
+        const ppPlanId = req.nextUrl.searchParams.get('id');
+        const ppAthleteId = req.nextUrl.searchParams.get('athleteId');
+        if (!ppPlanId || !ppAthleteId)
+          return NextResponse.json(
+            {error: 'id and athleteId required'},
+            {status: 400},
+          );
+
+        await db
+          .update(physioPlans)
+          .set({isActive: false})
+          .where(eq(physioPlans.athleteId, Number(ppAthleteId)));
+
+        await db
+          .update(physioPlans)
+          .set({isActive: true})
+          .where(eq(physioPlans.id, ppPlanId));
 
         return NextResponse.json({success: true});
       }
@@ -595,6 +734,15 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         if (!planId)
           return NextResponse.json({error: 'id required'}, {status: 400});
         await db.delete(coachPlans).where(eq(coachPlans.id, planId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'physio-plans': {
+        // DELETE /api/db/physio-plans?id=uuid → delete a specific plan
+        const ppPlanId = req.nextUrl.searchParams.get('id');
+        if (!ppPlanId)
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        await db.delete(physioPlans).where(eq(physioPlans.id, ppPlanId));
         return NextResponse.json({success: true});
       }
 

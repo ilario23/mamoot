@@ -7,10 +7,10 @@ import {
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
 import {getSystemPrompt, isValidPersona} from '@/lib/aiPrompts';
-import {shareTrainingPlanSchema} from '@/lib/aiTools';
+import {shareTrainingPlanSchema, sharePhysioPlanSchema, suggestFollowUpsSchema} from '@/lib/aiTools';
 import {createRetrievalTools} from '@/lib/aiRetrievalTools';
 import {db} from '@/db';
-import {coachPlans, userSettings} from '@/db/schema';
+import {coachPlans, physioPlans, userSettings} from '@/db/schema';
 import {eq} from 'drizzle-orm';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 
@@ -119,9 +119,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // Fetch minimal always-on context (athlete name + HR zones) from Neon
+  // Fetch minimal always-on context (athlete name + HR zones + weight) from Neon
   let athleteName: string | null = null;
   let hrZonesText: string | null = null;
+  let athleteWeight: number | null = null;
+  let trainingBalance: number | null = null;
   if (athleteId) {
     try {
       const settingsRows = await db
@@ -134,6 +136,8 @@ export async function POST(req: Request) {
         hrZonesText = Object.entries(zones)
           .map(([key, [min, max]]) => `${key.toUpperCase()} ${min}-${max}`)
           .join(' | ');
+        athleteWeight = s.weight ?? null;
+        trainingBalance = s.trainingBalance ?? 50;
       }
     } catch {
       // Non-blocking — proceed without minimal context
@@ -145,6 +149,8 @@ export async function POST(req: Request) {
     persona,
     athleteName,
     hrZonesText,
+    athleteWeight,
+    trainingBalance,
     memory ?? null,
   );
 
@@ -192,7 +198,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // Build tools — retrieval tools (all personas) + shareTrainingPlan (coach only)
+  // Build tools — retrieval tools (all personas) + persona-specific sharing tools
   const retrievalTools = athleteId ? createRetrievalTools(athleteId) : {};
   const shareTrainingPlan =
     persona === 'coach'
@@ -252,9 +258,82 @@ export async function POST(req: Request) {
         }
       : {};
 
+  const sharePhysioPlan =
+    persona === 'physio'
+      ? {
+          sharePhysioPlan: {
+            description:
+              'Share a structured strength/mobility plan with the athlete and the rest of the coaching team (Coach, Nutritionist). Call this tool whenever you create or update a strength, mobility, or rehab program.',
+            inputSchema: sharePhysioPlanSchema,
+            execute: async (plan: {
+              title: string;
+              summary?: string;
+              phase?: string;
+              strengthSessionsPerWeek?: number;
+              sessions: Array<{
+                day: string;
+                date?: string;
+                type: string;
+                exercises: Array<{
+                  name: string;
+                  sets?: string;
+                  reps?: string;
+                  tempo?: string;
+                  notes?: string;
+                }>;
+                duration?: string;
+                notes?: string;
+              }>;
+              content: string;
+            }) => {
+              const planId = crypto.randomUUID();
+              const now = Date.now();
+
+              if (athleteId) {
+                try {
+                  await db.insert(physioPlans).values({
+                    id: planId,
+                    athleteId,
+                    title: plan.title,
+                    summary: plan.summary ?? null,
+                    phase: plan.phase ?? null,
+                    strengthSessionsPerWeek: plan.strengthSessionsPerWeek ?? null,
+                    sessions: plan.sessions,
+                    content: plan.content,
+                    isActive: false,
+                    sourceSessionId: sessionId ?? null,
+                    sharedAt: now,
+                  });
+                } catch (error) {
+                  console.error(
+                    '[sharePhysioPlan] Failed to save plan:',
+                    error,
+                  );
+                }
+              }
+
+              return {planId, title: plan.title, sharedAt: now};
+            },
+          },
+        }
+      : {};
+
+  const suggestFollowUps = {
+    suggestFollowUps: {
+      description:
+        'REQUIRED at the end of most responses. Suggest 2-3 short follow-up questions (max 8 words each) the athlete might ask next. These appear as clickable buttons in the UI. Do NOT write follow-up suggestions as text — always use this tool instead.',
+      inputSchema: suggestFollowUpsSchema,
+      execute: async (input: {suggestions: string[]}) => {
+        return {suggestions: input.suggestions};
+      },
+    },
+  };
+
   const tools = {
     ...retrievalTools,
     ...shareTrainingPlan,
+    ...sharePhysioPlan,
+    ...suggestFollowUps,
   };
 
   const toolNames = Object.keys(tools);

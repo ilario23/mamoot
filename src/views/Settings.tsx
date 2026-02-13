@@ -29,6 +29,7 @@ import {
   Bot,
   ChevronDown,
 } from 'lucide-react';
+import TrainingGauge from '@/components/ui/TrainingGauge';
 
 const COMMON_ALLERGIES = [
   'Gluten',
@@ -40,7 +41,7 @@ const COMMON_ALLERGIES = [
 ];
 
 const Settings = () => {
-  const {settings, updateSettings} = useSettings();
+  const {settings, updateSettings, isLoadingSettings} = useSettings();
   const {theme, setTheme} = useTheme();
   const {
     isAuthenticated,
@@ -57,9 +58,17 @@ const Settings = () => {
   );
   const [isExchangingCode, setIsExchangingCode] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [allergyInput, setAllergyInput] = useState('');
   const forceRefreshActivities = useForceRefreshActivities();
   const queryClient = useQueryClient();
+
+  // Sync formState when settings are loaded from Neon (source of truth)
+  useEffect(() => {
+    if (!isLoadingSettings) {
+      setFormState(JSON.parse(JSON.stringify(settings)));
+    }
+  }, [settings, isLoadingSettings]);
 
   const handleAddAllergy = (allergy: string) => {
     const trimmed = allergy.trim();
@@ -204,12 +213,25 @@ const Settings = () => {
     }));
   };
 
-  const handleSave = () => {
-    updateSettings(formState);
-    toast({
-      title: 'Settings Saved',
-      description: 'Your personal information has been updated successfully.',
-    });
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await updateSettings(formState);
+      toast({
+        title: 'Settings Saved',
+        description:
+          'Your personal information has been updated successfully.',
+      });
+    } catch {
+      toast({
+        title: 'Save Failed',
+        description:
+          'Could not save settings. Please check your connection and try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleStravaConnect = () => {
@@ -556,6 +578,26 @@ const Settings = () => {
         </div>
       </div>
 
+      {/* ── Training Focus ── */}
+      <div className='border-3 border-border p-5 bg-background shadow-neo space-y-5'>
+        <div>
+          <h3 className='font-black text-lg uppercase tracking-wider'>
+            Training Focus
+          </h3>
+          <p className='text-xs font-bold text-muted-foreground mt-1'>
+            Set how your weekly schedule should balance running and gym sessions.
+            The AI team will adjust plans accordingly.
+          </p>
+        </div>
+
+        <TrainingGauge
+          value={formState.trainingBalance ?? 50}
+          onChange={(v) =>
+            setFormState((prev) => ({...prev, trainingBalance: v}))
+          }
+        />
+      </div>
+
       {/* ── Nutrition Profile ── */}
       <div className='border-3 border-border p-5 bg-background shadow-neo space-y-6'>
         <div>
@@ -743,11 +785,19 @@ const Settings = () => {
       {/* Save button — full width on mobile */}
       <button
         onClick={handleSave}
-        className='w-full md:w-auto px-8 py-3 md:py-4 rounded-full bg-primary text-primary-foreground font-black text-base md:text-lg border-3 border-border shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px]'
+        disabled={isSaving || isLoadingSettings}
+        className='w-full md:w-auto px-8 py-3 md:py-4 rounded-full bg-primary text-primary-foreground font-black text-base md:text-lg border-3 border-border shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
         aria-label='Save configuration'
         tabIndex={0}
       >
-        Save Configuration
+        {isSaving ? (
+          <span className='flex items-center justify-center gap-2'>
+            <Loader2 className='h-5 w-5 animate-spin' />
+            Saving…
+          </span>
+        ) : (
+          'Save Configuration'
+        )}
       </button>
     </div>
   );

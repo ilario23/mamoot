@@ -141,6 +141,10 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0" },
         },
+        "fade-in-up": {
+          "0%": { opacity: "0", transform: "translateY(6px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -148,6 +152,7 @@ export default {
         "neo-pulse": "neo-pulse-border 2s ease-in-out infinite",
         "neo-progress": "neo-indeterminate 1.5s ease-in-out infinite",
         "neo-blink": "neo-blink 1s step-end infinite",
+        "fade-in-up": "fade-in-up 0.3s ease-out both",
       },
     },
   },

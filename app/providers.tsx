@@ -7,22 +7,24 @@ import {StravaAuthProvider, useStravaAuth} from '@/contexts/StravaAuthContext';
 import {SettingsProvider, useSettings} from '@/contexts/SettingsContext';
 import {Toaster} from '@/components/ui/toaster';
 import {Toaster as Sonner} from '@/components/ui/sonner';
-import {useState, useEffect, type ReactNode} from 'react';
+import {useState, useEffect, useRef, type ReactNode} from 'react';
 
 interface ProvidersProps {
   children: ReactNode;
 }
 
-/** Bridges StravaAuth → SettingsContext to trigger Neon sync once athleteId is known. */
-const SettingsSyncBridge = ({children}: {children: ReactNode}) => {
+/** Bridges StravaAuth → SettingsContext to load settings from Neon once athleteId is known. */
+const SettingsLoader = ({children}: {children: ReactNode}) => {
   const {athlete} = useStravaAuth();
-  const {syncToNeon} = useSettings();
+  const {loadSettings} = useSettings();
+  const loadedForRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (athlete?.id) {
-      syncToNeon(athlete.id);
+    if (athlete?.id && loadedForRef.current !== athlete.id) {
+      loadedForRef.current = athlete.id;
+      loadSettings(athlete.id);
     }
-  }, [athlete?.id, syncToNeon]);
+  }, [athlete?.id, loadSettings]);
 
   return <>{children}</>;
 };
@@ -40,11 +42,11 @@ const Providers = ({children}: ProvidersProps) => {
         <TooltipProvider>
           <StravaAuthProvider>
             <SettingsProvider>
-              <SettingsSyncBridge>
+              <SettingsLoader>
                 <Toaster />
                 <Sonner />
                 {children}
-              </SettingsSyncBridge>
+              </SettingsLoader>
             </SettingsProvider>
           </StravaAuthProvider>
         </TooltipProvider>

@@ -6,7 +6,7 @@
 // for chat sessions, messages, and coach plans.
 // Neon is the primary persistent store — writes are awaitable.
 
-import type {CachedChatSession, CachedChatMessage, CachedCoachPlan} from './cacheTypes';
+import type {CachedChatSession, CachedChatMessage, CachedCoachPlan, CachedPhysioPlan} from './cacheTypes';
 
 const API = '/api/db';
 
@@ -136,5 +136,53 @@ export const neonActivateCoachPlan = async (
     });
   } catch (err) {
     console.warn('[chatSync] PATCH coach-plan activate error:', err);
+  }
+};
+
+// ---- Physio Plans ----
+
+/** Get all physio plans for an athlete (ordered by sharedAt desc). */
+export const neonGetPhysioPlans = async (
+  athleteId: number,
+): Promise<CachedPhysioPlan[] | null> =>
+  getFromNeon<CachedPhysioPlan[]>(
+    `${API}/physio-plans?athleteId=${athleteId}`,
+  );
+
+/** Get only the active physio plan for an athlete. */
+export const neonGetActivePhysioPlan = async (
+  athleteId: number,
+): Promise<CachedPhysioPlan | null> =>
+  getFromNeon<CachedPhysioPlan>(
+    `${API}/physio-plans?athleteId=${athleteId}&active=true`,
+  );
+
+/** Awaitable upsert of a physio plan. */
+export const neonSyncPhysioPlan = async (record: CachedPhysioPlan): Promise<void> => {
+  await postToNeon('physio-plans', record);
+};
+
+/** Awaitable delete of a physio plan by ID. */
+export const neonDeletePhysioPlan = async (planId: string): Promise<void> => {
+  try {
+    await fetch(`${API}/physio-plans?id=${planId}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.warn('[chatSync] DELETE physio-plan error:', err);
+  }
+};
+
+/** Awaitable activate a physio plan (deactivates all others for the athlete). */
+export const neonActivatePhysioPlan = async (
+  planId: string,
+  athleteId: number,
+): Promise<void> => {
+  try {
+    await fetch(`${API}/physio-plans?id=${planId}&athleteId=${athleteId}`, {
+      method: 'PATCH',
+    });
+  } catch (err) {
+    console.warn('[chatSync] PATCH physio-plan activate error:', err);
   }
 };

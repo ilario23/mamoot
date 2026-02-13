@@ -77,9 +77,21 @@ const VolumeChart = () => {
     return (
       <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[220px] md:min-h-[300px] gap-3">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        {showProgress && (
+        {showProgress ? (
+          <div className="text-center">
+            <p className="text-sm font-bold text-muted-foreground">
+              Analyzing activities: {progress.done} / {progress.total}
+            </p>
+            <div className="w-48 h-1.5 bg-muted mt-2 overflow-hidden rounded-full">
+              <div
+                className="h-full bg-primary transition-all duration-300 rounded-full"
+                style={{ width: `${(progress.done / progress.total) * 100}%` }}
+              />
+            </div>
+          </div>
+        ) : (
           <p className="text-sm font-bold text-muted-foreground">
-            Analyzing activities: {progress.done} / {progress.total}
+            Loading volume data…
           </p>
         )}
       </div>

@@ -107,6 +107,8 @@ export interface UserSettings {
   injuries?: Injury[];
   /** Selected AI model for all chat personas */
   aiModel?: string;
+  /** Training focus: 20 = run-centric, 80 = gym-centric, 50 = balanced */
+  trainingBalance?: number;
 }
 
 export interface AIMessage {
@@ -134,6 +136,7 @@ export const defaultSettings: UserSettings = {
   foodPreferences: '',
   injuries: [],
   aiModel: DEFAULT_MODEL,
+  trainingBalance: 50,
 };
 
 // ----- Utility functions -----
