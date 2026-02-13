@@ -14,6 +14,7 @@ import {
   Menu,
   ClipboardList,
   Calendar,
+  ChevronRight,
   type LucideIcon,
 } from 'lucide-react';
 import {useChat} from '@ai-sdk/react';
@@ -33,7 +34,11 @@ import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/mockData';
 import type {PersonaId} from '@/lib/aiPrompts';
 import type {ShareTrainingPlanInput, SharePhysioPlanInput} from '@/lib/aiTools';
-import {getMentionCategory, parseMentionMeta, type MentionReference} from '@/lib/mentionTypes';
+import {
+  getMentionCategory,
+  parseMentionMeta,
+  type MentionReference,
+} from '@/lib/mentionTypes';
 import type {PlanSession, PhysioPlanSession} from '@/lib/cacheTypes';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import {
@@ -70,10 +75,52 @@ interface Persona {
 }
 
 const personas: Persona[] = [
-  {id: 'coach', label: 'Coach', icon: Dumbbell, color: 'bg-secondary', bubbleBorder: 'border-l-secondary', labelColor: 'text-secondary', tintBg: 'bg-secondary/10'},
-  {id: 'nutritionist', label: 'Nutrition', icon: Apple, color: 'bg-zone-1', bubbleBorder: 'border-l-zone-1', labelColor: 'text-zone-1', tintBg: 'bg-zone-1/10'},
-  {id: 'physio', label: 'Physio', icon: Stethoscope, color: 'bg-destructive', bubbleBorder: 'border-l-destructive', labelColor: 'text-destructive', tintBg: 'bg-destructive/10'},
+  {
+    id: 'coach',
+    label: 'Coach',
+    icon: Dumbbell,
+    color: 'bg-secondary',
+    bubbleBorder: 'border-l-secondary',
+    labelColor: 'text-secondary',
+    tintBg: 'bg-secondary/10',
+  },
+  {
+    id: 'nutritionist',
+    label: 'Nutrition',
+    icon: Apple,
+    color: 'bg-zone-1',
+    bubbleBorder: 'border-l-zone-1',
+    labelColor: 'text-zone-1',
+    tintBg: 'bg-zone-1/10',
+  },
+  {
+    id: 'physio',
+    label: 'Physio',
+    icon: Stethoscope,
+    color: 'bg-destructive',
+    bubbleBorder: 'border-l-destructive',
+    labelColor: 'text-destructive',
+    tintBg: 'bg-destructive/10',
+  },
 ];
+
+const PERSONA_STARTERS: Record<PersonaId, string[]> = {
+  coach: [
+    'Build me a 5K plan',
+    'Review my last week',
+    'What should I run today?',
+  ],
+  nutritionist: [
+    'Pre-race fueling plan',
+    'Recovery meal ideas',
+    'Hydration strategy',
+  ],
+  physio: [
+    "Prevent runner's knee",
+    'Post-run stretch routine',
+    'Hip mobility drills',
+  ],
+};
 
 const PersonaAvatar = ({
   persona,
@@ -119,59 +166,160 @@ const TOOL_LABELS: Record<string, string> = {
   suggestFollowUps: 'Preparing suggestions',
 };
 
+// ----- Collapsible tool call group -----
+
+interface ToolChipData {
+  toolName: string;
+  label: string;
+  done: boolean;
+}
+
+const ToolCallGroup = ({chips}: {chips: ToolChipData[]}) => {
+  const [expanded, setExpanded] = useState(false);
+  const allDone = chips.every((c) => c.done);
+  const stillLoading = chips.filter((c) => !c.done);
+
+  // While tools are still running, show the loading ones inline
+  if (!allDone) {
+    return (
+      <div className='flex flex-wrap gap-1 mb-1.5'>
+        {chips.map((chip) => (
+          <ToolCallChip
+            key={chip.toolName}
+            label={chip.label}
+            done={chip.done}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // All done — show collapsible "Retrieved information"
+  return (
+    <div className='mb-1.5'>
+      <button
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-label='Toggle retrieved information'
+        aria-expanded={expanded}
+        tabIndex={0}
+        className='flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground transition-colors'
+      >
+        <ChevronRight
+          className={`h-3 w-3 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+        />
+        Retrieved information
+        <span className='text-[10px] font-medium'>({chips.length})</span>
+      </button>
+      {expanded && (
+        <div className='flex flex-wrap gap-1 mt-1.5 pl-[18px]'>
+          {chips.map((chip) => (
+            <ToolCallChip
+              key={chip.toolName}
+              label={chip.label}
+              done={chip.done}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ----- Markdown renderer for AI messages -----
 
 const MarkdownContent = ({content}: {content: string}) => (
   <ReactMarkdown
     remarkPlugins={[remarkGfm]}
     components={{
-      p: ({children}) => <p className='mb-2 last:mb-0'>{children}</p>,
-      ul: ({children}) => <ul className='list-disc pl-4 mb-2'>{children}</ul>,
-      ol: ({children}) => (
-        <ol className='list-decimal pl-4 mb-2'>{children}</ol>
+      p: ({children}) => (
+        <p className='mb-2 last:mb-0 leading-relaxed'>{children}</p>
       ),
-      li: ({children}) => <li className='mb-0.5'>{children}</li>,
+      ul: ({children}) => (
+        <ul className='list-disc pl-4 mb-2 space-y-0.5 marker:text-primary'>
+          {children}
+        </ul>
+      ),
+      ol: ({children}) => (
+        <ol className='list-decimal pl-4 mb-2 space-y-0.5 marker:text-primary marker:font-bold'>
+          {children}
+        </ol>
+      ),
+      li: ({children}) => (
+        <li className='mb-0.5 leading-relaxed'>{children}</li>
+      ),
       strong: ({children}) => (
         <strong className='font-black'>{children}</strong>
       ),
+      em: ({children}) => (
+        <em className='italic text-muted-foreground'>{children}</em>
+      ),
       h1: ({children}) => (
-        <h1 className='font-black text-base mb-1'>{children}</h1>
+        <h1 className='font-black text-base mb-2 mt-3 first:mt-0 border-l-3 border-primary pl-2'>
+          {children}
+        </h1>
       ),
       h2: ({children}) => (
-        <h2 className='font-black text-sm mb-1'>{children}</h2>
+        <h2 className='font-black text-sm mb-1.5 mt-3 first:mt-0 border-l-3 border-secondary pl-2'>
+          {children}
+        </h2>
       ),
       h3: ({children}) => (
-        <h3 className='font-bold text-sm mb-1'>{children}</h3>
+        <h3 className='font-bold text-sm mb-1 mt-2 first:mt-0 border-l-2 border-border pl-2'>
+          {children}
+        </h3>
+      ),
+      blockquote: ({children}) => (
+        <blockquote className='border-l-3 border-primary/60 bg-muted/50 pl-3 pr-2 py-1.5 mb-2 text-muted-foreground italic'>
+          {children}
+        </blockquote>
+      ),
+      hr: () => (
+        <hr className='border-t-2 border-dashed border-border/60 my-3' />
+      ),
+      a: ({children, href}) => (
+        <a
+          href={href}
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-primary underline underline-offset-2 decoration-primary/40 hover:decoration-primary font-bold transition-colors'
+        >
+          {children}
+        </a>
       ),
       code: ({children, className}) => {
         const isInline = !className;
         if (isInline) {
           return (
-            <code className='bg-background/20 px-1 py-0.5 rounded text-xs font-mono'>
+            <code className='bg-muted px-1 py-0.5 text-xs font-mono border border-border/30'>
               {children}
             </code>
           );
         }
         return (
-          <pre className='bg-background/10 border-2 border-background/20 p-2 rounded text-xs font-mono overflow-x-auto mb-2'>
+          <pre className='bg-muted border-2 border-border p-2 text-xs font-mono overflow-x-auto mb-2'>
             <code>{children}</code>
           </pre>
         );
       },
       table: ({children}) => (
         <div className='overflow-x-auto mb-2 max-w-full'>
-          <table className='w-full text-xs border-3 border-background/20'>
+          <table className='w-full text-xs border-3 border-border'>
             {children}
           </table>
         </div>
       ),
+      thead: ({children}) => <thead className='bg-muted'>{children}</thead>,
       th: ({children}) => (
-        <th className='border-2 border-background/20 px-2 py-1 bg-background/10 font-black text-left'>
+        <th className='border-2 border-border px-2 py-1.5 bg-muted font-black text-left uppercase text-[10px] tracking-wider'>
           {children}
         </th>
       ),
       td: ({children}) => (
-        <td className='border-2 border-background/20 px-2 py-1'>{children}</td>
+        <td className='border-2 border-border/50 px-2 py-1'>{children}</td>
+      ),
+      tr: ({children}) => (
+        // even/odd striping — thead rows have their own bg that takes precedence
+        <tr className='even:bg-muted/30'>{children}</tr>
       ),
     }}
   >
@@ -199,9 +347,7 @@ const PlanCard = ({
         </span>
         <h4 className='font-black text-sm mt-0.5'>{plan.title}</h4>
         {plan.summary && (
-          <p className='text-xs text-muted-foreground mt-0.5'>
-            {plan.summary}
-          </p>
+          <p className='text-xs text-muted-foreground mt-0.5'>{plan.summary}</p>
         )}
       </div>
       {isSaved && (
@@ -276,9 +422,7 @@ const PhysioPlanCard = ({
         </span>
         <h4 className='font-black text-sm mt-0.5'>{plan.title}</h4>
         {plan.summary && (
-          <p className='text-xs text-muted-foreground mt-0.5'>
-            {plan.summary}
-          </p>
+          <p className='text-xs text-muted-foreground mt-0.5'>{plan.summary}</p>
         )}
       </div>
       {isSaved && (
@@ -356,9 +500,12 @@ const AITeamChat = () => {
   const [activePersona, setActivePersona] = useState<PersonaId>('coach');
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [planListOpen, setPlanListOpen] = useState(false);
   const [physioPlanListOpen, setPhysioPlanListOpen] = useState(false);
-  const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
+  const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
+    string | null
+  >(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {athlete} = useStravaAuth();
@@ -424,7 +571,11 @@ const AITeamChat = () => {
         const summary = await getMemorySummary(sid);
         setMemory(summary);
       } catch (err) {
-        console.error('[AITeamChat] Failed to load messages for session', sid, err);
+        console.error(
+          '[AITeamChat] Failed to load messages for session',
+          sid,
+          err,
+        );
         // Ensure the chat area is cleared so the user sees the empty state
         // rather than stale messages from a previous session
         activeChat.setMessages([]);
@@ -436,10 +587,11 @@ const AITeamChat = () => {
 
   // Auto-scroll on new messages and while tokens stream in
   const lastMsg = activeChat.messages[activeChat.messages.length - 1];
-  const lastMsgText = lastMsg?.parts
-    ?.filter((p): p is {type: 'text'; text: string} => p.type === 'text')
-    .map((p) => p.text)
-    .join('') ?? '';
+  const lastMsgText =
+    lastMsg?.parts
+      ?.filter((p): p is {type: 'text'; text: string} => p.type === 'text')
+      .map((p) => p.text)
+      .join('') ?? '';
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -499,7 +651,11 @@ const AITeamChat = () => {
               part.input &&
               typeof part.input === 'object'
             ) {
-              const output = part.output as {planId: string; title: string; sharedAt: number};
+              const output = part.output as {
+                planId: string;
+                title: string;
+                sharedAt: number;
+              };
               const planInput = part.input as ShareTrainingPlanInput;
 
               // Only save once
@@ -534,7 +690,11 @@ const AITeamChat = () => {
               part.input &&
               typeof part.input === 'object'
             ) {
-              const output = part.output as {planId: string; title: string; sharedAt: number};
+              const output = part.output as {
+                planId: string;
+                title: string;
+                sharedAt: number;
+              };
               const planInput = part.input as SharePhysioPlanInput;
 
               if (!savedPhysioPlanIds.current.has(output.planId)) {
@@ -545,7 +705,8 @@ const AITeamChat = () => {
                   title: planInput.title,
                   summary: planInput.summary ?? null,
                   phase: planInput.phase ?? null,
-                  strengthSessionsPerWeek: planInput.strengthSessionsPerWeek ?? null,
+                  strengthSessionsPerWeek:
+                    planInput.strengthSessionsPerWeek ?? null,
                   sessions: planInput.sessions as PhysioPlanSession[],
                   content: planInput.content,
                   sourceSessionId: sessionId,
@@ -559,18 +720,23 @@ const AITeamChat = () => {
 
       // Update session metadata
       const firstUserMsg = messages.find((m) => m.role === 'user');
-      const title = firstUserMsg
+      const rawTitle = firstUserMsg
         ? firstUserMsg.parts
             ?.filter(
               (p): p is {type: 'text'; text: string} => p.type === 'text',
             )
             .map((p) => p.text)
-            .join('')
-            .slice(0, 50) || 'New conversation'
-        : 'New conversation';
+            .join('') || ''
+        : '';
+      // Strip mention metadata so titles don't start with <!-- mentions:... -->
+      const title =
+        parseMentionMeta(rawTitle).cleanText.trim().slice(0, 50) ||
+        'New conversation';
 
       // Count only messages that have parts (matching what persistMessage actually stores)
-      const persistedCount = messages.filter((m) => (m.parts ?? []).length > 0).length;
+      const persistedCount = messages.filter(
+        (m) => (m.parts ?? []).length > 0,
+      ).length;
 
       await activeSM.updateSession(sessionId, {
         title,
@@ -595,62 +761,70 @@ const AITeamChat = () => {
     athleteId,
   ]);
 
-  const handleSend = useCallback(async (text: string, mentions: MentionReference[]) => {
-    if (!text.trim() || activeChat.status === 'streaming') return;
+  const handleSend = useCallback(
+    async (text: string, mentions: MentionReference[]) => {
+      if (!text.trim() || activeChat.status === 'streaming') return;
 
-    // Auto-create a session if none exists
-    let session = activeSession;
-    if (!session) {
-      session = await activeSM.createSession();
-    }
+      // Auto-create a session if none exists
+      let session = activeSession;
+      if (!session) {
+        session = await activeSM.createSession();
+      }
 
-    // For long sessions, trim messages to context window
-    const messages = activeChat.messages;
-    const trimmedMessages =
-      messages.length > MAX_MESSAGES_IN_CONTEXT
-        ? messages.slice(-MAX_MESSAGES_IN_CONTEXT)
-        : messages;
+      // For long sessions, trim messages to context window
+      const messages = activeChat.messages;
+      const trimmedMessages =
+        messages.length > MAX_MESSAGES_IN_CONTEXT
+          ? messages.slice(-MAX_MESSAGES_IN_CONTEXT)
+          : messages;
 
-    // If trimming happened, set the trimmed messages first
-    if (messages.length > MAX_MESSAGES_IN_CONTEXT) {
-      activeChat.setMessages(trimmedMessages);
-    }
+      // If trimming happened, set the trimmed messages first
+      if (messages.length > MAX_MESSAGES_IN_CONTEXT) {
+        activeChat.setMessages(trimmedMessages);
+      }
 
-    // Resolve @-mention data from Neon
-    const explicitContext = mentions.length > 0 ? await resolveAll(mentions) : undefined;
+      // Resolve @-mention data from Neon
+      const explicitContext =
+        mentions.length > 0 ? await resolveAll(mentions) : undefined;
 
-    // Encode mentions into message text so they're visible in the conversation
-    let messageText = text.trim();
-    if (mentions.length > 0) {
-      const mentionMeta = JSON.stringify(
-        mentions.map((m) => ({categoryId: m.categoryId, itemId: m.itemId, label: m.label})),
-      );
-      messageText = `<!-- mentions:${mentionMeta} -->\n${messageText}`;
-    }
+      // Encode mentions into message text so they're visible in the conversation
+      let messageText = text.trim();
+      if (mentions.length > 0) {
+        const mentionMeta = JSON.stringify(
+          mentions.map((m) => ({
+            categoryId: m.categoryId,
+            itemId: m.itemId,
+            label: m.label,
+          })),
+        );
+        messageText = `<!-- mentions:${mentionMeta} -->\n${messageText}`;
+      }
 
-    activeChat.sendMessage(
-      {text: messageText},
-      {
-        body: {
-          persona: activePersona,
-          model: selectedModel,
-          memory,
-          athleteId,
-          sessionId: session?.id ?? null,
-          explicitContext,
+      activeChat.sendMessage(
+        {text: messageText},
+        {
+          body: {
+            persona: activePersona,
+            model: selectedModel,
+            memory,
+            athleteId,
+            sessionId: session?.id ?? null,
+            explicitContext,
+          },
         },
-      },
-    );
-  }, [
-    activeChat,
-    activePersona,
-    selectedModel,
-    memory,
-    activeSession,
-    activeSM,
-    athleteId,
-    resolveAll,
-  ]);
+      );
+    },
+    [
+      activeChat,
+      activePersona,
+      selectedModel,
+      memory,
+      activeSession,
+      activeSM,
+      athleteId,
+      resolveAll,
+    ],
+  );
 
   const handleNewConversation = useCallback(async () => {
     await activeSM.createSession();
@@ -668,12 +842,9 @@ const AITeamChat = () => {
     [activeSM],
   );
 
-  const handleDeleteSessionRequest = useCallback(
-    (id: string) => {
-      setDeleteConfirmSessionId(id);
-    },
-    [],
-  );
+  const handleDeleteSessionRequest = useCallback((id: string) => {
+    setDeleteConfirmSessionId(id);
+  }, []);
 
   const handleDeleteSessionConfirm = useCallback(async () => {
     const id = deleteConfirmSessionId;
@@ -715,7 +886,9 @@ const AITeamChat = () => {
   const followUpSuggestions = useMemo(() => {
     if (isStreaming) return [];
     const messages = activeChat.messages;
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    const lastAssistant = [...messages]
+      .reverse()
+      .find((m) => m.role === 'assistant');
     if (!lastAssistant?.parts) return [];
     for (const part of lastAssistant.parts) {
       if (
@@ -733,25 +906,37 @@ const AITeamChat = () => {
 
   // ----- Sidebar content (shared between desktop and mobile drawer) -----
 
-  const sidebarContent = (
+  const renderSidebarContent = (options?: {onCollapse?: () => void}) => (
     <div className='flex flex-col h-full'>
       {/* History header */}
-      <div className='px-3 py-2 border-b-3 border-border flex items-center justify-between bg-muted/30'>
-        <span className='font-black text-xs uppercase tracking-wider text-muted-foreground'>
+      <div className='px-3 py-2.5 border-b-3 border-border flex items-center justify-between bg-foreground text-background'>
+        <span className='font-black text-xs uppercase tracking-widest'>
           History
         </span>
-        <button
-          onClick={() => {
-            handleNewConversation();
-            setSidebarOpen(false);
-          }}
-          aria-label='New conversation'
-          tabIndex={0}
-          className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground hover:bg-primary/80 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
-        >
-          <Plus className='h-3 w-3' />
-          New
-        </button>
+        <div className='flex items-center gap-1'>
+          <button
+            onClick={() => {
+              handleNewConversation();
+              setSidebarOpen(false);
+            }}
+            aria-label='New conversation'
+            tabIndex={0}
+            className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-background bg-accent text-accent-foreground transition-all shrink-0 shadow-neo-sm hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none'
+          >
+            <Plus className='h-3 w-3' />
+            New
+          </button>
+          {options?.onCollapse && (
+            <button
+              onClick={options.onCollapse}
+              aria-label='Collapse sidebar'
+              tabIndex={0}
+              className='p-1 hover:bg-background/20 transition-colors'
+            >
+              <ChevronRight className='h-4 w-4' />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Session list */}
@@ -771,10 +956,10 @@ const AITeamChat = () => {
         {activeSM.sessions.map((session) => (
           <div
             key={session.id}
-            className={`group flex items-center gap-2 px-3 py-2.5 text-xs border-b border-border/50 cursor-pointer transition-colors ${
+            className={`group flex items-center gap-2 px-3 py-3 text-xs border-b border-border/50 cursor-pointer transition-all ${
               session.id === activeSession?.id
-                ? `${currentPersona.tintBg} font-black border-l-4 ${currentPersona.bubbleBorder}`
-                : 'hover:bg-muted font-medium border-l-4 border-l-transparent'
+                ? `${currentPersona.tintBg} font-black border-l-[4px] ${currentPersona.bubbleBorder} shadow-neo-sm`
+                : 'hover:bg-muted font-medium border-l-[4px] border-l-transparent'
             }`}
           >
             <button
@@ -814,6 +999,8 @@ const AITeamChat = () => {
       <div className='border-t-3 border-border bg-background shrink-0'>
         {personas.map((p) => {
           const isActive = activePersona === p.id;
+          const sm = sessionManagers[p.id];
+          const sessionCount = sm.sessions.length;
           return (
             <button
               key={p.id}
@@ -823,21 +1010,16 @@ const AITeamChat = () => {
               }}
               aria-label={`Switch to ${p.label}`}
               tabIndex={0}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs transition-all border-l-4 ${
+              className={`w-full flex items-center gap-2.5 px-3 py-3 text-xs transition-all border-l-[5px] ${
                 isActive
-                  ? `font-black text-foreground ${p.tintBg} ${p.bubbleBorder}`
-                  : 'font-medium text-muted-foreground/40 hover:text-muted-foreground/70 hover:bg-muted/50 border-l-transparent'
+                  ? `font-black text-foreground ${p.color} border-l-border shadow-neo-sm`
+                  : 'font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 border-l-transparent hover:border-l-border/30'
               }`}
             >
-              <div className={isActive ? '' : 'opacity-30 grayscale'}>
-                <PersonaAvatar persona={p} size='sm' />
-              </div>
-              <span className={isActive ? p.labelColor : ''}>{p.label}</span>
-              {isActive && (
-                <div
-                  className={`ml-auto w-2.5 h-2.5 ${p.color} border-2 border-border shadow-neo-sm`}
-                />
-              )}
+              <PersonaAvatar persona={p} size='sm' />
+              <span className={isActive ? 'text-foreground' : ''}>
+                {p.label}
+              </span>
             </button>
           );
         })}
@@ -851,7 +1033,11 @@ const AITeamChat = () => {
     <div className='flex h-full min-w-0 overflow-hidden'>
       {/* Coach plan list sheet */}
       <Sheet open={planListOpen} onOpenChange={setPlanListOpen}>
-        <SheetContent side='right' className='p-0 w-[340px] sm:max-w-[340px]' aria-describedby={undefined}>
+        <SheetContent
+          side='right'
+          className='p-0 w-[340px] sm:max-w-[340px]'
+          aria-describedby={undefined}
+        >
           <SheetTitle className='sr-only'>Training Plans</SheetTitle>
           <CoachPlanList
             plans={plans}
@@ -865,7 +1051,11 @@ const AITeamChat = () => {
 
       {/* Physio plan list sheet */}
       <Sheet open={physioPlanListOpen} onOpenChange={setPhysioPlanListOpen}>
-        <SheetContent side='right' className='p-0 w-[340px] sm:max-w-[340px]' aria-describedby={undefined}>
+        <SheetContent
+          side='right'
+          className='p-0 w-[340px] sm:max-w-[340px]'
+          aria-describedby={undefined}
+        >
           <SheetTitle className='sr-only'>Physio Plans</SheetTitle>
           <PhysioPlanList
             plans={physioPlans}
@@ -878,10 +1068,12 @@ const AITeamChat = () => {
       {/* Chat area */}
       <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
         {/* Mobile header — persona + new chat + history */}
-        <div className={`md:hidden px-2 py-2 border-b border-border flex items-center gap-2 ${currentPersona.tintBg}`}>
+        <div
+          className={`md:hidden px-2 py-2 border-b-3 border-border flex items-center gap-2 bg-neo-stripe ${currentPersona.color}`}
+        >
           <div className='flex items-center gap-1.5 flex-1 min-w-0'>
             <PersonaAvatar persona={currentPersona} size='sm' />
-            <span className={`font-black text-xs truncate ${currentPersona.labelColor}`}>
+            <span className='font-black text-xs truncate text-foreground'>
               {activeSession?.title ?? currentPersona.label}
             </span>
           </div>
@@ -889,7 +1081,7 @@ const AITeamChat = () => {
             onClick={handleNewConversation}
             aria-label='New conversation'
             tabIndex={0}
-            className='p-1.5 border-2 border-border hover:bg-muted transition-colors shrink-0'
+            className='p-1.5 border-2 border-border bg-background hover:bg-muted transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
           >
             <Plus className='h-4 w-4' />
           </button>
@@ -897,17 +1089,19 @@ const AITeamChat = () => {
             onClick={() => setSidebarOpen(true)}
             aria-label='Open conversation history'
             tabIndex={0}
-            className='p-1.5 border-2 border-border hover:bg-muted transition-colors shrink-0'
+            className='p-1.5 border-2 border-border bg-background hover:bg-muted transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
           >
             <Menu className='h-4 w-4' />
           </button>
         </div>
 
         {/* Desktop header — new chat button top-right */}
-        <div className={`hidden md:flex items-center justify-between px-3 py-1.5 border-b-3 border-border ${currentPersona.tintBg}`}>
+        <div
+          className={`hidden md:flex items-center justify-between px-3 py-2 border-b-[5px] border-border bg-neo-stripe ${currentPersona.color}`}
+        >
           <div className='flex items-center gap-1.5 min-w-0'>
             <PersonaAvatar persona={currentPersona} size='sm' />
-            <span className={`font-black text-xs truncate ${currentPersona.labelColor}`}>
+            <span className='font-black text-xs truncate text-foreground'>
               {activeSession?.title ?? currentPersona.label}
             </span>
           </div>
@@ -917,7 +1111,7 @@ const AITeamChat = () => {
                 onClick={() => setPlanListOpen(true)}
                 aria-label='View training plans'
                 tabIndex={0}
-                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-secondary/15 text-secondary hover:bg-secondary/25 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
+                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background text-foreground hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all shrink-0 shadow-neo-sm'
               >
                 <ClipboardList className='h-3 w-3' />
                 Plans ({plans.length})
@@ -928,7 +1122,7 @@ const AITeamChat = () => {
                 onClick={() => setPhysioPlanListOpen(true)}
                 aria-label='View physio plans'
                 tabIndex={0}
-                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
+                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background text-foreground hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all shrink-0 shadow-neo-sm'
               >
                 <Stethoscope className='h-3 w-3' />
                 Physio ({physioPlans.length})
@@ -938,7 +1132,7 @@ const AITeamChat = () => {
               onClick={handleNewConversation}
               aria-label='New conversation'
               tabIndex={0}
-              className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground hover:bg-primary/80 transition-colors shrink-0 shadow-neo-sm hover:shadow-none'
+              className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-accent text-accent-foreground hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all shrink-0 shadow-neo-sm'
             >
               <Plus className='h-3 w-3' />
               New
@@ -981,35 +1175,63 @@ const AITeamChat = () => {
         )}
 
         {/* Messages */}
-        <div ref={scrollRef} className='flex-1 overflow-y-auto overflow-x-hidden p-2 md:p-3 space-y-3 md:space-y-4'>
+        <div
+          ref={scrollRef}
+          className='flex-1 overflow-y-auto overflow-x-hidden p-1 md:p-3 space-y-3 md:space-y-4 bg-neo-grid'
+        >
           {activeChat.messages.length === 0 && !isStreaming && (
             <div className='flex items-center justify-center h-full'>
-              <div className={`text-center space-y-3 p-6 border-3 border-border shadow-neo ${currentPersona.tintBg}`}>
-                <div className='flex justify-center'>
+              <div className='text-center space-y-5 p-8 max-w-sm'>
+                {/* Large persona icon with bounce animation */}
+                <div className='flex justify-center animate-bounce-in'>
                   <div
-                    className={`w-14 h-14 ${currentPersona.color} rounded-full border-3 border-border flex items-center justify-center shadow-neo-sm`}
+                    className={`w-20 h-20 ${currentPersona.color} rounded-full border-[4px] border-border flex items-center justify-center shadow-neo-lg`}
                   >
-                    <currentPersona.icon className='h-7 w-7 text-foreground' />
+                    <currentPersona.icon className='h-10 w-10 text-foreground' />
                   </div>
                 </div>
-                <p className={`font-black text-lg uppercase tracking-wider ${currentPersona.labelColor}`}>
+                {/* Persona name */}
+                <p
+                  className={`font-black text-2xl md:text-3xl uppercase tracking-widest ${currentPersona.labelColor}`}
+                >
                   {currentPersona.label}
                 </p>
-                <p className='text-xs font-bold text-muted-foreground max-w-[220px]'>
-                  {activePersona === 'coach' &&
-                    'Ask about training plans, workouts, and race strategy'}
-                  {activePersona === 'nutritionist' &&
-                    'Ask about fueling, hydration, and recovery nutrition'}
-                  {activePersona === 'physio' &&
-                    'Ask about injury prevention, mobility, and recovery'}
-                </p>
+                {/* Description in a card */}
+                <div
+                  className={`border-3 border-border p-3 shadow-neo-sm ${currentPersona.tintBg}`}
+                >
+                  <p className='text-sm font-bold text-muted-foreground'>
+                    {activePersona === 'coach' &&
+                      'Ask about training plans, workouts, and race strategy'}
+                    {activePersona === 'nutritionist' &&
+                      'Ask about fueling, hydration, and recovery nutrition'}
+                    {activePersona === 'physio' &&
+                      'Ask about injury prevention, mobility, and recovery'}
+                  </p>
+                </div>
+                {/* Quick-start suggestion buttons */}
+                <div className='flex flex-wrap justify-center gap-2 pt-1'>
+                  {PERSONA_STARTERS[activePersona].map((starter, idx) => (
+                    <button
+                      key={starter}
+                      onClick={() => handleSend(starter, [])}
+                      tabIndex={0}
+                      aria-label={`Ask: ${starter}`}
+                      className={`animate-fade-in-up px-3 py-1.5 text-xs font-black border-3 border-border shadow-neo-sm transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-x-1 active:translate-y-1 cursor-pointer ${currentPersona.tintBg} ${currentPersona.labelColor}`}
+                      style={{animationDelay: `${idx * 100}ms`}}
+                    >
+                      {starter}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {activeChat.messages.map((msg, msgIdx) => {
             const isUser = msg.role === 'user';
-            const prevRole = msgIdx > 0 ? activeChat.messages[msgIdx - 1]?.role : null;
+            const prevRole =
+              msgIdx > 0 ? activeChat.messages[msgIdx - 1]?.role : null;
             const isRoleSwitch = prevRole !== null && prevRole !== msg.role;
 
             // Collect text content
@@ -1023,21 +1245,26 @@ const AITeamChat = () => {
                 .join('') ?? '';
 
             // Check for tool call parts
-            const toolParts = msg.parts?.filter(
-              (part) => part.type === 'tool-shareTrainingPlan',
-            ) ?? [];
-            const physioToolParts = msg.parts?.filter(
-              (part) => part.type === 'tool-sharePhysioPlan',
-            ) ?? [];
+            const toolParts =
+              msg.parts?.filter(
+                (part) => part.type === 'tool-shareTrainingPlan',
+              ) ?? [];
+            const physioToolParts =
+              msg.parts?.filter(
+                (part) => part.type === 'tool-sharePhysioPlan',
+              ) ?? [];
 
             // Skip suggestFollowUps tool parts — rendered separately as chips
-            const hasSuggestionTool = msg.parts?.some(
-              (part) => part.type === 'tool-suggestFollowUps',
-            ) ?? false;
+            const hasSuggestionTool =
+              msg.parts?.some(
+                (part) => part.type === 'tool-suggestFollowUps',
+              ) ?? false;
 
             // Collect ALL tool parts for status chips (any part whose type starts with 'tool-')
             const allToolChipParts = (msg.parts ?? [])
-              .filter((part) => part.type.startsWith('tool-') && 'state' in part)
+              .filter(
+                (part) => part.type.startsWith('tool-') && 'state' in part,
+              )
               .map((part) => {
                 const toolName = part.type.replace(/^tool-/, '');
                 const state = (part as unknown as {state: string}).state;
@@ -1049,38 +1276,59 @@ const AITeamChat = () => {
               });
 
             // Skip if no content at all (suggestFollowUps-only messages are hidden)
-            if (!textContent && toolParts.length === 0 && physioToolParts.length === 0 && !hasSuggestionTool && allToolChipParts.length === 0) return null;
+            if (
+              !textContent &&
+              toolParts.length === 0 &&
+              physioToolParts.length === 0 &&
+              !hasSuggestionTool &&
+              allToolChipParts.length === 0
+            )
+              return null;
             // If the only parts are suggestFollowUps with no text or other tools, skip the bubble
-            if (!textContent && toolParts.length === 0 && physioToolParts.length === 0 && hasSuggestionTool && allToolChipParts.length <= 1) return null;
+            if (
+              !textContent &&
+              toolParts.length === 0 &&
+              physioToolParts.length === 0 &&
+              hasSuggestionTool &&
+              allToolChipParts.length <= 1
+            )
+              return null;
 
             return (
               <div
                 key={msg.id}
-                className={`flex gap-2 min-w-0 ${isUser ? 'flex-row-reverse' : 'flex-row'} ${isRoleSwitch ? 'mt-2' : ''}`}
+                className={`flex gap-2 min-w-0 ${isUser ? 'flex-row-reverse animate-slide-in-right' : 'flex-row animate-slide-in-left'} ${isRoleSwitch ? 'mt-4' : ''}`}
               >
-                {!isUser && (
-                  <PersonaAvatar persona={currentPersona} size='md' />
-                )}
                 <div
-                  className={`p-2 md:p-3 border-2 md:border-3 border-border text-sm font-medium overflow-hidden break-words min-w-0 ${
+                  className={`text-sm font-medium overflow-hidden break-words min-w-0 ${
                     isUser
-                      ? 'bg-accent text-accent-foreground ml-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm'
-                      : `bg-foreground text-background mr-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm border-l-[5px] ${currentPersona.bubbleBorder}`
+                      ? 'p-2 md:p-3 border-3 border-border bg-accent text-accent-foreground ml-auto max-w-[90%] md:max-w-[75%] shadow-neo-sm hover:shadow-neo transition-shadow'
+                      : 'py-1 mr-auto max-w-[95%] md:max-w-[80%] text-foreground'
                   }`}
                   style={{overflowWrap: 'anywhere'}}
                 >
-                  <span className={`font-black text-xs uppercase mb-1 block ${isUser ? '' : currentPersona.labelColor}`}>
-                    {isUser ? 'You' : currentPersona.label}
-                  </span>
+                  {!isUser && (
+                    <span
+                      className={`font-black text-xs uppercase mb-1 flex items-center gap-1.5 ${currentPersona.labelColor}`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 ${currentPersona.color} border border-border shrink-0`}
+                      />
+                      {currentPersona.label}
+                    </span>
+                  )}
                   {isUser ? (
                     (() => {
-                      const {mentions: msgMentions, cleanText} = parseMentionMeta(textContent);
+                      const {mentions: msgMentions, cleanText} =
+                        parseMentionMeta(textContent);
                       return (
                         <>
                           {msgMentions.length > 0 && (
                             <div className='flex flex-wrap gap-1 mb-1.5'>
                               {msgMentions.map((mention, idx) => {
-                                const cat = getMentionCategory(mention.categoryId);
+                                const cat = getMentionCategory(
+                                  mention.categoryId,
+                                );
                                 const Icon = cat?.icon;
                                 return (
                                   <span
@@ -1100,20 +1348,12 @@ const AITeamChat = () => {
                     })()
                   ) : (
                     <>
-                      {/* Tool call status chips */}
+                      {/* Tool call status chips — collapsible when all done */}
                       {allToolChipParts.length > 0 && (
-                        <div className='flex flex-wrap gap-1 mb-1.5'>
-                          {allToolChipParts.map((chip) => (
-                            <ToolCallChip
-                              key={chip.toolName}
-                              label={chip.label}
-                              done={chip.done}
-                            />
-                          ))}
-                        </div>
+                        <ToolCallGroup chips={allToolChipParts} />
                       )}
                       {textContent && (
-                        <div className='prose-sm overflow-hidden max-w-full'>
+                        <div className='prose prose-sm dark:prose-invert overflow-hidden max-w-full prose-p:mb-2 prose-p:last:mb-0'>
                           <MarkdownContent content={textContent} />
                           {/* Blinking block cursor while streaming */}
                           {isStreaming &&
@@ -1130,9 +1370,16 @@ const AITeamChat = () => {
                           type: string;
                           state: string;
                           input?: ShareTrainingPlanInput;
-                          output?: {planId: string; title: string; sharedAt: number};
+                          output?: {
+                            planId: string;
+                            title: string;
+                            sharedAt: number;
+                          };
                         };
-                        if (toolPart.state !== 'output-available' || !toolPart.input) {
+                        if (
+                          toolPart.state !== 'output-available' ||
+                          !toolPart.input
+                        ) {
                           return null; // Chip handles in-progress state
                         }
                         const isSaved = toolPart.output
@@ -1153,13 +1400,22 @@ const AITeamChat = () => {
                           type: string;
                           state: string;
                           input?: SharePhysioPlanInput;
-                          output?: {planId: string; title: string; sharedAt: number};
+                          output?: {
+                            planId: string;
+                            title: string;
+                            sharedAt: number;
+                          };
                         };
-                        if (toolPart.state !== 'output-available' || !toolPart.input) {
+                        if (
+                          toolPart.state !== 'output-available' ||
+                          !toolPart.input
+                        ) {
                           return null; // Chip handles in-progress state
                         }
                         const isSaved = toolPart.output
-                          ? savedPhysioPlanIds.current.has(toolPart.output.planId)
+                          ? savedPhysioPlanIds.current.has(
+                              toolPart.output.planId,
+                            )
                           : false;
                         return (
                           <PhysioPlanCard
@@ -1189,6 +1445,14 @@ const AITeamChat = () => {
                 labelColor={currentPersona.labelColor}
               />
             )}
+
+          {/* Follow-up suggestion chips — inside scroll area, after last message */}
+          {followUpSuggestions.length > 0 && !isStreaming && (
+            <SuggestionChips
+              suggestions={followUpSuggestions}
+              onSelect={(text) => handleSend(text, [])}
+            />
+          )}
         </div>
 
         {/* Error display */}
@@ -1202,14 +1466,6 @@ const AITeamChat = () => {
           </div>
         )}
 
-        {/* Follow-up suggestion chips */}
-        {followUpSuggestions.length > 0 && !isStreaming && (
-          <SuggestionChips
-            suggestions={followUpSuggestions}
-            onSelect={(text) => handleSend(text, [])}
-          />
-        )}
-
         {/* Input with @-mention support */}
         <ChatInput
           onSend={handleSend}
@@ -1218,16 +1474,57 @@ const AITeamChat = () => {
         />
       </div>
 
-      {/* Desktop history sidebar (right) — always visible on md+ */}
-      <div className='hidden md:flex flex-col w-[280px] border-l-3 border-border bg-muted/30 shrink-0 overflow-hidden'>
-        {sidebarContent}
+      {/* Desktop history sidebar (right) — collapsible, default closed */}
+      <div
+        className={`hidden md:flex flex-col border-l-3 border-border bg-muted/30 shrink-0 overflow-hidden transition-all duration-200 ${desktopSidebarExpanded ? 'w-[280px]' : 'w-[52px]'}`}
+      >
+        {desktopSidebarExpanded ? (
+          renderSidebarContent({
+            onCollapse: () => setDesktopSidebarExpanded(false),
+          })
+        ) : (
+          <div className='flex flex-col h-full items-center'>
+            {/* History icon — expand sidebar */}
+            <button
+              onClick={() => setDesktopSidebarExpanded(true)}
+              aria-label='Open conversation history'
+              tabIndex={0}
+              className='w-full py-3 flex justify-center border-b-3 border-border bg-foreground text-background hover:bg-foreground/90 transition-colors'
+            >
+              <MessageSquare className='h-5 w-5' />
+            </button>
+            {/* Spacer */}
+            <div className='flex-1' />
+            {/* Persona icons */}
+            <div className='border-t-3 border-border w-full bg-background'>
+              {personas.map((p) => {
+                const isActive = activePersona === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handlePersonaSwitch(p.id)}
+                    aria-label={`Switch to ${p.label}`}
+                    tabIndex={0}
+                    className={`w-full flex justify-center py-3 transition-all ${isActive ? `${p.color} shadow-neo-sm` : 'hover:bg-muted/50'}`}
+                  >
+                    <PersonaAvatar persona={p} size='sm' />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Mobile history drawer (right) */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetContent side='right' className='p-0 w-[280px] sm:max-w-[280px]' aria-describedby={undefined}>
+        <SheetContent
+          side='right'
+          className='p-0 w-[280px] sm:max-w-[280px]'
+          aria-describedby={undefined}
+        >
           <SheetTitle className='sr-only'>Conversation History</SheetTitle>
-          {sidebarContent}
+          {renderSidebarContent()}
         </SheetContent>
       </Sheet>
 
@@ -1245,7 +1542,8 @@ const AITeamChat = () => {
             </AlertDialogTitle>
             <AlertDialogDescription className='text-sm text-muted-foreground space-y-2'>
               <span className='block'>
-                This will permanently delete this conversation and all associated data:
+                This will permanently delete this conversation and all
+                associated data:
               </span>
               <span className='block space-y-1 text-xs'>
                 <span className='flex items-center gap-1.5'>
@@ -1257,10 +1555,17 @@ const AITeamChat = () => {
                   Memory &amp; conversation summary
                 </span>
                 {deleteConfirmSessionId &&
-                  plans.some((p) => p.sourceSessionId === deleteConfirmSessionId) && (
+                  plans.some(
+                    (p) => p.sourceSessionId === deleteConfirmSessionId,
+                  ) && (
                     <span className='flex items-center gap-1.5 text-destructive font-bold'>
                       <ClipboardList className='h-3 w-3 shrink-0' />
-                      {plans.filter((p) => p.sourceSessionId === deleteConfirmSessionId).length} training plan(s) created in this conversation
+                      {
+                        plans.filter(
+                          (p) => p.sourceSessionId === deleteConfirmSessionId,
+                        ).length
+                      }{' '}
+                      training plan(s) created in this conversation
                     </span>
                   )}
               </span>

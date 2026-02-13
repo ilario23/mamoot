@@ -10,6 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { TrendingUp } from "lucide-react";
 import { formatPace, formatDuration } from "@/lib/mockData";
 import { computeSegmentProgression } from "@/lib/segments";
 import type { SegmentSummary } from "@/lib/segments";
@@ -29,9 +30,14 @@ const SegmentProgressionChart = ({
   if (data.length < 2) {
     return (
       <div className="border-3 border-border p-5 bg-background shadow-neo">
-        <h3 className="font-black text-lg mb-2 uppercase tracking-wider">
-          Progression
-        </h3>
+        <div className="flex items-center gap-2.5 mb-2">
+          <div className="flex items-center justify-center w-7 h-7 bg-primary text-primary-foreground border-3 border-border shadow-neo-sm">
+            <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" />
+          </div>
+          <h3 className="font-black text-lg uppercase tracking-wider">
+            Progression
+          </h3>
+        </div>
         <p className="text-sm font-bold text-muted-foreground">
           Need at least 2 efforts to show a progression chart.
         </p>
@@ -48,10 +54,16 @@ const SegmentProgressionChart = ({
   }));
 
   return (
-    <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo overflow-hidden">
-      <h3 className="font-black text-base md:text-lg mb-3 md:mb-4 uppercase tracking-wider">
-        Progression
-      </h3>
+    <div className="border-3 border-border bg-background shadow-neo overflow-hidden">
+      <div className="p-3 md:p-5 pb-0 md:pb-0 flex items-center gap-2.5 mb-3 md:mb-4">
+        <div className="flex items-center justify-center w-7 h-7 bg-primary text-primary-foreground border-3 border-border shadow-neo-sm">
+          <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" />
+        </div>
+        <h3 className="font-black text-base md:text-lg uppercase tracking-wider">
+          Progression
+        </h3>
+      </div>
+      <div className="px-3 md:px-5 pb-3 md:pb-5">
       <ResponsiveContainer width="100%" height={240}>
         <LineChart data={chartData} margin={{ left: -10, right: 5 }}>
           <CartesianGrid
@@ -110,6 +122,7 @@ const SegmentProgressionChart = ({
           />
         </LineChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 };

@@ -14,7 +14,7 @@ import {
 import { ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
 import { useActivities, usePerActivityZoneBreakdowns } from "@/hooks/useStrava";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
-import { Loader2 } from "lucide-react";
+import { NeoLoader } from "@/components/ui/neo-loader";
 
 const WEEKS_WINDOW = 4;
 
@@ -75,24 +75,19 @@ const VolumeChart = () => {
   if (isLoading) {
     const showProgress = progress.total > 0;
     return (
-      <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[220px] md:min-h-[300px] gap-3">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        {showProgress ? (
-          <div className="text-center">
-            <p className="text-sm font-bold text-muted-foreground">
-              Analyzing activities: {progress.done} / {progress.total}
-            </p>
-            <div className="w-48 h-1.5 bg-muted mt-2 overflow-hidden rounded-full">
-              <div
-                className="h-full bg-primary transition-all duration-300 rounded-full"
-                style={{ width: `${(progress.done / progress.total) * 100}%` }}
-              />
-            </div>
+      <div className="border-3 border-border p-3 md:p-5 bg-background shadow-neo flex flex-col items-center justify-center min-h-[220px] md:min-h-[300px] gap-4">
+        <NeoLoader
+          label={showProgress ? `Analyzing ${progress.done}/${progress.total}` : 'Loading volume'}
+          size="sm"
+          colorClass="bg-secondary"
+        />
+        {showProgress && (
+          <div className="w-48 h-2 border-2 border-border bg-muted overflow-hidden">
+            <div
+              className="h-full bg-secondary transition-all duration-300"
+              style={{ width: `${(progress.done / progress.total) * 100}%` }}
+            />
           </div>
-        ) : (
-          <p className="text-sm font-bold text-muted-foreground">
-            Loading volume data…
-          </p>
         )}
       </div>
     );

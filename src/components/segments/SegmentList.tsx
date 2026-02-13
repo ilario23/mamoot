@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, ChevronRight, Mountain, Star } from "lucide-react";
+import { Search, ChevronRight, Mountain, Star, MapPin } from "lucide-react";
 import { formatDuration } from "@/lib/mockData";
 import { filterSegmentsByQuery } from "@/lib/segments";
 import type { SegmentSummary } from "@/lib/segments";
@@ -28,10 +28,15 @@ const SegmentList = ({
   return (
     <div className="border-3 border-border bg-background shadow-neo overflow-hidden w-full">
       {/* Header + search */}
-      <div className="p-3 md:p-4 border-b-3 border-border space-y-3">
-        <h3 className="font-black text-lg uppercase tracking-wider">
-          All Segments
-        </h3>
+      <div className="p-3 md:p-4 border-b-3 border-border bg-neo-stripe space-y-3">
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-center w-7 h-7 bg-page text-page-foreground border-3 border-border shadow-neo-sm">
+            <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+          </div>
+          <h3 className="font-black text-lg uppercase tracking-wider">
+            All Segments
+          </h3>
+        </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
@@ -66,10 +71,10 @@ const SegmentList = ({
                 key={segment.segmentId}
                 onClick={() => onSelect(segment.segmentId)}
                 aria-label={`Select segment ${segment.name}`}
-                className={`w-full text-left p-3 md:p-4 border-b-3 border-border last:border-b-0 transition-colors ${
+                className={`w-full text-left p-3 md:p-4 border-b-3 border-border last:border-b-0 transition-all ${
                   isSelected
-                    ? "bg-primary/10"
-                    : "bg-background hover:bg-muted"
+                    ? "bg-page/8 border-l-[5px] border-l-page"
+                    : "bg-background hover:bg-muted/60 hover:border-l-[5px] hover:border-l-page/40"
                 }`}
               >
                 <div className="grid grid-cols-[1fr_auto] gap-2 md:gap-3 items-center">
@@ -77,7 +82,7 @@ const SegmentList = ({
                     <div className="flex items-center gap-1.5">
                       {segment.starred && (
                         <Star
-                          className="h-3 w-3 text-yellow-500 fill-yellow-500 shrink-0"
+                          className="h-3 w-3 text-accent fill-accent shrink-0"
                           aria-hidden="true"
                         />
                       )}
@@ -103,7 +108,7 @@ const SegmentList = ({
                   </div>
                   <div className="flex items-center gap-1.5 md:gap-2">
                     <div className="text-right">
-                      <p className="font-black text-sm whitespace-nowrap">
+                      <p className={`font-black text-sm whitespace-nowrap ${isSelected ? 'text-page' : ''}`}>
                         {formatDuration(segment.bestEffort.elapsed_time)}
                       </p>
                       <p className="text-[10px] font-bold text-muted-foreground uppercase">
@@ -112,7 +117,7 @@ const SegmentList = ({
                     </div>
                     <ChevronRight
                       className={`h-4 w-4 shrink-0 transition-colors hidden sm:block ${
-                        isSelected ? "text-primary" : "text-muted-foreground"
+                        isSelected ? "text-page" : "text-muted-foreground"
                       }`}
                       aria-hidden="true"
                     />

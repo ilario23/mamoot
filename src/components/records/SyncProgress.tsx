@@ -1,7 +1,7 @@
 "use client";
 
 import type { SyncState } from "@/hooks/useSyncActivityDetails";
-import { Loader2, Clock } from "lucide-react";
+import { Clock } from "lucide-react";
 
 interface SyncProgressProps {
   state: SyncState;
@@ -35,7 +35,11 @@ const SyncProgress = ({ state }: SyncProgressProps) => {
           {isRateLimited ? (
             <Clock className="h-4 w-4 text-accent" aria-hidden="true" />
           ) : (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            <span className="flex items-end gap-px" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="w-1 h-3 bg-primary animate-neo-blocks" style={{ animationDelay: `${i * 0.2}s` }} />
+              ))}
+            </span>
           )}
           <span className="text-sm font-black uppercase tracking-wider">
             {isRateLimited ? "Rate Limit Reached" : "Syncing Activities"}

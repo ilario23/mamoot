@@ -16,7 +16,7 @@ import {formatPace} from '@/lib/mockData';
 import {useActivities} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useIsMobile} from '@/hooks/use-mobile';
-import {Loader2} from 'lucide-react';
+import {NeoLoader} from '@/components/ui/neo-loader';
 
 const PERIOD_OPTIONS = [
   {label: '3 months', value: 90},
@@ -139,7 +139,7 @@ const PaceProgressionChart = ({embedded = false}: {embedded?: boolean}) => {
   if (isLoading) {
     return (
       <div className={`${embedded ? '' : 'border-3 border-border p-5 bg-background shadow-neo'} flex items-center justify-center min-h-[220px] md:min-h-[300px]`}>
-        <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
+        <NeoLoader label='Loading pace data' size='sm' colorClass='bg-primary' />
       </div>
     );
   }

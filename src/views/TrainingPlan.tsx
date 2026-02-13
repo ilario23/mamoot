@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {NeoLoader} from '@/components/ui/neo-loader';
 import {useCoachPlan} from '@/hooks/useCoachPlan';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {SESSION_TYPE_COLORS, SESSION_TYPE_BORDER_COLORS} from '@/lib/planConstants';
@@ -221,10 +222,7 @@ const TrainingPlan = () => {
           Training Plan
         </h1>
         <div className='border-3 border-border bg-background shadow-neo p-8 flex items-center justify-center'>
-          <div className='flex items-center gap-2 text-muted-foreground font-bold text-sm'>
-            <div className='w-4 h-4 border-3 border-muted-foreground border-t-primary animate-spin' />
-            Loading plan...
-          </div>
+          <NeoLoader label='Loading plan' size='sm' />
         </div>
       </div>
     );

@@ -119,6 +119,7 @@ export default {
         neo: "4px 4px 0px 0px hsl(var(--neo-shadow))",
         "neo-sm": "2px 2px 0px 0px hsl(var(--neo-shadow))",
         "neo-lg": "6px 6px 0px 0px hsl(var(--neo-shadow))",
+        "neo-inset": "inset 2px 2px 0px 0px hsl(var(--neo-shadow) / 0.08)",
       },
       keyframes: {
         "accordion-down": {
@@ -145,6 +146,27 @@ export default {
           "0%": { opacity: "0", transform: "translateY(6px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        "slide-in-left": {
+          "0%": { opacity: "0", transform: "translateX(-12px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        "slide-in-right": {
+          "0%": { opacity: "0", transform: "translateX(12px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        "bounce-in": {
+          "0%": { opacity: "0", transform: "scale(0.6)" },
+          "50%": { transform: "scale(1.08)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
+        },
+        "neo-shimmer": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "neo-blocks": {
+          "0%, 100%": { transform: "scaleY(0.4)", opacity: "0.4" },
+          "50%": { transform: "scaleY(1)", opacity: "1" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -152,9 +174,17 @@ export default {
         "neo-pulse": "neo-pulse-border 2s ease-in-out infinite",
         "neo-progress": "neo-indeterminate 1.5s ease-in-out infinite",
         "neo-blink": "neo-blink 1s step-end infinite",
+        "neo-shimmer": "neo-shimmer 1.8s ease-in-out infinite",
+        "neo-blocks": "neo-blocks 0.8s ease-in-out infinite",
         "fade-in-up": "fade-in-up 0.3s ease-out both",
+        "slide-in-left": "slide-in-left 0.25s ease-out both",
+        "slide-in-right": "slide-in-right 0.25s ease-out both",
+        "bounce-in": "bounce-in 0.4s ease-out both",
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    require("@tailwindcss/typography"),
+  ],
 } satisfies Config;

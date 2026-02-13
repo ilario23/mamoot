@@ -12,7 +12,7 @@ import ActivityCalendar from "@/components/calendar/ActivityCalendar";
 import ActivitySummaryCards from "@/components/calendar/ActivitySummaryCards";
 import { useActivities } from "@/hooks/useStrava";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
-import { Loader2 } from "lucide-react";
+import { NeoLoader } from "@/components/ui/neo-loader";
 
 const Calendar = () => {
   const { isAuthenticated } = useStravaAuth();
@@ -68,7 +68,7 @@ const Calendar = () => {
           Activity Calendar
         </h1>
         <div className="flex items-center justify-center min-h-[300px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <NeoLoader label="Loading calendar" />
         </div>
       </div>
     );

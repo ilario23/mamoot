@@ -26,11 +26,11 @@ const AIChat = () => {
   };
 
   return (
-    <div className='flex flex-col h-full w-full overflow-hidden -mx-4 px-0 md:mx-0'>
+    <div className='flex flex-col h-full w-[100vw] md:w-full overflow-hidden -ml-3 md:ml-0'>
       {/* Top bar: Title (desktop) + Collapsible info */}
-      <div className='flex items-start gap-3 mb-0 md:mb-3 px-4 md:px-0'>
+      <div className='flex items-start gap-3 mb-0 md:mb-3 px-3 md:px-0'>
         {/* Page title — hidden on mobile */}
-        <h1 className='hidden md:block text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3 shrink-0 leading-none py-1'>
+        <h1 className='hidden md:block text-4xl md:text-5xl font-black uppercase tracking-tight border-l-[7px] border-page pl-3 shrink-0 leading-none py-1'>
           AI Team
         </h1>
 
@@ -41,7 +41,7 @@ const AIChat = () => {
             aria-label='Toggle athlete profile info'
             aria-expanded={infoExpanded}
             tabIndex={0}
-            className='w-full flex items-center gap-2 px-3 py-2 border-3 border-border bg-background hover:bg-muted transition-colors text-left shadow-neo-sm'
+            className='w-full flex items-center gap-2 px-3 py-2 border-3 border-border bg-background text-left shadow-neo-sm transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-x-1 active:translate-y-1'
           >
             <div className='w-6 h-6 bg-primary rounded-full border-2 border-border flex items-center justify-center shrink-0'>
               <Target className='h-3 w-3 text-primary-foreground' />
@@ -76,9 +76,9 @@ const AIChat = () => {
 
           {/* Expanded info panel */}
           {infoExpanded && (
-            <div className='border-3 border-t-0 border-border bg-background p-3 space-y-3 shadow-neo-sm'>
+            <div className='border-3 border-t-0 border-border bg-background p-3 space-y-3 shadow-neo'>
               {/* Goal */}
-              <div>
+              <div className='border-l-[3px] border-primary pl-2'>
                 <span className='font-black text-[10px] uppercase tracking-wider text-muted-foreground block mb-0.5'>
                   Training Goal
                 </span>
@@ -92,7 +92,7 @@ const AIChat = () => {
               </div>
 
               {/* Allergies */}
-              <div>
+              <div className='border-l-[3px] border-destructive pl-2'>
                 <span className='font-black text-[10px] uppercase tracking-wider text-muted-foreground block mb-1'>
                   Allergies
                 </span>
@@ -101,7 +101,7 @@ const AIChat = () => {
                     {allergies.map((allergy) => (
                       <span
                         key={allergy}
-                        className='px-2 py-0.5 bg-destructive/10 text-destructive text-xs font-bold border border-destructive/20 rounded'
+                        className='px-2 py-0.5 bg-destructive/10 text-destructive text-xs font-bold border-2 border-destructive/30'
                       >
                         {allergy}
                       </span>
@@ -113,7 +113,7 @@ const AIChat = () => {
               </div>
 
               {/* Injuries */}
-              <div>
+              <div className='border-l-[3px] border-secondary pl-2'>
                 <span className='font-black text-[10px] uppercase tracking-wider text-muted-foreground block mb-1'>
                   Injuries
                 </span>

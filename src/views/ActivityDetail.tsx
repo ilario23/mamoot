@@ -2,7 +2,8 @@
 
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { NeoLoader } from "@/components/ui/neo-loader";
 import {
   formatPace,
   formatDuration,
@@ -20,7 +21,7 @@ const ActivityMap = dynamic(
     ssr: false,
     loading: () => (
       <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[250px] md:min-h-[400px]">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <NeoLoader label="Loading map" size="sm" colorClass="bg-secondary" />
       </div>
     ),
   }
@@ -57,7 +58,7 @@ const ActivityDetail = () => {
   if (activitiesLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <NeoLoader label="Loading activity" />
       </div>
     );
   }
@@ -163,7 +164,7 @@ const ActivityDetail = () => {
       {/* Charts */}
       {streamLoading ? (
         <div className="border-3 border-border p-8 bg-background shadow-neo flex items-center justify-center min-h-[200px]">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <NeoLoader label="Loading charts" size="sm" colorClass="bg-accent" />
         </div>
       ) : stream && stream.length > 0 ? (
         <ActivityCharts stream={stream} />

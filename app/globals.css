@@ -266,4 +266,41 @@
   .pb-bottom-nav {
     padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
   }
+
+  /* Neo-brutalist dot-grid background pattern */
+  .bg-neo-grid {
+    background-image: radial-gradient(
+      circle,
+      hsl(var(--border) / 0.10) 1px,
+      transparent 1px
+    );
+    background-size: 20px 20px;
+  }
+  .dark .bg-neo-grid {
+    background-image: radial-gradient(
+      circle,
+      hsl(var(--border) / 0.25) 1px,
+      transparent 1px
+    );
+  }
+
+  /* Neo-brutalist diagonal stripe pattern for headers */
+  .bg-neo-stripe {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 6px,
+      hsl(var(--foreground) / 0.06) 6px,
+      hsl(var(--foreground) / 0.06) 7px
+    );
+  }
+  .dark .bg-neo-stripe {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 6px,
+      hsl(var(--foreground) / 0.04) 6px,
+      hsl(var(--foreground) / 0.04) 7px
+    );
+  }
 }

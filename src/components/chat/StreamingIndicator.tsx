@@ -35,29 +35,23 @@ const StreamingIndicator = ({
   }, []);
 
   return (
-    <div className='flex gap-2 flex-row min-w-0'>
-      {/* Avatar (mirrors PersonaAvatar md size) */}
-      <div
-        className={`w-9 h-9 ${color} rounded-full border-3 border-border flex items-center justify-center shadow-neo-sm shrink-0`}
-      >
-        <Icon className='h-4 w-4 text-foreground' />
-      </div>
-
-      {/* Thinking bubble */}
-      <div className={`p-2 md:p-3 border-2 md:border-3 border-border text-sm font-medium bg-foreground text-background mr-auto max-w-[85%] md:max-w-[75%] shadow-neo-sm animate-neo-pulse min-w-0 ${bubbleBorder ? `border-l-[5px] ${bubbleBorder}` : ''}`}>
-        <span className={`font-black text-xs uppercase mb-1 block ${labelColor}`}>
+    <div className='flex gap-2 flex-row min-w-0 animate-slide-in-left'>
+      {/* Thinking bubble — transparent, no icon */}
+      <div className='py-1 text-sm font-medium text-foreground mr-auto max-w-[90%] md:max-w-[80%] min-w-0'>
+        <span className={`font-black text-xs uppercase mb-1 flex items-center gap-1.5 ${labelColor}`}>
+          <span className={`w-1.5 h-1.5 ${color} border border-border shrink-0`} />
           {label}
         </span>
         <div className='flex items-center gap-1.5'>
           {/* Block cursor */}
           <span className='inline-block w-2 h-4 bg-primary animate-neo-blink' />
-          <span className='text-background/60 text-xs font-bold tracking-wide'>
+          <span className='text-muted-foreground text-sm font-bold tracking-wider'>
             {thinkingSteps[stepIdx]}
           </span>
         </div>
 
         {/* Indeterminate progress bar */}
-        <div className='mt-2 h-0.5 bg-background/20 overflow-hidden border-t border-background/10'>
+        <div className='mt-2 h-1 bg-muted overflow-hidden border-t border-border/30'>
           <div className='h-full w-1/3 bg-primary animate-neo-progress' />
         </div>
       </div>

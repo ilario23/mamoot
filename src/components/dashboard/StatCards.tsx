@@ -5,7 +5,8 @@ import {useActivities, useAthleteStats} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {calcStreak} from '@/utils/trainingLoad';
-import {Loader2, ChevronDown} from 'lucide-react';
+import {ChevronDown} from 'lucide-react';
+import {NeoSkeleton} from '@/components/ui/skeleton';
 import {useMemo, useState} from 'react';
 import {useIsMobile} from '@/hooks/use-mobile';
 
@@ -133,26 +134,27 @@ const StatCards = () => {
   }
 
   if (isLoading) {
+    const SKELETON_COLORS = ['bg-primary', 'bg-secondary', 'bg-accent', 'bg-nav-activities', 'bg-nav-segments', 'bg-nav-ai'];
     return (
       <div className='space-y-4'>
         <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[1, 2, 3].map((i) => (
-            <div
+          {[0, 1, 2].map((i) => (
+            <NeoSkeleton
               key={i}
-              className='border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]'
-            >
-              <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
-            </div>
+              className='min-h-[120px] animate-fade-in-up'
+              shimmerColor={SKELETON_COLORS[i]}
+              style={{ animationDelay: `${i * 80}ms` }}
+            />
           ))}
         </div>
         <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[4, 5, 6].map((i) => (
-            <div
+          {[3, 4, 5].map((i) => (
+            <NeoSkeleton
               key={i}
-              className='border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[120px]'
-            >
-              <Loader2 className='h-6 w-6 animate-spin text-muted-foreground' />
-            </div>
+              className='min-h-[120px] animate-fade-in-up'
+              shimmerColor={SKELETON_COLORS[i]}
+              style={{ animationDelay: `${i * 80}ms` }}
+            />
           ))}
         </div>
       </div>

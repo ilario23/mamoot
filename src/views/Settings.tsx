@@ -12,6 +12,7 @@ import {
   ZONE_NAMES,
   MODEL_OPTIONS,
   DEFAULT_MODEL,
+  type ModelOption,
   type Injury,
 } from '@/lib/mockData';
 import {useQueryClient} from '@tanstack/react-query';
@@ -22,7 +23,6 @@ import {
   Moon,
   Link2,
   Link2Off,
-  Loader2,
   RefreshCw,
   X,
   Plus,
@@ -30,6 +30,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import TrainingGauge from '@/components/ui/TrainingGauge';
+import {NeoLoader} from '@/components/ui/neo-loader';
 
 const COMMON_ALLERGIES = [
   'Gluten',
@@ -62,6 +63,23 @@ const Settings = () => {
   const [allergyInput, setAllergyInput] = useState('');
   const forceRefreshActivities = useForceRefreshActivities();
   const queryClient = useQueryClient();
+  const [availableProviders, setAvailableProviders] = useState<string[]>([
+    'OpenAI',
+  ]);
+
+  // Fetch which AI providers have API keys configured
+  useEffect(() => {
+    fetch('/api/ai/providers')
+      .then((res) => res.json())
+      .then((data: {providers: string[]}) =>
+        setAvailableProviders(data.providers),
+      )
+      .catch(() => setAvailableProviders(['OpenAI']));
+  }, []);
+
+  const filteredModelOptions: ModelOption[] = MODEL_OPTIONS.filter((m) =>
+    availableProviders.includes(m.provider),
+  );
 
   // Sync formState when settings are loaded from Neon (source of truth)
   useEffect(() => {
@@ -323,7 +341,7 @@ const Settings = () => {
               aria-label='Select AI model'
               className='w-full appearance-none px-4 py-3 pr-10 border-3 border-border bg-background font-bold text-sm focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer'
             >
-              {MODEL_OPTIONS.map((m) => (
+              {filteredModelOptions.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label} — {m.provider} ({m.tier})
                 </option>
@@ -343,9 +361,8 @@ const Settings = () => {
           Strava Account
         </h3>
         {authLoading || isExchangingCode ? (
-          <div className='flex items-center gap-3 py-4'>
-            <Loader2 className='h-5 w-5 animate-spin' />
-            <p className='font-bold text-sm'>Connecting to Strava...</p>
+          <div className='flex items-center justify-center py-6'>
+            <NeoLoader label='Connecting to Strava' size='sm' colorClass='bg-primary' />
           </div>
         ) : isAuthenticated && athlete ? (
           <div className='flex items-center justify-between flex-wrap gap-4'>
@@ -792,7 +809,11 @@ const Settings = () => {
       >
         {isSaving ? (
           <span className='flex items-center justify-center gap-2'>
-            <Loader2 className='h-5 w-5 animate-spin' />
+            <span className='flex items-end gap-0.5'>
+              {[0, 1, 2].map((i) => (
+                <span key={i} className='w-1 h-4 bg-primary-foreground animate-neo-blocks' style={{ animationDelay: `${i * 0.2}s` }} />
+              ))}
+            </span>
             Saving…
           </span>
         ) : (

@@ -10,7 +10,7 @@ import ActivityFilters, {
 } from '@/components/activities/ActivityFilters';
 import ActivityStats from '@/components/activities/ActivityStats';
 import ActivityList from '@/components/activities/ActivityList';
-import {Loader2} from 'lucide-react';
+import {NeoLoader} from '@/components/ui/neo-loader';
 
 const Activities = () => {
   const {isAuthenticated} = useStravaAuth();
@@ -117,7 +117,7 @@ const Activities = () => {
           Activities
         </h1>
         <div className='flex items-center justify-center min-h-[300px]'>
-          <Loader2 className='h-8 w-8 animate-spin text-muted-foreground' />
+          <NeoLoader label='Loading activities' />
         </div>
       </div>
     );

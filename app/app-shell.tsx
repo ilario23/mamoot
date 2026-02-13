@@ -9,7 +9,8 @@ import {SidebarProvider} from '@/contexts/SidebarContext';
 import {useCoachPlan} from '@/hooks/useCoachPlan';
 import usePageTheme from '@/hooks/usePageTheme';
 import useServiceWorker from '@/hooks/useServiceWorker';
-import {Loader2, ClipboardList} from 'lucide-react';
+import {ClipboardList} from 'lucide-react';
+import {NeoLoader} from '@/components/ui/neo-loader';
 import Link from 'next/link';
 import type {ReactNode} from 'react';
 
@@ -26,8 +27,14 @@ const AppShell = ({children}: {children: ReactNode}) => {
 
   if (isLoading) {
     return (
-      <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe' suppressHydrationWarning>
-        <Loader2 className='h-8 w-8 animate-spin text-primary' />
+      <div className='min-h-screen flex flex-col items-center justify-center bg-background bg-neo-grid pt-safe pb-safe' suppressHydrationWarning>
+        {/* Branded logo */}
+        <div className='animate-bounce-in mb-6'>
+          <div className='w-16 h-16 bg-primary border-[4px] border-border shadow-neo-lg flex items-center justify-center'>
+            <span className='font-black text-2xl text-primary-foreground leading-none select-none'>M</span>
+          </div>
+        </div>
+        <NeoLoader label='Loading' size='md' colorClass='bg-primary' />
       </div>
     );
   }
@@ -77,7 +84,7 @@ const AppShell = ({children}: {children: ReactNode}) => {
             </div>
           </header>
 
-          <main className='flex-1 px-3 py-4 md:p-6 overflow-y-auto overflow-x-hidden border-t-[4px] border-page overscroll-y-contain'>{children}</main>
+          <main className='flex-1 px-3 py-1 md:p-6 overflow-y-auto overflow-x-hidden border-t-[4px] border-page overscroll-y-contain'>{children}</main>
         </div>
 
         {/* Mobile Bottom Nav */}

@@ -41,89 +41,93 @@ const StarredSegmentCard = ({ segment, onSelect }: StarredSegmentCardProps) => {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       aria-label={`View segment ${segment.name}`}
-      className="border-3 border-border bg-background p-3 md:p-5 shadow-neo hover:shadow-neo-lg transition-shadow cursor-pointer overflow-hidden"
+      className="border-3 border-border border-l-[6px] border-l-page bg-background shadow-neo hover:shadow-neo-lg hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all active:shadow-neo-sm active:translate-x-[1px] active:translate-y-[1px] cursor-pointer overflow-hidden"
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <div className="min-w-0">
-          <p className="font-black text-sm uppercase tracking-wider truncate">
-            {segment.name}
-          </p>
-          {segment.city && (
-            <p className="text-xs font-bold text-muted-foreground mt-0.5 truncate">
-              {segment.city}
-              {segment.state ? `, ${segment.state}` : ""}
+      {/* Header — tinted accent strip */}
+      <div className="bg-page/5 border-b-3 border-border px-3 md:px-5 py-2.5 md:py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="font-black text-sm uppercase tracking-wider truncate">
+              {segment.name}
             </p>
-          )}
-        </div>
-        <Star
-          className="h-4 w-4 text-yellow-500 fill-yellow-500 shrink-0"
-          aria-hidden="true"
-        />
-      </div>
-
-      {/* Best time — hero value */}
-      <p className="text-2xl md:text-3xl font-black leading-tight">
-        {formatDuration(segment.bestEffort.elapsed_time)}
-      </p>
-
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 gap-x-3 md:gap-x-4 gap-y-1.5 md:gap-y-2 mt-3 md:mt-4">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Ruler
-            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
+            {segment.city && (
+              <p className="text-xs font-bold text-muted-foreground mt-0.5 truncate">
+                {segment.city}
+                {segment.state ? `, ${segment.state}` : ""}
+              </p>
+            )}
+          </div>
+          <Star
+            className="h-4 w-4 text-accent fill-accent shrink-0"
             aria-hidden="true"
           />
-          <span className="text-xs md:text-sm font-bold truncate">
-            {distKm >= 1 ? `${distKm.toFixed(2)} km` : `${Math.round(segment.distance)}m`}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Mountain
-            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
-            aria-hidden="true"
-          />
-          <span className="text-xs md:text-sm font-bold">
-            {segment.averageGrade.toFixed(1)}%
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Clock
-            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
-            aria-hidden="true"
-          />
-          <span className="text-xs md:text-sm font-bold truncate">
-            {bestPace > 0 ? `${formatPace(bestPace)}/km` : "—"}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Hash
-            className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
-            aria-hidden="true"
-          />
-          <span className="text-xs md:text-sm font-bold truncate">
-            {segment.effortCount} effort{segment.effortCount !== 1 ? "s" : ""}
-          </span>
         </div>
       </div>
 
-      {/* Trend indicator */}
-      <div className="flex items-center gap-1.5 mt-3">
-        <TrendingUp
-          className={`h-3.5 w-3.5 shrink-0 ${
-            isLastBest
-              ? "text-green-600"
-              : trendPct < 5
-                ? "text-yellow-600"
-                : "text-red-500"
-          }`}
-          aria-hidden="true"
-        />
-        <span className="text-xs font-bold text-muted-foreground">
-          {isLastBest
-            ? "Last effort is your PR"
-            : `Last: ${formatDuration(lastTime)} (+${trendPct.toFixed(1)}%)`}
-        </span>
+      <div className="p-3 md:p-5">
+        {/* Best time — hero value */}
+        <p className="text-2xl md:text-3xl font-black leading-tight">
+          {formatDuration(segment.bestEffort.elapsed_time)}
+        </p>
+        <span className="text-[10px] font-black uppercase tracking-widest text-primary">Best Time</span>
+
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 gap-x-3 md:gap-x-4 gap-y-1.5 md:gap-y-2 mt-3 md:mt-4">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Ruler
+              className="h-3 w-3 md:h-3.5 md:w-3.5 text-secondary shrink-0"
+              aria-hidden="true"
+            />
+            <span className="text-xs md:text-sm font-bold truncate">
+              {distKm >= 1 ? `${distKm.toFixed(2)} km` : `${Math.round(segment.distance)}m`}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Mountain
+              className="h-3 w-3 md:h-3.5 md:w-3.5 text-accent-foreground shrink-0"
+              aria-hidden="true"
+            />
+            <span className="text-xs md:text-sm font-bold">
+              {segment.averageGrade.toFixed(1)}%
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Clock
+              className="h-3 w-3 md:h-3.5 md:w-3.5 text-primary shrink-0"
+              aria-hidden="true"
+            />
+            <span className="text-xs md:text-sm font-bold truncate">
+              {bestPace > 0 ? `${formatPace(bestPace)}/km` : "—"}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Hash
+              className="h-3 w-3 md:h-3.5 md:w-3.5 text-muted-foreground shrink-0"
+              aria-hidden="true"
+            />
+            <span className="text-xs md:text-sm font-bold truncate">
+              {segment.effortCount} effort{segment.effortCount !== 1 ? "s" : ""}
+            </span>
+          </div>
+        </div>
+
+        {/* Trend indicator — pill badge */}
+        <div className="mt-3">
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border ${
+              isLastBest
+                ? "bg-zone-1/15 text-zone-1"
+                : trendPct < 5
+                  ? "bg-accent/15 text-accent-foreground"
+                  : "bg-destructive/15 text-destructive"
+            }`}
+          >
+            <TrendingUp className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+            {isLastBest
+              ? "PR!"
+              : `+${trendPct.toFixed(1)}%`}
+          </span>
+        </div>
       </div>
     </div>
   );

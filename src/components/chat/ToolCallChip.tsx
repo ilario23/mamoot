@@ -11,18 +11,18 @@ interface ToolCallChipProps {
 
 const ToolCallChip = ({label, done}: ToolCallChipProps) => (
   <div
-    className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold tracking-wide border-2 transition-all duration-300 ${
+    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold tracking-wide border-2 transition-all duration-300 ${
       done
-        ? 'border-primary/30 bg-primary/10 text-primary/60'
-        : 'border-primary/50 bg-primary/20 text-primary animate-neo-pulse'
+        ? 'border-border bg-muted text-foreground shadow-neo-sm'
+        : 'border-border border-l-[3px] border-l-primary bg-primary/15 text-foreground animate-neo-pulse'
     }`}
     role='status'
     aria-label={done ? `${label} — done` : `${label} — in progress`}
   >
     {done ? (
-      <Check className='h-2.5 w-2.5 shrink-0' />
+      <Check className='h-3 w-3 shrink-0' />
     ) : (
-      <Loader2 className='h-2.5 w-2.5 shrink-0 animate-spin' />
+      <Loader2 className='h-3 w-3 shrink-0 animate-spin' />
     )}
     <span>{label}</span>
   </div>

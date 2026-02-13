@@ -4,7 +4,8 @@ import {Suspense, useEffect, useRef} from 'react';
 import {useSearchParams, useRouter} from 'next/navigation';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {toast} from '@/hooks/use-toast';
-import {Loader2, Activity, BarChart3, Brain, Trophy} from 'lucide-react';
+import {Activity, BarChart3, Brain, Trophy} from 'lucide-react';
+import {NeoLoader} from '@/components/ui/neo-loader';
 
 const features = [
   {icon: Activity, label: 'Activity Tracking'},
@@ -64,13 +65,13 @@ const LoginWallContent = () => {
 
   if (isLoading) {
     return (
-      <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe'>
-        <div className='flex flex-col items-center gap-4'>
-          <Loader2 className='h-8 w-8 animate-spin text-primary' />
-          <p className='font-bold text-sm text-muted-foreground'>
-            Connecting to Strava...
-          </p>
+      <div className='min-h-screen flex flex-col items-center justify-center bg-background bg-neo-grid pt-safe pb-safe'>
+        <div className='animate-bounce-in mb-6'>
+          <div className='w-16 h-16 bg-primary border-[4px] border-border shadow-neo-lg flex items-center justify-center'>
+            <span className='font-black text-2xl text-primary-foreground leading-none select-none'>M</span>
+          </div>
         </div>
+        <NeoLoader label='Connecting to Strava' size='md' colorClass='bg-primary' />
       </div>
     );
   }
@@ -141,8 +142,13 @@ const LoginWall = () => {
   return (
     <Suspense
       fallback={
-        <div className='min-h-screen flex items-center justify-center bg-background pt-safe pb-safe'>
-          <Loader2 className='h-8 w-8 animate-spin text-primary' />
+        <div className='min-h-screen flex flex-col items-center justify-center bg-background bg-neo-grid pt-safe pb-safe'>
+          <div className='animate-bounce-in mb-6'>
+            <div className='w-16 h-16 bg-primary border-[4px] border-border shadow-neo-lg flex items-center justify-center'>
+              <span className='font-black text-2xl text-primary-foreground leading-none select-none'>M</span>
+            </div>
+          </div>
+          <NeoLoader label='Loading' size='md' colorClass='bg-primary' />
         </div>
       }
     >

@@ -18,7 +18,7 @@ import ActivityTypeFilter from "@/components/records/ActivityTypeFilter";
 import PaceProgressionChart from "@/components/records/PaceProgressionChart";
 import SyncProgress from "@/components/records/SyncProgress";
 import CollapsibleSection from "@/components/ui/collapsible-section";
-import { Loader2 } from "lucide-react";
+import { NeoLoader } from "@/components/ui/neo-loader";
 
 const Records = () => {
   const { isAuthenticated } = useStravaAuth();
@@ -94,7 +94,7 @@ const Records = () => {
           Records
         </h1>
         <div className="border-3 border-border p-8 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <NeoLoader label="Loading records" />
         </div>
       </div>
     );

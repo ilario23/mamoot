@@ -3,7 +3,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { ArrowLeft, Star, Ruler, Mountain, Hash, TrendingUp, MapPin } from "lucide-react";
+import { NeoLoader } from "@/components/ui/neo-loader";
 import { formatDuration } from "@/lib/mockData";
 import { useActivities, useStarredSegments, useSegmentDetail } from "@/hooks/useStrava";
 
@@ -13,7 +14,7 @@ const ActivityMap = dynamic(
     ssr: false,
     loading: () => (
       <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[300px] md:min-h-[400px]">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <NeoLoader label="Loading map" size="sm" colorClass="bg-secondary" />
       </div>
     ),
   },
@@ -119,7 +120,7 @@ const Segments = () => {
           Segments
         </h1>
         <div className="border-3 border-border p-8 bg-background shadow-neo flex items-center justify-center min-h-[300px]">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <NeoLoader label="Loading segments" />
         </div>
       </div>
     );
@@ -132,9 +133,12 @@ const Segments = () => {
         <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
           Segments
         </h1>
-        <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
+        <div className="border-3 border-border p-8 bg-background shadow-neo text-center space-y-3">
+          <div className="w-12 h-12 mx-auto bg-page/10 border-3 border-border shadow-neo-sm flex items-center justify-center">
+            <MapPin className="h-6 w-6 text-page" />
+          </div>
           <p className="font-black text-lg">No activities found</p>
-          <p className="text-sm font-bold text-muted-foreground mt-2">
+          <p className="text-sm font-bold text-muted-foreground">
             Record some activities on Strava to see your segments here
           </p>
         </div>
@@ -160,9 +164,14 @@ const Segments = () => {
       {/* Starred Segments Section */}
       {starredSegmentSummaries.length > 0 && !selectedSegment && (
         <div className="space-y-3">
-          <h2 className="font-black text-xl uppercase tracking-wider">
-            Starred Segments
-          </h2>
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-8 h-8 bg-accent text-accent-foreground border-3 border-border shadow-neo-sm">
+              <Star className="h-4 w-4 fill-current" aria-hidden="true" />
+            </div>
+            <h2 className="font-black text-xl uppercase tracking-wider">
+              Starred Segments
+            </h2>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {starredSegmentSummaries.map((seg) => (
               <StarredSegmentCard
@@ -181,60 +190,64 @@ const Segments = () => {
           {/* Back to list */}
           <button
             onClick={handleClearSelection}
-            className="flex items-center gap-2 font-black text-sm hover:text-primary transition-colors"
+            className="inline-flex items-center gap-2 px-3 py-1.5 font-black text-xs uppercase tracking-wider border-3 border-border bg-background shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
             aria-label="Back to segment list"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Back to all segments
+            <ArrowLeft className="h-3.5 w-3.5" />
+            All segments
           </button>
 
-          {/* Segment header */}
-          <div className="min-w-0">
+          {/* Segment header card */}
+          <div className="border-3 border-border bg-background shadow-neo border-l-[6px] border-l-page p-4 md:p-5 min-w-0">
             <h2 className="text-xl md:text-3xl font-black uppercase tracking-tight break-words">
               {selectedSegment.name}
             </h2>
-            <div className="flex flex-wrap items-center gap-2 md:gap-4 mt-1 md:mt-2">
-              {selectedSegment.city && (
-                <span className="text-xs md:text-sm font-bold text-muted-foreground">
-                  {selectedSegment.city}
-                  {selectedSegment.state
-                    ? `, ${selectedSegment.state}`
-                    : ""}
-                </span>
-              )}
-              <span className="text-xs md:text-sm font-bold text-muted-foreground">
+            {selectedSegment.city && (
+              <p className="text-xs md:text-sm font-bold text-muted-foreground mt-1">
+                {selectedSegment.city}
+                {selectedSegment.state ? `, ${selectedSegment.state}` : ""}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-secondary/10 text-secondary border-2 border-border">
+                <Ruler className="h-2.5 w-2.5" />
                 {(selectedSegment.distance / 1000).toFixed(2)} km
               </span>
-              <span className="text-xs md:text-sm font-bold text-muted-foreground">
-                {selectedSegment.averageGrade.toFixed(1)}% avg grade
+              <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-accent/15 text-accent-foreground border-2 border-border">
+                <Mountain className="h-2.5 w-2.5" />
+                {selectedSegment.averageGrade.toFixed(1)}% avg
               </span>
-              <span className="text-xs md:text-sm font-bold text-muted-foreground">
-                {selectedSegment.effortCount} effort
-                {selectedSegment.effortCount !== 1 ? "s" : ""}
+              <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-primary/10 text-primary border-2 border-border">
+                <TrendingUp className="h-2.5 w-2.5" />
+                {selectedSegment.maximumGrade.toFixed(1)}% max
+              </span>
+              <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-muted border-2 border-border">
+                <Hash className="h-2.5 w-2.5" />
+                {selectedSegment.effortCount} effort{selectedSegment.effortCount !== 1 ? "s" : ""}
               </span>
             </div>
           </div>
 
           {/* Stats cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3">
-            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
-              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <div className="border-3 border-border border-l-[6px] border-l-primary p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-primary">
                 Best Time
               </p>
               <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
                 {formatDuration(selectedSegment.bestEffort.elapsed_time)}
               </p>
             </div>
-            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
-              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <div className="border-3 border-border border-l-[6px] border-l-secondary p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-secondary">
                 Last Time
               </p>
               <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
                 {formatDuration(selectedSegment.lastEffort.elapsed_time)}
               </p>
             </div>
-            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
-              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <div className="border-3 border-border border-l-[6px] border-l-accent p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-accent-foreground">
                 Elevation
               </p>
               <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
@@ -245,8 +258,8 @@ const Segments = () => {
                 m
               </p>
             </div>
-            <div className="border-3 border-border p-3 md:p-4 bg-background shadow-neo-sm">
-              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-muted-foreground">
+            <div className="border-3 border-border border-l-[6px] border-l-destructive p-3 md:p-4 bg-background shadow-neo-sm">
+              <p className="text-[10px] md:text-xs font-black uppercase tracking-wider text-destructive">
                 Max Grade
               </p>
               <p className="text-lg md:text-2xl font-black mt-0.5 md:mt-1">
@@ -258,7 +271,7 @@ const Segments = () => {
           {/* Segment map */}
           {segmentDetailLoading ? (
             <div className="border-3 border-border bg-muted shadow-neo flex items-center justify-center min-h-[250px] md:min-h-[400px]">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <NeoLoader label="Loading map" size="sm" colorClass="bg-secondary" />
             </div>
           ) : segmentDetail?.map?.polyline ? (
             <ActivityMap polyline={segmentDetail.map.polyline} />
@@ -286,17 +299,15 @@ const Segments = () => {
           />
         ) : syncState.isSyncing ? (
           <div className="border-3 border-border p-8 bg-background shadow-neo flex items-center justify-center min-h-[200px]">
-            <div className="text-center">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mx-auto mb-3" />
-              <p className="font-bold text-muted-foreground text-sm">
-                Syncing activity details to discover segments...
-              </p>
-            </div>
+            <NeoLoader label="Syncing segments" size="sm" colorClass="bg-accent" />
           </div>
         ) : (
-          <div className="border-3 border-border p-8 bg-background shadow-neo text-center">
+          <div className="border-3 border-border p-8 bg-background shadow-neo text-center space-y-3">
+            <div className="w-12 h-12 mx-auto bg-page/10 border-3 border-border shadow-neo-sm flex items-center justify-center">
+              <MapPin className="h-6 w-6 text-page" />
+            </div>
             <p className="font-black text-lg">No segments found</p>
-            <p className="text-sm font-bold text-muted-foreground mt-2">
+            <p className="text-sm font-bold text-muted-foreground">
               Segments are discovered from your activity details. Make sure your
               activities have been fully synced.
             </p>

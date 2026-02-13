@@ -71,6 +71,19 @@ export const MODEL_OPTIONS: ModelOption[] = [
   {id: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI', tier: 'Smart'},
   {id: 'gpt-4.1', label: 'GPT-4.1', provider: 'OpenAI', tier: 'Smartest'},
   {
+    id: 'gpt-5-nano',
+    label: 'GPT-5 Nano',
+    provider: 'OpenAI',
+    tier: 'Budget',
+  },
+  {
+    id: 'gpt-5-mini',
+    label: 'GPT-5 Mini',
+    provider: 'OpenAI',
+    tier: 'Balanced',
+  },
+  {id: 'gpt-5.2', label: 'GPT-5.2', provider: 'OpenAI', tier: 'Smartest'},
+  {
     id: 'claude-haiku-3-5',
     label: 'Claude 3.5 Haiku',
     provider: 'Anthropic',
