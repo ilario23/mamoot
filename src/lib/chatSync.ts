@@ -3,10 +3,10 @@
 // ============================================================
 //
 // Provides typed read/write functions that call /api/db/[table]
-// for chat sessions, messages, and coach plans.
+// for chat sessions, messages, and weekly plans.
 // Neon is the primary persistent store — writes are awaitable.
 
-import type {CachedChatSession, CachedChatMessage, CachedCoachPlan, CachedPhysioPlan} from './cacheTypes';
+import type {CachedChatSession, CachedChatMessage, CachedWeeklyPlan, CachedTrainingBlock, WeekOutline, TrainingPhase} from './cacheTypes';
 
 const API = '/api/db';
 
@@ -91,98 +91,111 @@ export const neonDeleteChatSession = async (sessionId: string): Promise<void> =>
   }
 };
 
-// ---- Coach Plans ----
+// ---- Weekly Plans ----
 
-/** Get all plans for an athlete (ordered by sharedAt desc). */
-export const neonGetCoachPlans = async (
+/** Get all weekly plans for an athlete (ordered by createdAt desc). */
+export const neonGetWeeklyPlans = async (
   athleteId: number,
-): Promise<CachedCoachPlan[] | null> =>
-  getFromNeon<CachedCoachPlan[]>(
-    `${API}/coach-plans?athleteId=${athleteId}`,
+): Promise<CachedWeeklyPlan[] | null> =>
+  getFromNeon<CachedWeeklyPlan[]>(
+    `${API}/weekly-plans?athleteId=${athleteId}`,
   );
 
-/** Get only the active plan for an athlete. */
-export const neonGetActiveCoachPlan = async (
+/** Get only the active weekly plan for an athlete. */
+export const neonGetActiveWeeklyPlan = async (
   athleteId: number,
-): Promise<CachedCoachPlan | null> =>
-  getFromNeon<CachedCoachPlan>(
-    `${API}/coach-plans?athleteId=${athleteId}&active=true`,
+): Promise<CachedWeeklyPlan | null> =>
+  getFromNeon<CachedWeeklyPlan>(
+    `${API}/weekly-plans?athleteId=${athleteId}&active=true`,
   );
 
-/** Awaitable upsert of a coach plan. */
-export const neonSyncCoachPlan = async (record: CachedCoachPlan): Promise<void> => {
-  await postToNeon('coach-plans', record);
+/** Awaitable upsert of a weekly plan. */
+export const neonSyncWeeklyPlan = async (record: CachedWeeklyPlan): Promise<void> => {
+  await postToNeon('weekly-plans', record);
 };
 
-/** Awaitable delete of a coach plan by ID. */
-export const neonDeleteCoachPlan = async (planId: string): Promise<void> => {
+/** Awaitable delete of a weekly plan by ID. */
+export const neonDeleteWeeklyPlan = async (planId: string): Promise<void> => {
   try {
-    await fetch(`${API}/coach-plans?id=${planId}`, {
+    await fetch(`${API}/weekly-plans?id=${planId}`, {
       method: 'DELETE',
     });
   } catch (err) {
-    console.warn('[chatSync] DELETE coach-plan error:', err);
+    console.warn('[chatSync] DELETE weekly-plan error:', err);
   }
 };
 
-/** Awaitable activate a plan (deactivates all others for the athlete). */
-export const neonActivateCoachPlan = async (
+/** Awaitable activate a weekly plan (deactivates all others for the athlete). */
+export const neonActivateWeeklyPlan = async (
   planId: string,
   athleteId: number,
 ): Promise<void> => {
   try {
-    await fetch(`${API}/coach-plans?id=${planId}&athleteId=${athleteId}`, {
+    await fetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
       method: 'PATCH',
     });
   } catch (err) {
-    console.warn('[chatSync] PATCH coach-plan activate error:', err);
+    console.warn('[chatSync] PATCH weekly-plan activate error:', err);
   }
 };
 
-// ---- Physio Plans ----
+// ---- Training Blocks ----
 
-/** Get all physio plans for an athlete (ordered by sharedAt desc). */
-export const neonGetPhysioPlans = async (
+export const neonGetTrainingBlocks = async (
   athleteId: number,
-): Promise<CachedPhysioPlan[] | null> =>
-  getFromNeon<CachedPhysioPlan[]>(
-    `${API}/physio-plans?athleteId=${athleteId}`,
+): Promise<CachedTrainingBlock[] | null> =>
+  getFromNeon<CachedTrainingBlock[]>(
+    `${API}/training-blocks?athleteId=${athleteId}`,
   );
 
-/** Get only the active physio plan for an athlete. */
-export const neonGetActivePhysioPlan = async (
+export const neonGetActiveTrainingBlock = async (
   athleteId: number,
-): Promise<CachedPhysioPlan | null> =>
-  getFromNeon<CachedPhysioPlan>(
-    `${API}/physio-plans?athleteId=${athleteId}&active=true`,
+): Promise<CachedTrainingBlock | null> =>
+  getFromNeon<CachedTrainingBlock>(
+    `${API}/training-blocks?athleteId=${athleteId}&active=true`,
   );
 
-/** Awaitable upsert of a physio plan. */
-export const neonSyncPhysioPlan = async (record: CachedPhysioPlan): Promise<void> => {
-  await postToNeon('physio-plans', record);
+export const neonSyncTrainingBlock = async (record: CachedTrainingBlock): Promise<void> => {
+  await postToNeon('training-blocks', record);
 };
 
-/** Awaitable delete of a physio plan by ID. */
-export const neonDeletePhysioPlan = async (planId: string): Promise<void> => {
+export const neonDeleteTrainingBlock = async (blockId: string): Promise<void> => {
   try {
-    await fetch(`${API}/physio-plans?id=${planId}`, {
-      method: 'DELETE',
-    });
+    await fetch(`${API}/training-blocks?id=${blockId}`, {method: 'DELETE'});
   } catch (err) {
-    console.warn('[chatSync] DELETE physio-plan error:', err);
+    console.warn('[chatSync] DELETE training-block error:', err);
   }
 };
 
-/** Awaitable activate a physio plan (deactivates all others for the athlete). */
-export const neonActivatePhysioPlan = async (
-  planId: string,
+export const neonActivateTrainingBlock = async (
+  blockId: string,
   athleteId: number,
 ): Promise<void> => {
   try {
-    await fetch(`${API}/physio-plans?id=${planId}&athleteId=${athleteId}`, {
+    await fetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
       method: 'PATCH',
     });
   } catch (err) {
-    console.warn('[chatSync] PATCH physio-plan activate error:', err);
+    console.warn('[chatSync] PATCH training-block activate error:', err);
+  }
+};
+
+export const neonUpdateTrainingBlockOutlines = async (
+  blockId: string,
+  weekOutlines: WeekOutline[],
+  phases?: TrainingPhase[],
+): Promise<void> => {
+  try {
+    await fetch(`${API}/training-blocks?id=${blockId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        weekOutlines,
+        ...(phases ? {phases} : {}),
+        updatedAt: Date.now(),
+      }),
+    });
+  } catch (err) {
+    console.warn('[chatSync] PATCH training-block outlines error:', err);
   }
 };

@@ -16,8 +16,8 @@ import {
   userSettings,
   zoneBreakdowns as zoneBreakdownsTable,
   athleteGear,
-  coachPlans,
-  physioPlans,
+  trainingBlocks,
+  weeklyPlans,
 } from '@/db/schema';
 import {eq, desc, and, inArray} from 'drizzle-orm';
 import type {ActivitySummary, UserSettings} from './mockData';
@@ -714,127 +714,77 @@ export const createRetrievalTools = (athleteId: number) => ({
     },
   }),
 
-  // ---- 10. Coach Plan ----
-  getCoachPlan: tool({
+  // ---- 10. Weekly Plan ----
+  getWeeklyPlan: tool({
     description:
-      'Get the active training plan shared by the Coach persona. Useful for Nutritionist and Physio to align recommendations.',
+      'Get the active unified weekly plan combining running (Coach) and strength/mobility (Physio) sessions. Each day includes both run and physio components.',
     inputSchema: z.object({}),
     execute: async () => {
       const plans = await db
         .select()
-        .from(coachPlans)
+        .from(weeklyPlans)
         .where(
           and(
-            eq(coachPlans.athleteId, athleteId),
-            eq(coachPlans.isActive, true),
+            eq(weeklyPlans.athleteId, athleteId),
+            eq(weeklyPlans.isActive, true),
           ),
         )
-        .orderBy(desc(coachPlans.sharedAt))
+        .orderBy(desc(weeklyPlans.createdAt))
         .limit(1);
 
       const plan = plans[0];
       if (!plan) {
-        return {plan: 'No active training plan.'};
+        return {plan: 'No active weekly plan. The athlete can generate one from the Weekly Plan page.'};
       }
 
-      const sessions = plan.sessions as Array<{
+      type SessionShape = {
         day: string;
-        type: string;
-        description: string;
-        targetPace?: string;
-        targetZone?: string;
-      }>;
-
-      const lines = [
-        `Training Plan: ${plan.title}`,
-        plan.goal ? `Goal: ${plan.goal}` : null,
-        plan.durationWeeks ? `Duration: ${plan.durationWeeks} weeks` : null,
-        '',
-        '| Day | Type | Workout | Pace/Zone |',
-        '|-----|------|---------|-----------',
-      ].filter(Boolean) as string[];
-
-      for (const s of sessions) {
-        const pz =
-          [s.targetPace, s.targetZone].filter(Boolean).join(' / ') || '—';
-        lines.push(`| ${s.day} | ${s.type} | ${s.description} | ${pz} |`);
-      }
-
-      // Include full plan content
-      if (plan.content) {
-        lines.push('', '### Full Plan Details', '', plan.content);
-      }
-
-      return {plan: lines.join('\n')};
-    },
-  }),
-
-  // ---- 10b. Physio Plan ----
-  getPhysioPlan: tool({
-    description:
-      'Get the active strength/mobility plan shared by the Physio persona. Includes training phase, strength sessions per week, and per-day exercises. The Coach uses this to leave room for gym days; the Nutritionist uses it to adjust macros for combined run+strength days.',
-    inputSchema: z.object({}),
-    execute: async () => {
-      const plans = await db
-        .select()
-        .from(physioPlans)
-        .where(
-          and(
-            eq(physioPlans.athleteId, athleteId),
-            eq(physioPlans.isActive, true),
-          ),
-        )
-        .orderBy(desc(physioPlans.sharedAt))
-        .limit(1);
-
-      const plan = plans[0];
-      if (!plan) {
-        return {plan: 'No active physio plan.'};
-      }
-
-      const sessions = plan.sessions as Array<{
-        day: string;
-        date?: string;
-        type: string;
-        exercises: Array<{
-          name: string;
-          sets?: string;
-          reps?: string;
-          tempo?: string;
-          notes?: string;
-        }>;
-        duration?: string;
+        date: string;
+        run?: {type: string; description: string; targetPace?: string; targetZone?: string; duration?: string; notes?: string};
+        physio?: {type: string; exercises: Array<{name: string; sets?: string; reps?: string; tempo?: string; notes?: string}>; duration?: string; notes?: string};
         notes?: string;
-      }>;
+      };
+
+      const sessions = plan.sessions as SessionShape[];
 
       const lines = [
-        `Physio Plan: ${plan.title}`,
-        plan.phase ? `Phase: ${plan.phase}` : null,
-        plan.strengthSessionsPerWeek
-          ? `Strength sessions/week: ${plan.strengthSessionsPerWeek}`
-          : null,
+        `Weekly Plan: ${plan.title}`,
+        `Week: ${plan.weekStart}`,
+        plan.goal ? `Goal: ${plan.goal}` : null,
         plan.summary ? `Summary: ${plan.summary}` : null,
         '',
       ].filter(Boolean) as string[];
 
       for (const s of sessions) {
-        const dateStr = s.date ? ` (${s.date})` : '';
-        const durStr = s.duration ? ` — ${s.duration}` : '';
-        lines.push(`### ${s.day}${dateStr} — ${s.type}${durStr}`);
-        if (s.notes) lines.push(`  Note: ${s.notes}`);
-        for (const ex of s.exercises) {
-          const parts = [ex.name];
-          if (ex.sets && ex.reps) parts.push(`${ex.sets}x${ex.reps}`);
-          else if (ex.reps) parts.push(ex.reps);
-          if (ex.tempo) parts.push(ex.tempo);
-          if (ex.notes) parts.push(`(${ex.notes})`);
-          lines.push(`- ${parts.join(' | ')}`);
-        }
-      }
+        lines.push(`### ${s.day} — ${s.date}`);
 
-      // Include full plan content
-      if (plan.content) {
-        lines.push('', '### Full Plan Details', '', plan.content);
+        if (s.run) {
+          const pz = [s.run.targetPace, s.run.targetZone].filter(Boolean).join(' / ') || '';
+          lines.push(`**Run (${s.run.type}):** ${s.run.description}${pz ? ` — ${pz}` : ''}`);
+          if (s.run.duration) lines.push(`Duration: ${s.run.duration}`);
+          if (s.run.notes) lines.push(`Note: ${s.run.notes}`);
+        }
+
+        if (s.physio) {
+          lines.push(`**Physio (${s.physio.type}):**`);
+          if (s.physio.duration) lines.push(`Duration: ${s.physio.duration}`);
+          for (const ex of s.physio.exercises) {
+            const parts = [ex.name];
+            if (ex.sets && ex.reps) parts.push(`${ex.sets}x${ex.reps}`);
+            else if (ex.reps) parts.push(ex.reps);
+            if (ex.tempo) parts.push(ex.tempo);
+            if (ex.notes) parts.push(`(${ex.notes})`);
+            lines.push(`- ${parts.join(' | ')}`);
+          }
+          if (s.physio.notes) lines.push(`Note: ${s.physio.notes}`);
+        }
+
+        if (!s.run && !s.physio) {
+          lines.push('Rest day');
+          if (s.notes) lines.push(s.notes);
+        }
+
+        lines.push('');
       }
 
       return {plan: lines.join('\n')};
@@ -844,7 +794,7 @@ export const createRetrievalTools = (athleteId: number) => ({
   // ---- 11. Plan vs Actual Comparison ----
   comparePlanVsActual: tool({
     description:
-      'Compare the active training plan against actual activities. Matches planned sessions to real activities by date and compares workout type, pace, and zone. Use proactively at the end of each week or when the athlete asks for a review.',
+      'Compare the active weekly plan against actual activities. Matches planned running sessions to real activities by date and compares workout type, pace, and zone. Use proactively at the end of each week or when the athlete asks for a review.',
     inputSchema: z.object({
       weekOffset: z
         .number()
@@ -854,32 +804,45 @@ export const createRetrievalTools = (athleteId: number) => ({
         ),
     }),
     execute: async ({weekOffset = 0}: {weekOffset?: number}) => {
-      // 1. Fetch active plan
+      // 1. Fetch active weekly plan
       const plans = await db
         .select()
-        .from(coachPlans)
+        .from(weeklyPlans)
         .where(
           and(
-            eq(coachPlans.athleteId, athleteId),
-            eq(coachPlans.isActive, true),
+            eq(weeklyPlans.athleteId, athleteId),
+            eq(weeklyPlans.isActive, true),
           ),
         )
-        .orderBy(desc(coachPlans.sharedAt))
+        .orderBy(desc(weeklyPlans.createdAt))
         .limit(1);
 
       const plan = plans[0];
       if (!plan) {
-        return {comparison: 'No active training plan to compare against.'};
+        return {comparison: 'No active weekly plan to compare against.'};
       }
 
-      const sessions = (plan.sessions ?? []) as Array<{
+      type UnifiedSessionShape = {
         day: string;
-        date?: string;
-        type: string;
-        description: string;
-        targetPace?: string;
-        targetZone?: string;
-      }>;
+        date: string;
+        run?: {type: string; description: string; targetPace?: string; targetZone?: string};
+        physio?: unknown;
+        notes?: string;
+      };
+
+      const unifiedSessions = (plan.sessions ?? []) as UnifiedSessionShape[];
+
+      // Extract running sessions for comparison
+      const sessions = unifiedSessions
+        .filter((s) => s.run || s.notes)
+        .map((s) => ({
+          day: s.day,
+          date: s.date,
+          type: s.run?.type ?? 'rest',
+          description: s.run?.description ?? (s.notes || 'Rest'),
+          targetPace: s.run?.targetPace,
+          targetZone: s.run?.targetZone,
+        }));
 
       // 2. Determine the target week date range (Mon-Sun)
       const now = new Date();
@@ -1417,6 +1380,69 @@ export const createRetrievalTools = (athleteId: number) => ({
       } catch (err) {
         return {weather: `Failed to fetch weather: ${err instanceof Error ? err.message : 'unknown error'}`};
       }
+    },
+  }),
+
+  // ---- 13. Training Block ----
+  getTrainingBlock: tool({
+    description:
+      'Get the active periodized training block (macro plan). Shows the goal event, phases, and per-week outlines with volume targets, intensity levels, and key workouts. Also highlights the current week.',
+    inputSchema: z.object({}),
+    execute: async () => {
+      const blocks = await db
+        .select()
+        .from(trainingBlocks)
+        .where(
+          and(
+            eq(trainingBlocks.athleteId, athleteId),
+            eq(trainingBlocks.isActive, true),
+          ),
+        )
+        .orderBy(desc(trainingBlocks.createdAt))
+        .limit(1);
+
+      const block = blocks[0];
+      if (!block) {
+        return {block: 'No active training block. The athlete can create one from the Training Block page.'};
+      }
+
+      type Phase = {name: string; weekNumbers: number[]; focus: string; volumeDirection: string};
+      type Outline = {weekNumber: number; phase: string; weekType: string; volumeTargetKm: number; intensityLevel: string; keyWorkouts: string[]; notes: string};
+
+      const phases = block.phases as Phase[];
+      const outlines = block.weekOutlines as Outline[];
+
+      const now = new Date();
+      const start = new Date(block.startDate);
+      const diffMs = now.getTime() - start.getTime();
+      const currentWeek = Math.max(1, Math.min(block.totalWeeks, Math.ceil(diffMs / (7 * 86400000))));
+      const currentPhase = phases.find((p) => p.weekNumbers.includes(currentWeek));
+
+      const lines = [
+        `Training Block: ${block.goalEvent}`,
+        `Goal Date: ${block.goalDate}`,
+        `Total Weeks: ${block.totalWeeks} (started ${block.startDate})`,
+        `Current Week: ${currentWeek} of ${block.totalWeeks}`,
+        currentPhase ? `Current Phase: ${currentPhase.name} — ${currentPhase.focus}` : '',
+        `Block ID: ${block.id}`,
+        '',
+        '## Phases',
+      ];
+
+      for (const p of phases) {
+        lines.push(`- **${p.name}** (weeks ${p.weekNumbers.join(', ')}): ${p.focus} [volume: ${p.volumeDirection}]`);
+      }
+
+      lines.push('', '## Week Outlines');
+
+      for (const o of outlines) {
+        const marker = o.weekNumber === currentWeek ? ' ← CURRENT' : o.weekNumber < currentWeek ? ' (past)' : '';
+        lines.push(
+          `- **Week ${o.weekNumber}** [${o.phase}] ${o.weekType} | ${o.volumeTargetKm}km | ${o.intensityLevel} intensity | workouts: ${o.keyWorkouts.join(', ')}${o.notes ? ` | ${o.notes}` : ''}${marker}`,
+        );
+      }
+
+      return {block: lines.join('\n')};
     },
   }),
 });

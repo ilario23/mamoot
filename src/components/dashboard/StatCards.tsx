@@ -136,27 +136,29 @@ const StatCards = () => {
   if (isLoading) {
     const SKELETON_COLORS = ['bg-primary', 'bg-secondary', 'bg-accent', 'bg-nav-activities', 'bg-nav-segments', 'bg-nav-ai'];
     return (
-      <div className='space-y-4'>
-        <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[0, 1, 2].map((i) => (
+      <div className='space-y-3 md:space-y-4'>
+        <div className='grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4'>
+          {SKELETON_COLORS.slice(0, isMobile ? 2 : 3).map((color, i) => (
             <NeoSkeleton
               key={i}
               className='min-h-[120px] animate-fade-in-up'
-              shimmerColor={SKELETON_COLORS[i]}
+              shimmerColor={color}
               style={{ animationDelay: `${i * 80}ms` }}
             />
           ))}
         </div>
-        <div className='grid grid-cols-2 md:grid-cols-3 gap-4'>
-          {[3, 4, 5].map((i) => (
-            <NeoSkeleton
-              key={i}
-              className='min-h-[120px] animate-fade-in-up'
-              shimmerColor={SKELETON_COLORS[i]}
-              style={{ animationDelay: `${i * 80}ms` }}
-            />
-          ))}
-        </div>
+        {!isMobile && (
+          <div className='grid grid-cols-3 gap-4'>
+            {SKELETON_COLORS.slice(3).map((color, i) => (
+              <NeoSkeleton
+                key={i + 3}
+                className='min-h-[120px] animate-fade-in-up'
+                shimmerColor={color}
+                style={{ animationDelay: `${(i + 3) * 80}ms` }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     );
   }

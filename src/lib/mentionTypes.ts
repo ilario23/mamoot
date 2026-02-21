@@ -16,6 +16,7 @@ import {
   Footprints,
   Dumbbell,
   ClipboardList,
+  Layers,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -116,10 +117,17 @@ export const MENTION_CATEGORIES: MentionCategory[] = [
   },
   {
     id: 'plan',
-    label: 'Coach Plan',
+    label: 'Weekly Plan',
     icon: ClipboardList,
     hasSubItems: false,
-    description: 'Active training plan from Coach',
+    description: 'Active unified weekly plan (running + physio)',
+  },
+  {
+    id: 'block',
+    label: 'Training Block',
+    icon: Layers,
+    hasSubItems: false,
+    description: 'Active periodized macro plan with phases and weekly outlines',
   },
 ];
 

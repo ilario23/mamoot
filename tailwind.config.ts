@@ -98,6 +98,18 @@ export default {
             DEFAULT: "hsl(var(--nav-gear))",
             foreground: "hsl(var(--nav-gear-foreground))",
           },
+          "weekly-plan": {
+            DEFAULT: "hsl(var(--nav-weekly-plan))",
+            foreground: "hsl(var(--nav-weekly-plan-foreground))",
+          },
+          "training-block": {
+            DEFAULT: "hsl(var(--nav-training-block))",
+            foreground: "hsl(var(--nav-training-block-foreground))",
+          },
+          more: {
+            DEFAULT: "hsl(var(--nav-more))",
+            foreground: "hsl(var(--nav-more-foreground))",
+          },
         },
         zone: {
           1: "hsl(var(--zone-1))",

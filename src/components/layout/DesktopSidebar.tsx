@@ -1,46 +1,175 @@
 'use client';
 
+import {useState} from 'react';
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {
-  LayoutDashboard,
-  CalendarDays,
-  List,
-  Bot,
-  Trophy,
-  Mountain,
-  Cog,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ClipboardList,
-} from 'lucide-react';
+import {PanelLeftClose, PanelLeftOpen, ChevronDown} from 'lucide-react';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import {useSidebarCollapse} from '@/contexts/SidebarContext';
-import {useCoachPlan} from '@/hooks/useCoachPlan';
-import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {Popover, PopoverTrigger, PopoverContent} from '@/components/ui/popover';
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible';
+import {desktopNavEntries, isNavGroup} from '@/lib/navConfig';
+import type {NavItem, NavGroup} from '@/lib/navConfig';
 
-const navItems = [
-  {href: '/', icon: LayoutDashboard, label: 'Dashboard', activeClass: 'bg-nav-dashboard text-nav-dashboard-foreground'},
-  {href: '/calendar', icon: CalendarDays, label: 'Calendar', activeClass: 'bg-nav-calendar text-nav-calendar-foreground'},
-  {href: '/activities', icon: List, label: 'Activities', activeClass: 'bg-nav-activities text-nav-activities-foreground'},
-  {href: '/records', icon: Trophy, label: 'Records', activeClass: 'bg-nav-records text-nav-records-foreground'},
-  {href: '/segments', icon: Mountain, label: 'Segments', activeClass: 'bg-nav-segments text-nav-segments-foreground'},
-  {href: '/ai-chat', icon: Bot, label: 'AI Team', activeClass: 'bg-nav-ai text-nav-ai-foreground'},
-  {href: '/gear', icon: Cog, label: 'Gear', activeClass: 'bg-nav-gear text-nav-gear-foreground'},
-];
+const isItemActive = (href: string, pathname: string) =>
+  href === '/' ? pathname === '/' : pathname.startsWith(href);
+
+const SidebarLink = ({
+  item,
+  pathname,
+  isCollapsed,
+  indented = false,
+}: {
+  item: NavItem;
+  pathname: string;
+  isCollapsed: boolean;
+  indented?: boolean;
+}) => {
+  const isActive = isItemActive(item.href, pathname);
+
+  return (
+    <Link
+      href={item.href}
+      className={`flex items-center gap-3 font-bold text-sm border-3 border-border transition-all ${
+        isCollapsed ? 'justify-center px-0 py-3' : indented ? 'px-4 py-2.5 ml-4' : 'px-4 py-3'
+      } ${
+        isActive
+          ? `${item.activeClass} shadow-neo-sm`
+          : 'bg-background hover:bg-muted'
+      }`}
+      aria-label={item.label}
+    >
+      <item.icon className='h-5 w-5 shrink-0' />
+      {!isCollapsed && <span>{item.label}</span>}
+    </Link>
+  );
+};
+
+const SidebarGroupExpanded = ({
+  group,
+  pathname,
+}: {
+  group: NavGroup;
+  pathname: string;
+}) => {
+  const activeChild = group.children.find((c) =>
+    isItemActive(c.href, pathname),
+  );
+  const [open, setOpen] = useState(!!activeChild);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          type='button'
+          aria-label={group.label}
+          className={`w-full flex items-center gap-3 px-4 py-3 font-bold text-sm border-3 border-border transition-all ${
+            activeChild && !open
+              ? `${activeChild.activeClass} shadow-neo-sm`
+              : 'bg-background hover:bg-muted'
+          }`}
+        >
+          <group.icon className='h-5 w-5 shrink-0' />
+          <span>{group.label}</span>
+          <ChevronDown
+            className={`h-4 w-4 ml-auto shrink-0 transition-transform duration-200 ${
+              open ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className='space-y-1 mt-1'>
+        {group.children.map((child) => (
+          <SidebarLink
+            key={child.href}
+            item={child}
+            pathname={pathname}
+            isCollapsed={false}
+            indented
+          />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
+const SidebarGroupCollapsed = ({
+  group,
+  pathname,
+}: {
+  group: NavGroup;
+  pathname: string;
+}) => {
+  const activeChild = group.children.find((c) =>
+    isItemActive(c.href, pathname),
+  );
+
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <button
+              type='button'
+              aria-label={group.label}
+              className={`w-full flex items-center justify-center py-3 font-bold text-sm border-3 border-border transition-all ${
+                activeChild
+                  ? `${activeChild.activeClass} shadow-neo-sm`
+                  : 'bg-background hover:bg-muted'
+              }`}
+            >
+              <group.icon className='h-5 w-5 shrink-0' />
+            </button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side='right'>
+          <p>{group.label}</p>
+        </TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        side='right'
+        sideOffset={8}
+        className='w-auto min-w-[180px] p-0 border-3 border-border shadow-neo bg-background'
+      >
+        <div className='flex flex-col'>
+          {group.children.map((child) => {
+            const isActive = isItemActive(child.href, pathname);
+            return (
+              <Link
+                key={child.href}
+                href={child.href}
+                aria-label={child.label}
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex items-center gap-3 px-4 py-3 font-bold text-sm transition-colors border-b-3 border-border last:border-b-0 ${
+                  isActive
+                    ? child.activeClass
+                    : 'bg-background hover:bg-muted'
+                }`}
+              >
+                <child.icon className='h-5 w-5 shrink-0' aria-hidden='true' />
+                <span>{child.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+};
 
 const DesktopSidebar = () => {
   const pathname = usePathname();
   const {isCollapsed, toggleSidebar} = useSidebarCollapse();
-  const {athlete} = useStravaAuth();
-  const {activePlan} = useCoachPlan(athlete?.id ?? null);
-  const isPlanActive = pathname === '/training-plan';
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -114,38 +243,41 @@ const DesktopSidebar = () => {
 
         {/* Nav links */}
         <nav className={`space-y-2 ${isCollapsed ? 'p-2' : 'p-3'}`}>
-          {navItems.map((item) => {
-            const isActive =
-              item.href === '/'
-                ? pathname === '/'
-                : pathname.startsWith(item.href);
+          {desktopNavEntries.map((entry) => {
+            if (isNavGroup(entry)) {
+              if (isCollapsed) {
+                return (
+                  <SidebarGroupCollapsed
+                    key={entry.id}
+                    group={entry}
+                    pathname={pathname}
+                  />
+                );
+              }
+              return (
+                <SidebarGroupExpanded
+                  key={entry.id}
+                  group={entry}
+                  pathname={pathname}
+                />
+              );
+            }
 
             const linkContent = (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 font-bold text-sm border-3 border-border transition-all ${
-                  isCollapsed
-                    ? 'justify-center px-0 py-3'
-                    : 'px-4 py-3'
-                } ${
-                  isActive
-                    ? `${item.activeClass} shadow-neo-sm`
-                    : 'bg-background hover:bg-muted'
-                }`}
-                aria-label={item.label}
-              >
-                <item.icon className='h-5 w-5 shrink-0' />
-                {!isCollapsed && <span>{item.label}</span>}
-              </Link>
+              <SidebarLink
+                key={entry.href}
+                item={entry}
+                pathname={pathname}
+                isCollapsed={isCollapsed}
+              />
             );
 
             if (isCollapsed) {
               return (
-                <Tooltip key={item.href}>
+                <Tooltip key={entry.href}>
                   <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
                   <TooltipContent side='right'>
-                    <p>{item.label}</p>
+                    <p>{entry.label}</p>
                   </TooltipContent>
                 </Tooltip>
               );
@@ -155,47 +287,8 @@ const DesktopSidebar = () => {
           })}
         </nav>
 
-        {/* Plan badge + User profile */}
+        {/* User profile */}
         <div className='mt-auto'>
-          {activePlan && (
-            <div className={isCollapsed ? 'px-2 pb-1' : 'px-3 pb-1'}>
-              {isCollapsed ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Link
-                      href='/training-plan'
-                      aria-label='View training plan'
-                      className={`relative flex items-center justify-center py-2.5 border-3 border-border font-bold text-sm transition-all ${
-                        isPlanActive
-                          ? 'bg-primary/10 text-primary shadow-neo-sm'
-                          : 'bg-background hover:bg-primary/5 hover:text-primary'
-                      }`}
-                    >
-                      <ClipboardList className='h-5 w-5 shrink-0' />
-                      <span className='absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full animate-pulse' />
-                    </Link>
-                  </TooltipTrigger>
-                  <TooltipContent side='right'>
-                    <p>Training Plan</p>
-                  </TooltipContent>
-                </Tooltip>
-              ) : (
-                <Link
-                  href='/training-plan'
-                  aria-label='View training plan'
-                  className={`relative flex items-center gap-3 px-4 py-2.5 border-3 border-border font-bold text-sm transition-all ${
-                    isPlanActive
-                      ? 'bg-primary/10 text-primary shadow-neo-sm'
-                      : 'bg-background hover:bg-primary/5 hover:text-primary'
-                  }`}
-                >
-                  <ClipboardList className='h-5 w-5 shrink-0' />
-                  <span className='truncate'>Training Plan</span>
-                  <span className='ml-auto w-2 h-2 bg-primary rounded-full animate-pulse shrink-0' />
-                </Link>
-              )}
-            </div>
-          )}
           <SidebarUserProfile collapsed={isCollapsed} />
         </div>
       </aside>

@@ -7,13 +7,10 @@ import {
   Stethoscope,
   Loader2,
   AlertCircle,
-  Check,
   Plus,
   MessageSquare,
   Trash2,
   Menu,
-  ClipboardList,
-  Calendar,
   ChevronRight,
   type LucideIcon,
 } from 'lucide-react';
@@ -21,8 +18,6 @@ import {useChat} from '@ai-sdk/react';
 import {DefaultChatTransport} from 'ai';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {useCoachPlan} from '@/hooks/useCoachPlan';
-import {usePhysioPlan} from '@/hooks/usePhysioPlan';
 import {useChatSessions} from '@/hooks/useChatSessions';
 import {
   useChatPersistence,
@@ -33,13 +28,11 @@ import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/mockData';
 import type {PersonaId} from '@/lib/aiPrompts';
-import type {ShareTrainingPlanInput, SharePhysioPlanInput} from '@/lib/aiTools';
 import {
   getMentionCategory,
   parseMentionMeta,
   type MentionReference,
 } from '@/lib/mentionTypes';
-import type {PlanSession, PhysioPlanSession} from '@/lib/cacheTypes';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import {
   AlertDialog,
@@ -51,8 +44,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import CoachPlanList from '@/components/layout/CoachPlanList';
-import PhysioPlanList from '@/components/layout/PhysioPlanList';
 import ChatInput from '@/components/chat/ChatInput';
 import StreamingIndicator from '@/components/chat/StreamingIndicator';
 import SuggestionChips from '@/components/chat/SuggestionChips';
@@ -154,15 +145,12 @@ const TOOL_LABELS: Record<string, string> = {
   getFitnessMetrics: 'Calculating fitness metrics',
   getRecentActivities: 'Looking at recent activities',
   getGearStatus: 'Checking your gear',
-  getCoachPlan: 'Reviewing the training plan',
-  getPhysioPlan: 'Reviewing the physio plan',
+  getWeeklyPlan: 'Reviewing the weekly plan',
   comparePlanVsActual: 'Comparing plan vs actual',
   getActivityDetail: 'Analyzing activity details',
   getPersonalRecords: 'Looking at your personal records',
   getWeatherForecast: 'Checking the weather forecast',
   // Action tools
-  shareTrainingPlan: 'Creating your training plan',
-  sharePhysioPlan: 'Creating your physio plan',
   suggestFollowUps: 'Preparing suggestions',
 };
 
@@ -327,154 +315,6 @@ const MarkdownContent = ({content}: {content: string}) => (
   </ReactMarkdown>
 );
 
-// ----- Plan card displayed inline when the AI calls shareTrainingPlan -----
-
-import {SESSION_TYPE_COLORS} from '@/lib/planConstants';
-
-const PlanCard = ({
-  plan,
-  isSaved,
-}: {
-  plan: ShareTrainingPlanInput;
-  isSaved: boolean;
-}) => (
-  <div className='mt-2 border-3 border-primary bg-primary/5 p-3 space-y-2 overflow-hidden'>
-    <div className='flex items-start justify-between gap-2 min-w-0'>
-      <div className='min-w-0'>
-        <span className='font-black text-xs uppercase tracking-wider text-primary flex items-center gap-1'>
-          <ClipboardList className='h-3 w-3' />
-          Training Plan
-        </span>
-        <h4 className='font-black text-sm mt-0.5'>{plan.title}</h4>
-        {plan.summary && (
-          <p className='text-xs text-muted-foreground mt-0.5'>{plan.summary}</p>
-        )}
-      </div>
-      {isSaved && (
-        <span className='inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-primary shrink-0'>
-          <Check className='h-3 w-3' />
-          Saved
-        </span>
-      )}
-    </div>
-
-    {(plan.goal || plan.durationWeeks) && (
-      <div className='flex flex-wrap gap-2 text-[10px] font-bold'>
-        {plan.goal && (
-          <span className='px-1.5 py-0.5 border-2 border-border bg-muted'>
-            {plan.goal}
-          </span>
-        )}
-        {plan.durationWeeks && (
-          <span className='px-1.5 py-0.5 border-2 border-border bg-muted flex items-center gap-1'>
-            <Calendar className='h-2.5 w-2.5' />
-            {plan.durationWeeks}w
-          </span>
-        )}
-      </div>
-    )}
-
-    {plan.sessions.length > 0 && (
-      <div className='space-y-1'>
-        {plan.sessions.map((session, i) => (
-          <div
-            key={i}
-            className='flex items-center gap-2 text-[11px] font-medium'
-          >
-            <span className='w-16 shrink-0 font-bold text-muted-foreground truncate'>
-              {session.day}
-            </span>
-            <span
-              className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${SESSION_TYPE_COLORS[session.type] ?? 'bg-muted text-foreground'}`}
-            >
-              {session.type}
-            </span>
-            <span className='truncate'>{session.description}</span>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-);
-
-const PlanSaving = () => (
-  <div className='mt-2 border-3 border-border bg-muted/50 p-3 flex items-center gap-2 text-xs font-medium text-muted-foreground'>
-    <Loader2 className='h-3 w-3 animate-spin' />
-    Saving plan...
-  </div>
-);
-
-// ----- Physio plan card displayed inline when the AI calls sharePhysioPlan -----
-
-const PhysioPlanCard = ({
-  plan,
-  isSaved,
-}: {
-  plan: SharePhysioPlanInput;
-  isSaved: boolean;
-}) => (
-  <div className='mt-2 border-3 border-destructive bg-destructive/5 p-3 space-y-2 overflow-hidden'>
-    <div className='flex items-start justify-between gap-2 min-w-0'>
-      <div className='min-w-0'>
-        <span className='font-black text-xs uppercase tracking-wider text-destructive flex items-center gap-1'>
-          <Stethoscope className='h-3 w-3' />
-          Physio Plan
-        </span>
-        <h4 className='font-black text-sm mt-0.5'>{plan.title}</h4>
-        {plan.summary && (
-          <p className='text-xs text-muted-foreground mt-0.5'>{plan.summary}</p>
-        )}
-      </div>
-      {isSaved && (
-        <span className='inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-destructive shrink-0'>
-          <Check className='h-3 w-3' />
-          Saved
-        </span>
-      )}
-    </div>
-
-    {(plan.phase || plan.strengthSessionsPerWeek) && (
-      <div className='flex flex-wrap gap-2 text-[10px] font-bold'>
-        {plan.phase && (
-          <span className='px-1.5 py-0.5 border-2 border-border bg-muted uppercase'>
-            {plan.phase}
-          </span>
-        )}
-        {plan.strengthSessionsPerWeek && (
-          <span className='px-1.5 py-0.5 border-2 border-border bg-muted flex items-center gap-1'>
-            <Dumbbell className='h-2.5 w-2.5' />
-            {plan.strengthSessionsPerWeek}x/wk
-          </span>
-        )}
-      </div>
-    )}
-
-    {plan.sessions.length > 0 && (
-      <div className='space-y-1'>
-        {plan.sessions.map((session, i) => (
-          <div
-            key={i}
-            className='flex items-center gap-2 text-[11px] font-medium'
-          >
-            <span className='w-16 shrink-0 font-bold text-muted-foreground truncate'>
-              {session.day}
-            </span>
-            <span
-              className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${SESSION_TYPE_COLORS[session.type] ?? 'bg-muted text-foreground'}`}
-            >
-              {session.type}
-            </span>
-            <span className='truncate text-muted-foreground'>
-              {session.exercises.length} exercises
-              {session.duration ? ` — ${session.duration}` : ''}
-            </span>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-);
-
 // ----- Session-aware chat instance -----
 
 const usePersistentChat = (sessionId: string | null) => {
@@ -501,8 +341,6 @@ const AITeamChat = () => {
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
-  const [planListOpen, setPlanListOpen] = useState(false);
-  const [physioPlanListOpen, setPhysioPlanListOpen] = useState(false);
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
     string | null
   >(null);
@@ -513,13 +351,6 @@ const AITeamChat = () => {
   const selectedModel = settings.aiModel ?? DEFAULT_MODEL;
   const {resolveAll} = useMentionResolver();
   const athleteId = athlete?.id ?? null;
-  const {plans, activePlan, savePlan, activatePlan, deletePlan} =
-    useCoachPlan(athleteId);
-  const {
-    plans: physioPlans,
-    savePlan: savePhysioPlan,
-    deletePlan: deletePhysioPlan,
-  } = usePhysioPlan(athleteId);
 
   // Session management per persona
   const coachSessions = useChatSessions(athleteId, 'coach');
@@ -602,23 +433,6 @@ const AITeamChat = () => {
   // Persist messages when they change (after streaming completes)
   const lastPersistedCount = useRef(0);
 
-  // Track which tool plan IDs we've already saved to Neon.
-  // Seed from existing plans so reloaded tool results aren't re-saved.
-  const savedPlanIds = useRef<Set<string>>(new Set());
-  const savedPhysioPlanIds = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    for (const p of plans) {
-      savedPlanIds.current.add(p.id);
-    }
-  }, [plans]);
-
-  useEffect(() => {
-    for (const p of physioPlans) {
-      savedPhysioPlanIds.current.add(p.id);
-    }
-  }, [physioPlans]);
-
   useEffect(() => {
     if (!activeSession?.id) return;
     if (activeChat.status === 'streaming') return;
@@ -635,87 +449,6 @@ const AITeamChat = () => {
     (async () => {
       for (const msg of newMessages) {
         await persistMessage(sessionId, msg);
-
-        // Detect tool results from shareTrainingPlan and save to Neon
-        if (msg.role === 'assistant' && msg.parts) {
-          for (const part of msg.parts) {
-            if (
-              part.type === 'tool-shareTrainingPlan' &&
-              'state' in part &&
-              part.state === 'output-available' &&
-              'output' in part &&
-              part.output &&
-              typeof part.output === 'object' &&
-              'planId' in part.output &&
-              'input' in part &&
-              part.input &&
-              typeof part.input === 'object'
-            ) {
-              const output = part.output as {
-                planId: string;
-                title: string;
-                sharedAt: number;
-              };
-              const planInput = part.input as ShareTrainingPlanInput;
-
-              // Only save once
-              if (!savedPlanIds.current.has(output.planId)) {
-                savedPlanIds.current.add(output.planId);
-                savePlan({
-                  id: output.planId,
-                  athleteId: athleteId ?? 0,
-                  title: planInput.title,
-                  summary: planInput.summary ?? null,
-                  goal: planInput.goal ?? null,
-                  durationWeeks: planInput.durationWeeks ?? null,
-                  sessions: planInput.sessions as PlanSession[],
-                  content: planInput.content,
-                  sourceMessageId: msg.id,
-                  sourceSessionId: sessionId,
-                  sharedAt: output.sharedAt,
-                });
-              }
-            }
-
-            // Detect tool results from sharePhysioPlan and save to Neon
-            if (
-              part.type === 'tool-sharePhysioPlan' &&
-              'state' in part &&
-              part.state === 'output-available' &&
-              'output' in part &&
-              part.output &&
-              typeof part.output === 'object' &&
-              'planId' in part.output &&
-              'input' in part &&
-              part.input &&
-              typeof part.input === 'object'
-            ) {
-              const output = part.output as {
-                planId: string;
-                title: string;
-                sharedAt: number;
-              };
-              const planInput = part.input as SharePhysioPlanInput;
-
-              if (!savedPhysioPlanIds.current.has(output.planId)) {
-                savedPhysioPlanIds.current.add(output.planId);
-                savePhysioPlan({
-                  id: output.planId,
-                  athleteId: athleteId ?? 0,
-                  title: planInput.title,
-                  summary: planInput.summary ?? null,
-                  phase: planInput.phase ?? null,
-                  strengthSessionsPerWeek:
-                    planInput.strengthSessionsPerWeek ?? null,
-                  sessions: planInput.sessions as PhysioPlanSession[],
-                  content: planInput.content,
-                  sourceSessionId: sessionId,
-                  sharedAt: output.sharedAt,
-                });
-              }
-            }
-          }
-        }
       }
 
       // Update session metadata
@@ -756,9 +489,6 @@ const AITeamChat = () => {
     persistMessage,
     activeSM,
     maybeTriggerSummary,
-    savePlan,
-    savePhysioPlan,
-    athleteId,
   ]);
 
   const handleSend = useCallback(
@@ -851,27 +581,14 @@ const AITeamChat = () => {
     if (!id) return;
     setDeleteConfirmSessionId(null);
 
-    // Find linked plans to remove from local plan state
-    const linkedPlanIds = plans
-      .filter((p) => p.sourceSessionId === id)
-      .map((p) => p.id);
-
     await activeSM.deleteSession(id);
-
-    // If deleted plans included the active plan, useCoachPlan will
-    // re-hydrate next render, but we should also trigger a local
-    // cleanup for linked plans that were already deleted from Neon
-    // via the cascade in deleteSession / API route.
-    for (const planId of linkedPlanIds) {
-      await deletePlan(planId);
-    }
 
     if (activeSM.sessions.length <= 1) {
       activeChat.setMessages([]);
       lastPersistedCount.current = 0;
       setMemory(null);
     }
-  }, [deleteConfirmSessionId, activeSM, activeChat, plans, deletePlan]);
+  }, [deleteConfirmSessionId, activeSM, activeChat]);
 
   const handlePersonaSwitch = useCallback((personaId: PersonaId) => {
     setActivePersona(personaId);
@@ -1031,40 +748,6 @@ const AITeamChat = () => {
 
   return (
     <div className='flex h-full min-w-0 overflow-hidden'>
-      {/* Coach plan list sheet */}
-      <Sheet open={planListOpen} onOpenChange={setPlanListOpen}>
-        <SheetContent
-          side='right'
-          className='p-0 w-[340px] sm:max-w-[340px]'
-          aria-describedby={undefined}
-        >
-          <SheetTitle className='sr-only'>Training Plans</SheetTitle>
-          <CoachPlanList
-            plans={plans}
-            activePlanId={activePlan?.id ?? null}
-            onActivate={activatePlan}
-            onDelete={deletePlan}
-            onClose={() => setPlanListOpen(false)}
-          />
-        </SheetContent>
-      </Sheet>
-
-      {/* Physio plan list sheet */}
-      <Sheet open={physioPlanListOpen} onOpenChange={setPhysioPlanListOpen}>
-        <SheetContent
-          side='right'
-          className='p-0 w-[340px] sm:max-w-[340px]'
-          aria-describedby={undefined}
-        >
-          <SheetTitle className='sr-only'>Physio Plans</SheetTitle>
-          <PhysioPlanList
-            plans={physioPlans}
-            onDelete={deletePhysioPlan}
-            onClose={() => setPhysioPlanListOpen(false)}
-          />
-        </SheetContent>
-      </Sheet>
-
       {/* Chat area */}
       <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
         {/* Mobile header — persona + new chat + history */}
@@ -1106,28 +789,6 @@ const AITeamChat = () => {
             </span>
           </div>
           <div className='flex items-center gap-1.5'>
-            {plans.length > 0 && (
-              <button
-                onClick={() => setPlanListOpen(true)}
-                aria-label='View training plans'
-                tabIndex={0}
-                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background text-foreground hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all shrink-0 shadow-neo-sm'
-              >
-                <ClipboardList className='h-3 w-3' />
-                Plans ({plans.length})
-              </button>
-            )}
-            {physioPlans.length > 0 && (
-              <button
-                onClick={() => setPhysioPlanListOpen(true)}
-                aria-label='View physio plans'
-                tabIndex={0}
-                className='flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background text-foreground hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none transition-all shrink-0 shadow-neo-sm'
-              >
-                <Stethoscope className='h-3 w-3' />
-                Physio ({physioPlans.length})
-              </button>
-            )}
             <button
               onClick={handleNewConversation}
               aria-label='New conversation'
@@ -1145,32 +806,6 @@ const AITeamChat = () => {
           <div className='px-3 py-1.5 bg-primary/15 border-b-3 border-border flex items-center gap-1.5 text-[10px] font-black text-primary uppercase tracking-wider'>
             <MessageSquare className='h-3 w-3 shrink-0' />
             Memory active — past conversations remembered
-          </div>
-        )}
-
-        {/* Shared coach plan banner — shown on Nutritionist & Physio tabs */}
-        {activePersona !== 'coach' && activePlan && (
-          <div className='px-3 py-2 bg-primary/10 border-b-3 border-border flex items-center justify-between gap-2 text-xs font-bold'>
-            <button
-              onClick={() => setPlanListOpen(true)}
-              aria-label='View training plans'
-              tabIndex={0}
-              className='flex items-center gap-1.5 text-foreground hover:text-primary transition-colors'
-            >
-              <Dumbbell className='h-3 w-3 shrink-0' />
-              <span className='truncate'>{activePlan.title}</span>
-              <span className='text-muted-foreground font-medium shrink-0'>
-                — {new Date(activePlan.sharedAt).toLocaleDateString()}
-              </span>
-            </button>
-            <button
-              onClick={() => setPlanListOpen(true)}
-              aria-label='Manage plans'
-              tabIndex={0}
-              className='inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors shrink-0'
-            >
-              <ClipboardList className='h-3 w-3' />
-            </button>
           </div>
         )}
 
@@ -1234,8 +869,15 @@ const AITeamChat = () => {
               msgIdx > 0 ? activeChat.messages[msgIdx - 1]?.role : null;
             const isRoleSwitch = prevRole !== null && prevRole !== msg.role;
 
-            // Collect text content
-            const textContent =
+            // Skip suggestFollowUps tool parts — rendered separately as chips
+            const hasSuggestionTool =
+              msg.parts?.some(
+                (part) => part.type === 'tool-suggestFollowUps',
+              ) ?? false;
+
+            // Collect text content, stripping trailing bracketed suggestions
+            // when the model duplicates them alongside a suggestFollowUps tool call
+            let textContent =
               msg.parts
                 ?.filter(
                   (part): part is {type: 'text'; text: string} =>
@@ -1243,22 +885,11 @@ const AITeamChat = () => {
                 )
                 .map((part) => part.text)
                 .join('') ?? '';
-
-            // Check for tool call parts
-            const toolParts =
-              msg.parts?.filter(
-                (part) => part.type === 'tool-shareTrainingPlan',
-              ) ?? [];
-            const physioToolParts =
-              msg.parts?.filter(
-                (part) => part.type === 'tool-sharePhysioPlan',
-              ) ?? [];
-
-            // Skip suggestFollowUps tool parts — rendered separately as chips
-            const hasSuggestionTool =
-              msg.parts?.some(
-                (part) => part.type === 'tool-suggestFollowUps',
-              ) ?? false;
+            if (hasSuggestionTool && textContent) {
+              textContent = textContent.replace(/(\s*\[[^\]]+\])+\s*$/, '').trim();
+            }
+            // Strip leaked tool-call artifacts like "functions.suggestFollowUps" (+ trailing garble)
+            textContent = textContent.replace(/functions\.\w+\S*/g, '').trim();
 
             // Collect ALL tool parts for status chips (any part whose type starts with 'tool-')
             const allToolChipParts = (msg.parts ?? [])
@@ -1278,8 +909,6 @@ const AITeamChat = () => {
             // Skip if no content at all (suggestFollowUps-only messages are hidden)
             if (
               !textContent &&
-              toolParts.length === 0 &&
-              physioToolParts.length === 0 &&
               !hasSuggestionTool &&
               allToolChipParts.length === 0
             )
@@ -1287,8 +916,6 @@ const AITeamChat = () => {
             // If the only parts are suggestFollowUps with no text or other tools, skip the bubble
             if (
               !textContent &&
-              toolParts.length === 0 &&
-              physioToolParts.length === 0 &&
               hasSuggestionTool &&
               allToolChipParts.length <= 1
             )
@@ -1363,68 +990,6 @@ const AITeamChat = () => {
                             )}
                         </div>
                       )}
-                      {/* Render tool call results as plan cards */}
-                      {toolParts.map((part, idx) => {
-                        if (!('state' in part)) return null;
-                        const toolPart = part as {
-                          type: string;
-                          state: string;
-                          input?: ShareTrainingPlanInput;
-                          output?: {
-                            planId: string;
-                            title: string;
-                            sharedAt: number;
-                          };
-                        };
-                        if (
-                          toolPart.state !== 'output-available' ||
-                          !toolPart.input
-                        ) {
-                          return null; // Chip handles in-progress state
-                        }
-                        const isSaved = toolPart.output
-                          ? savedPlanIds.current.has(toolPart.output.planId)
-                          : false;
-                        return (
-                          <PlanCard
-                            key={`coach-${idx}`}
-                            plan={toolPart.input}
-                            isSaved={isSaved || !!toolPart.output}
-                          />
-                        );
-                      })}
-                      {/* Render physio plan tool results */}
-                      {physioToolParts.map((part, idx) => {
-                        if (!('state' in part)) return null;
-                        const toolPart = part as {
-                          type: string;
-                          state: string;
-                          input?: SharePhysioPlanInput;
-                          output?: {
-                            planId: string;
-                            title: string;
-                            sharedAt: number;
-                          };
-                        };
-                        if (
-                          toolPart.state !== 'output-available' ||
-                          !toolPart.input
-                        ) {
-                          return null; // Chip handles in-progress state
-                        }
-                        const isSaved = toolPart.output
-                          ? savedPhysioPlanIds.current.has(
-                              toolPart.output.planId,
-                            )
-                          : false;
-                        return (
-                          <PhysioPlanCard
-                            key={`physio-${idx}`}
-                            plan={toolPart.input}
-                            isSaved={isSaved || !!toolPart.output}
-                          />
-                        );
-                      })}
                     </>
                   )}
                 </div>
@@ -1554,20 +1119,6 @@ const AITeamChat = () => {
                   <MessageSquare className='h-3 w-3 shrink-0' />
                   Memory &amp; conversation summary
                 </span>
-                {deleteConfirmSessionId &&
-                  plans.some(
-                    (p) => p.sourceSessionId === deleteConfirmSessionId,
-                  ) && (
-                    <span className='flex items-center gap-1.5 text-destructive font-bold'>
-                      <ClipboardList className='h-3 w-3 shrink-0' />
-                      {
-                        plans.filter(
-                          (p) => p.sourceSessionId === deleteConfirmSessionId,
-                        ).length
-                      }{' '}
-                      training plan(s) created in this conversation
-                    </span>
-                  )}
               </span>
               <span className='block font-bold text-foreground text-xs'>
                 This action cannot be undone.

@@ -6,7 +6,7 @@ import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import LoginWall from '@/components/auth/LoginWall';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {SidebarProvider} from '@/contexts/SidebarContext';
-import {useCoachPlan} from '@/hooks/useCoachPlan';
+import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
 import usePageTheme from '@/hooks/usePageTheme';
 import useServiceWorker from '@/hooks/useServiceWorker';
 import {ClipboardList} from 'lucide-react';
@@ -16,7 +16,7 @@ import type {ReactNode} from 'react';
 
 const AppShell = ({children}: {children: ReactNode}) => {
   const {isAuthenticated, isLoading, athlete} = useStravaAuth();
-  const {activePlan} = useCoachPlan(athlete?.id ?? null);
+  const {activePlan} = useWeeklyPlan(athlete?.id ?? null);
   const pageTheme = usePageTheme();
   useServiceWorker();
 
@@ -50,7 +50,7 @@ const AppShell = ({children}: {children: ReactNode}) => {
         <DesktopSidebar />
 
         {/* Main Content */}
-        <div className='flex-1 flex flex-col h-app-screen pb-bottom-nav md:pb-0'>
+        <div className='flex-1 min-w-0 flex flex-col h-app-screen pb-bottom-nav md:pb-0'>
           {/* Mobile header */}
           <header className='border-b-3 border-border px-3 pb-3 pt-safe-ios md:hidden flex items-center'>
             <div className='flex items-center gap-2.5' role='banner' aria-label='Mamoot'>
@@ -69,17 +69,17 @@ const AppShell = ({children}: {children: ReactNode}) => {
               </div>
             </div>
             <div className='ml-auto flex items-center gap-2'>
-              {activePlan && (
-                <Link
-                  href='/training-plan'
-                  aria-label='View training plan'
-                  tabIndex={0}
-                  className='relative p-1.5 border-2 border-border bg-background hover:bg-primary/5 transition-colors'
-                >
-                  <ClipboardList className='h-4.5 w-4.5 text-foreground' />
+              <Link
+                href='/weekly-plan'
+                aria-label='View weekly plan'
+                tabIndex={0}
+                className='relative p-1.5 border-2 border-border bg-background hover:bg-primary/5 transition-colors'
+              >
+                <ClipboardList className='h-4.5 w-4.5 text-foreground' />
+                {activePlan && (
                   <span className='absolute top-0.5 right-0.5 w-1.5 h-1.5 bg-primary rounded-full animate-pulse' />
-                </Link>
-              )}
+                )}
+              </Link>
               <SidebarUserProfile compact />
             </div>
           </header>

@@ -7,11 +7,16 @@ import {
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
 import {getSystemPrompt, isValidPersona} from '@/lib/aiPrompts';
-import {shareTrainingPlanSchema, sharePhysioPlanSchema, suggestFollowUpsSchema} from '@/lib/aiTools';
+import {
+  suggestFollowUpsSchema,
+  saveWeeklyPreferencesSchema,
+  updateTrainingBlockSchema,
+} from '@/lib/aiTools';
 import {createRetrievalTools} from '@/lib/aiRetrievalTools';
 import {db} from '@/db';
-import {coachPlans, physioPlans, userSettings} from '@/db/schema';
-import {eq} from 'drizzle-orm';
+import {userSettings, trainingBlocks} from '@/db/schema';
+import {eq, and} from 'drizzle-orm';
+import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 
 // Allow streaming responses up to 60 seconds
@@ -201,125 +206,8 @@ export async function POST(req: Request) {
     }
   }
 
-  // Build tools — retrieval tools (all personas) + persona-specific sharing tools
+  // Build tools — retrieval tools (all personas) + follow-up suggestions
   const retrievalTools = athleteId ? createRetrievalTools(athleteId) : {};
-  const shareTrainingPlan =
-    persona === 'coach'
-      ? {
-          shareTrainingPlan: {
-            description:
-              'Share a structured training plan with the athlete and the rest of the coaching team (Nutritionist, Physio). Call this tool whenever you create or update a training plan.',
-            inputSchema: shareTrainingPlanSchema,
-            execute: async (plan: {
-              title: string;
-              summary?: string;
-              goal?: string;
-              durationWeeks?: number;
-              sessions: Array<{
-                day: string;
-                date?: string;
-                type: string;
-                description: string;
-                duration?: string;
-                targetPace?: string;
-                targetZone?: string;
-                notes?: string;
-              }>;
-              content: string;
-            }) => {
-              const planId = crypto.randomUUID();
-              const now = Date.now();
-
-              if (athleteId) {
-                try {
-                  // Save as inactive — the user must explicitly activate
-                  await db.insert(coachPlans).values({
-                    id: planId,
-                    athleteId,
-                    title: plan.title,
-                    summary: plan.summary ?? null,
-                    goal: plan.goal ?? null,
-                    durationWeeks: plan.durationWeeks ?? null,
-                    sessions: plan.sessions,
-                    content: plan.content,
-                    isActive: false,
-                    sourceMessageId: null,
-                    sourceSessionId: sessionId ?? null,
-                    sharedAt: now,
-                  });
-                } catch (error) {
-                  console.error(
-                    '[shareTrainingPlan] Failed to save plan:',
-                    error,
-                  );
-                }
-              }
-
-              return {planId, title: plan.title, sharedAt: now};
-            },
-          },
-        }
-      : {};
-
-  const sharePhysioPlan =
-    persona === 'physio'
-      ? {
-          sharePhysioPlan: {
-            description:
-              'Share a structured strength/mobility plan with the athlete and the rest of the coaching team (Coach, Nutritionist). Call this tool whenever you create or update a strength, mobility, or rehab program.',
-            inputSchema: sharePhysioPlanSchema,
-            execute: async (plan: {
-              title: string;
-              summary?: string;
-              phase?: string;
-              strengthSessionsPerWeek?: number;
-              sessions: Array<{
-                day: string;
-                date?: string;
-                type: string;
-                exercises: Array<{
-                  name: string;
-                  sets?: string;
-                  reps?: string;
-                  tempo?: string;
-                  notes?: string;
-                }>;
-                duration?: string;
-                notes?: string;
-              }>;
-              content: string;
-            }) => {
-              const planId = crypto.randomUUID();
-              const now = Date.now();
-
-              if (athleteId) {
-                try {
-                  await db.insert(physioPlans).values({
-                    id: planId,
-                    athleteId,
-                    title: plan.title,
-                    summary: plan.summary ?? null,
-                    phase: plan.phase ?? null,
-                    strengthSessionsPerWeek: plan.strengthSessionsPerWeek ?? null,
-                    sessions: plan.sessions,
-                    content: plan.content,
-                    isActive: false,
-                    sourceSessionId: sessionId ?? null,
-                    sharedAt: now,
-                  });
-                } catch (error) {
-                  console.error(
-                    '[sharePhysioPlan] Failed to save plan:',
-                    error,
-                  );
-                }
-              }
-
-              return {planId, title: plan.title, sharedAt: now};
-            },
-          },
-        }
-      : {};
 
   const suggestFollowUps = {
     suggestFollowUps: {
@@ -332,10 +220,76 @@ export async function POST(req: Request) {
     },
   };
 
+  const coachOnlyTools =
+    persona === 'coach' && athleteId
+      ? {
+          saveWeeklyPreferences: {
+            description:
+              "Save the athlete's preferences/constraints for their next weekly plan generation. Call this when the athlete mentions schedule constraints, unavailable days, focus areas, or special requests for their upcoming training week.",
+            inputSchema: saveWeeklyPreferencesSchema,
+            execute: async ({preferences}: {preferences: string}) => {
+              await db
+                .update(userSettings)
+                .set({weeklyPreferences: preferences})
+                .where(eq(userSettings.athleteId, athleteId));
+              return {saved: true, preferences};
+            },
+          },
+          updateTrainingBlock: {
+            description:
+              "Modify a specific week in the athlete's active training block. Use when the athlete wants to change a week's type (e.g. make it a recovery/off-load week), adjust volume, intensity, or key workouts. Always call getTrainingBlock first to see the current block before making changes.",
+            inputSchema: updateTrainingBlockSchema,
+            execute: async (input: {weekNumber: number; weekType?: string; volumeTargetKm?: number; intensityLevel?: string; keyWorkouts?: string[]; notes?: string}) => {
+              const blocks = await db
+                .select()
+                .from(trainingBlocks)
+                .where(
+                  and(
+                    eq(trainingBlocks.athleteId, athleteId),
+                    eq(trainingBlocks.isActive, true),
+                  ),
+                )
+                .limit(1);
+
+              const block = blocks[0];
+              if (!block) {
+                return {error: 'No active training block found.'};
+              }
+
+              const outlines = block.weekOutlines as WeekOutline[];
+              const idx = outlines.findIndex((o) => o.weekNumber === input.weekNumber);
+              if (idx === -1) {
+                return {error: `Week ${input.weekNumber} not found in the training block.`};
+              }
+
+              const updated = {...outlines[idx]};
+              if (input.weekType) updated.weekType = input.weekType as WeekOutline['weekType'];
+              if (input.volumeTargetKm !== undefined) updated.volumeTargetKm = input.volumeTargetKm;
+              if (input.intensityLevel) updated.intensityLevel = input.intensityLevel as WeekOutline['intensityLevel'];
+              if (input.keyWorkouts) updated.keyWorkouts = input.keyWorkouts;
+              if (input.notes !== undefined) updated.notes = input.notes;
+
+              const newOutlines = [...outlines];
+              newOutlines[idx] = updated;
+
+              await db
+                .update(trainingBlocks)
+                .set({weekOutlines: newOutlines, updatedAt: Date.now()})
+                .where(eq(trainingBlocks.id, block.id));
+
+              return {
+                updated: true,
+                weekNumber: input.weekNumber,
+                summary: `Week ${input.weekNumber} updated: ${updated.weekType} | ${updated.volumeTargetKm}km | ${updated.intensityLevel} | workouts: ${updated.keyWorkouts.join(', ')}`,
+              };
+            },
+          },
+        }
+      : {};
+
   const tools = {
     ...retrievalTools,
-    ...shareTrainingPlan,
-    ...sharePhysioPlan,
+    ...coachOnlyTools,
     ...suggestFollowUps,
   };
 

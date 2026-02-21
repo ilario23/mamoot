@@ -16,7 +16,8 @@ const ROUTE_THEME_MAP: Record<string, PageTheme> = {
   '/ai-chat': {accent: '--nav-ai', accentForeground: '--nav-ai-foreground', key: 'ai'},
   '/gear': {accent: '--nav-gear', accentForeground: '--nav-gear-foreground', key: 'gear'},
   '/settings': {accent: '--nav-dashboard', accentForeground: '--nav-dashboard-foreground', key: 'dashboard'},
-  '/training-plan': {accent: '--nav-ai', accentForeground: '--nav-ai-foreground', key: 'ai'},
+  '/training-block': {accent: '--nav-training-block', accentForeground: '--nav-training-block-foreground', key: 'training-block'},
+  '/weekly-plan': {accent: '--nav-weekly-plan', accentForeground: '--nav-weekly-plan-foreground', key: 'weekly-plan'},
 };
 
 const DEFAULT_THEME: PageTheme = {

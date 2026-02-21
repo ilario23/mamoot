@@ -70,6 +70,12 @@
     --nav-ai-foreground: 0 0% 100%;
     --nav-gear: 180 75% 40%;
     --nav-gear-foreground: 0 0% 100%;
+    --nav-weekly-plan: 265 70% 55%;
+    --nav-weekly-plan-foreground: 0 0% 100%;
+    --nav-training-block: 25 95% 53%;
+    --nav-training-block-foreground: 0 0% 100%;
+    --nav-more: 220 10% 50%;
+    --nav-more-foreground: 0 0% 100%;
 
     /* Page accent (defaults to dashboard, overridden per-route) */
     --page-accent: 312 100% 67%;
@@ -171,6 +177,12 @@
     --nav-ai-foreground: 0 0% 100%;
     --nav-gear: 180 75% 45%;
     --nav-gear-foreground: 0 0% 100%;
+    --nav-weekly-plan: 265 70% 58%;
+    --nav-weekly-plan-foreground: 0 0% 100%;
+    --nav-training-block: 25 95% 55%;
+    --nav-training-block-foreground: 0 0% 100%;
+    --nav-more: 220 10% 55%;
+    --nav-more-foreground: 0 0% 100%;
 
     /* Page accent (defaults to dashboard, overridden per-route) */
     --page-accent: 312 100% 67%;

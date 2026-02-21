@@ -53,40 +53,6 @@ export const planSessionSchema = z.object({
 
 export type PlanSessionInput = z.infer<typeof planSessionSchema>;
 
-// ----- Share Training Plan -----
-
-export const shareTrainingPlanSchema = z.object({
-  title: z
-    .string()
-    .describe(
-      'Short title for the training plan, e.g. "Half Marathon Build — Weeks 1-4"',
-    ),
-  summary: z
-    .string()
-    .optional()
-    .describe('1-2 sentence overview of the plan'),
-  goal: z
-    .string()
-    .optional()
-    .describe('The target race or goal this plan is for, e.g. "sub-1:45 half marathon"'),
-  durationWeeks: z
-    .number()
-    .optional()
-    .describe('How many weeks the plan spans'),
-  sessions: z
-    .array(planSessionSchema)
-    .describe(
-      'Array of planned workout sessions — one per training day in the plan',
-    ),
-  content: z
-    .string()
-    .describe(
-      'Full markdown rendering of the complete plan for display. Include all details, tables, and formatting.',
-    ),
-});
-
-export type ShareTrainingPlanInput = z.infer<typeof shareTrainingPlanSchema>;
-
 // ----- Physio Exercise -----
 
 export const physioExerciseSchema = z.object({
@@ -111,7 +77,7 @@ export const physioExerciseSchema = z.object({
     .describe('Form cues or additional instructions'),
 });
 
-// ----- Physio Plan Session -----
+// ----- Physio Session -----
 
 export const physioSessionSchema = z.object({
   day: z
@@ -121,7 +87,7 @@ export const physioSessionSchema = z.object({
     .string()
     .optional()
     .describe(
-      'ISO date for this session, e.g. "2026-02-10". Include dates so sessions align with the Coach plan.',
+      'ISO date for this session, e.g. "2026-02-10". Include dates so sessions align with the weekly plan.',
     ),
   type: z
     .enum(['strength', 'mobility', 'warmup', 'cooldown', 'recovery'])
@@ -138,42 +104,6 @@ export const physioSessionSchema = z.object({
 
 export type PhysioSessionInput = z.infer<typeof physioSessionSchema>;
 
-// ----- Share Physio Plan -----
-
-export const sharePhysioPlanSchema = z.object({
-  title: z
-    .string()
-    .describe(
-      'Short title for the plan, e.g. "Base Phase Strength — Weeks 1-4"',
-    ),
-  summary: z
-    .string()
-    .optional()
-    .describe('1-2 sentence overview of the plan'),
-  phase: z
-    .string()
-    .optional()
-    .describe('Training phase: "base", "build", "taper", or "maintenance"'),
-  strengthSessionsPerWeek: z
-    .number()
-    .optional()
-    .describe(
-      'How many dedicated strength sessions per week this plan prescribes (e.g. 2 or 3). The Coach uses this to leave room in the running schedule.',
-    ),
-  sessions: z
-    .array(physioSessionSchema)
-    .describe(
-      'Array of planned physio sessions — strength, mobility, warm-up, and cool-down routines',
-    ),
-  content: z
-    .string()
-    .describe(
-      'Full markdown rendering of the complete plan for display. Include all details, tables, and formatting.',
-    ),
-});
-
-export type SharePhysioPlanInput = z.infer<typeof sharePhysioPlanSchema>;
-
 // ----- Suggest Follow-Ups -----
 
 export const suggestFollowUpsSchema = z.object({
@@ -187,3 +117,29 @@ export const suggestFollowUpsSchema = z.object({
 });
 
 export type SuggestFollowUpsInput = z.infer<typeof suggestFollowUpsSchema>;
+
+// ----- Save Weekly Preferences -----
+
+export const saveWeeklyPreferencesSchema = z.object({
+  preferences: z
+    .string()
+    .describe(
+      'Free-text summary of athlete preferences/constraints for the upcoming week, e.g. "Can\'t run Tuesday and Thursday. Focus on tempo work. Recovering from knee soreness."',
+    ),
+});
+
+// ----- Update Training Block -----
+
+export const updateTrainingBlockSchema = z.object({
+  weekNumber: z.number().describe('Which week to modify (1-indexed)'),
+  weekType: z
+    .enum(['build', 'recovery', 'peak', 'taper', 'race', 'base', 'off-load'])
+    .optional()
+    .describe('New week type'),
+  volumeTargetKm: z.number().optional().describe('New volume target in km'),
+  intensityLevel: z.enum(['low', 'moderate', 'high']).optional(),
+  keyWorkouts: z.array(z.string()).optional(),
+  notes: z.string().optional().describe('Updated notes for this week'),
+});
+
+export type UpdateTrainingBlockInput = z.infer<typeof updateTrainingBlockSchema>;

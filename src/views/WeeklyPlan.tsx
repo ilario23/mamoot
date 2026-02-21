@@ -1,0 +1,598 @@
+'use client';
+
+import {useState, useMemo} from 'react';
+import {
+  CalendarDays,
+  Dumbbell,
+  Footprints,
+  Zap,
+  Clock,
+  Gauge,
+  ChevronDown,
+  Sparkles,
+  Moon,
+  Trash2,
+  Check,
+  MessageSquareText,
+  Target,
+} from 'lucide-react';
+import Link from 'next/link';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {NeoLoader} from '@/components/ui/neo-loader';
+import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
+import {useTrainingBlock} from '@/hooks/useTrainingBlock';
+import {useStravaAuth} from '@/contexts/StravaAuthContext';
+import {SESSION_TYPE_COLORS, SESSION_TYPE_BORDER_COLORS} from '@/lib/planConstants';
+import type {UnifiedSession, PhysioExercise} from '@/lib/cacheTypes';
+
+const formatWeekRange = (weekStart: string): string => {
+  const start = new Date(weekStart);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+  const year = end.getFullYear();
+  return `${fmt(start)} – ${fmt(end)}, ${year}`;
+};
+
+const DayCard = ({session}: {session: UnifiedSession}) => {
+  const hasRun = !!session.run;
+  const hasPhysio = !!session.physio;
+  const isRest = !hasRun && !hasPhysio;
+
+  const borderColor = hasRun
+    ? (SESSION_TYPE_BORDER_COLORS[session.run!.type] ?? 'border-l-muted-foreground')
+    : hasPhysio
+      ? (SESSION_TYPE_BORDER_COLORS[session.physio!.type] ?? 'border-l-secondary')
+      : 'border-l-muted-foreground';
+
+  return (
+    <div
+      className={`border-3 border-border bg-background shadow-neo-sm p-4 transition-all hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] border-l-[6px] overflow-hidden min-w-0 ${borderColor}`}
+      role='article'
+      aria-label={`${session.day} — ${session.date}`}
+    >
+      {/* Day header */}
+      <div className='flex items-start justify-between gap-2 mb-3'>
+        <div className='flex items-center gap-2 shrink-0'>
+          <span className='font-black text-sm uppercase tracking-wider'>
+            {session.day}
+          </span>
+          <span className='text-[11px] text-muted-foreground font-bold'>
+            {new Date(session.date).toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+            })}
+          </span>
+        </div>
+        <div className='flex flex-wrap justify-end gap-1'>
+          {hasRun && (
+            <span
+              className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${SESSION_TYPE_COLORS[session.run!.type] ?? 'bg-muted text-foreground'}`}
+            >
+              <Footprints className='h-3 w-3 inline mr-0.5 -mt-0.5' />
+              {session.run!.type}
+            </span>
+          )}
+          {hasPhysio && (
+            <span
+              className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${SESSION_TYPE_COLORS[session.physio!.type] ?? 'bg-muted text-foreground'}`}
+            >
+              <Dumbbell className='h-3 w-3 inline mr-0.5 -mt-0.5' />
+              {session.physio!.type}
+            </span>
+          )}
+          {isRest && (
+            <span className='px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-muted text-muted-foreground'>
+              <Moon className='h-3 w-3 inline mr-0.5 -mt-0.5' />
+              rest
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Running section */}
+      {hasRun && (
+        <div className='mb-3'>
+          <p className='text-sm font-medium leading-relaxed'>
+            {session.run!.description}
+          </p>
+          {(session.run!.duration || session.run!.targetPace || session.run!.targetZone) && (
+            <div className='flex flex-wrap gap-1.5 mt-2'>
+              {session.run!.duration && (
+                <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-muted border-2 border-border'>
+                  <Clock className='h-2.5 w-2.5' />
+                  {session.run!.duration}
+                </span>
+              )}
+              {session.run!.targetPace && (
+                <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-secondary/10 text-secondary border-2 border-border'>
+                  <Gauge className='h-2.5 w-2.5' />
+                  {session.run!.targetPace}
+                </span>
+              )}
+              {session.run!.targetZone && (
+                <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-primary/10 text-primary border-2 border-border'>
+                  <Zap className='h-2.5 w-2.5' />
+                  {session.run!.targetZone}
+                </span>
+              )}
+            </div>
+          )}
+          {session.run!.notes && (
+            <p className='text-xs text-muted-foreground font-medium mt-2 italic'>
+              {session.run!.notes}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Divider between run and physio */}
+      {hasRun && hasPhysio && (
+        <div className='border-t-2 border-border/30 my-3' />
+      )}
+
+      {/* Physio section */}
+      {hasPhysio && (
+        <div>
+          <div className='flex items-center gap-1.5 mb-2'>
+            <Dumbbell className='h-3.5 w-3.5 text-secondary' />
+            <span className='text-xs font-black uppercase tracking-wider text-secondary'>
+              {session.physio!.type}
+            </span>
+            {session.physio!.duration && (
+              <span className='text-[10px] text-muted-foreground font-bold ml-auto'>
+                {session.physio!.duration}
+              </span>
+            )}
+          </div>
+          <div className='space-y-1'>
+            {session.physio!.exercises.map((ex, i) => (
+              <div
+                key={i}
+                className='text-xs'
+              >
+                <span className='font-bold'>{ex.name}</span>
+                {' '}
+                <span className='text-muted-foreground'>
+                  {[
+                    ex.sets && ex.reps ? `${ex.sets}x${ex.reps}` : null,
+                    ex.tempo,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </div>
+            ))}
+          </div>
+          {session.physio!.notes && (
+            <p className='text-xs text-muted-foreground font-medium mt-2 italic'>
+              {session.physio!.notes}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Rest day */}
+      {isRest && session.notes && (
+        <p className='text-sm text-muted-foreground font-medium'>
+          {session.notes}
+        </p>
+      )}
+    </div>
+  );
+};
+
+const PreferencesBox = ({
+  preferences,
+  onChange,
+  onBlur,
+}: {
+  preferences: string;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+}) => (
+  <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
+    <div className='flex items-center gap-1.5'>
+      <MessageSquareText className='h-3.5 w-3.5 text-primary' />
+      <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
+        Preferences
+      </span>
+    </div>
+    <textarea
+      value={preferences}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
+      placeholder="No preferences set. Chat with the Coach to set constraints, or type them here (e.g. &quot;Can't run Tuesday, focus on tempo work&quot;)."
+      rows={2}
+      className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none'
+    />
+  </div>
+);
+
+const EmptyState = ({
+  onGenerate,
+  isGenerating,
+  preferences,
+  onPreferencesChange,
+  onPreferencesBlur,
+}: {
+  onGenerate: () => void;
+  isGenerating: boolean;
+  preferences: string;
+  onPreferencesChange: (value: string) => void;
+  onPreferencesBlur: () => void;
+}) => (
+  <div className='border-3 border-border bg-background shadow-neo p-8 md:p-12 text-center space-y-4'>
+    <div className='w-16 h-16 mx-auto bg-muted border-3 border-border shadow-neo-sm flex items-center justify-center'>
+      <CalendarDays className='h-8 w-8 text-muted-foreground' />
+    </div>
+    <div className='space-y-1'>
+      <h2 className='font-black text-lg uppercase tracking-wider'>
+        No Weekly Plan Yet
+      </h2>
+      <p className='text-sm text-muted-foreground font-medium max-w-sm mx-auto'>
+        Generate a unified weekly plan that combines running sessions from your
+        Coach with strength and mobility work from your Physio.
+      </p>
+    </div>
+    <div className='max-w-md mx-auto w-full'>
+      <PreferencesBox
+        preferences={preferences}
+        onChange={onPreferencesChange}
+        onBlur={onPreferencesBlur}
+      />
+    </div>
+    <button
+      onClick={onGenerate}
+      disabled={isGenerating}
+      tabIndex={0}
+      aria-label='Generate weekly plan'
+      className='inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground font-black text-sm uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
+    >
+      {isGenerating ? (
+        <NeoLoader label='Generating' size='sm' />
+      ) : (
+        <>
+          <Sparkles className='h-4 w-4' />
+          Generate Weekly Plan
+        </>
+      )}
+    </button>
+  </div>
+);
+
+const PlanHistoryItem = ({
+  plan,
+  isActive,
+  onActivate,
+  onDelete,
+}: {
+  plan: {id: string; title: string; weekStart: string; createdAt: number; isActive: boolean};
+  isActive: boolean;
+  onActivate: () => void;
+  onDelete: () => void;
+}) => (
+  <div
+    className={`flex items-center gap-3 px-4 py-3 border-3 border-border transition-all overflow-hidden ${
+      isActive ? 'bg-primary/10 shadow-neo-sm' : 'bg-background hover:bg-muted'
+    }`}
+  >
+    <div className='min-w-0 flex-1'>
+      <p className='text-sm font-bold truncate'>{plan.title}</p>
+      <p className='text-[11px] text-muted-foreground font-medium'>
+        {formatWeekRange(plan.weekStart)}
+      </p>
+    </div>
+    <div className='flex gap-1 shrink-0'>
+      {!isActive && (
+        <button
+          onClick={onActivate}
+          tabIndex={0}
+          aria-label='Activate this plan'
+          className='p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 border-2 border-transparent hover:border-border transition-all'
+        >
+          <Check className='h-3.5 w-3.5' />
+        </button>
+      )}
+      <button
+        onClick={onDelete}
+        tabIndex={0}
+        aria-label='Delete this plan'
+        className='p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 border-2 border-transparent hover:border-border transition-all'
+      >
+        <Trash2 className='h-3.5 w-3.5' />
+      </button>
+    </div>
+  </div>
+);
+
+const MarkdownContent = ({content}: {content: string}) => (
+  <ReactMarkdown
+    remarkPlugins={[remarkGfm]}
+    components={{
+      table: ({children}) => (
+        <div className='overflow-x-auto -mx-1 px-1'>
+          <table className='w-full border-collapse border-3 border-border text-sm'>
+            {children}
+          </table>
+        </div>
+      ),
+      th: ({children}) => (
+        <th className='border-2 border-border px-3 py-2 bg-muted font-black text-xs uppercase tracking-wider text-left'>
+          {children}
+        </th>
+      ),
+      td: ({children}) => (
+        <td className='border-2 border-border px-3 py-2'>{children}</td>
+      ),
+      pre: ({children}) => (
+        <pre className='overflow-x-auto'>{children}</pre>
+      ),
+    }}
+  >
+    {content}
+  </ReactMarkdown>
+);
+
+const BlockContextBanner = ({
+  weekNumber,
+  totalWeeks,
+  phaseName,
+  goalEvent,
+}: {
+  weekNumber: number;
+  totalWeeks: number;
+  phaseName: string | null;
+  goalEvent: string;
+}) => (
+  <Link
+    href='/training-block'
+    className='flex items-center gap-2 px-4 py-2.5 border-3 border-border bg-nav-training-block/10 shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all min-w-0 overflow-hidden'
+  >
+    <Target className='h-4 w-4 text-nav-training-block shrink-0' />
+    <span className='text-xs font-black uppercase tracking-wider shrink-0'>
+      Week {weekNumber} of {totalWeeks}
+    </span>
+    {phaseName && (
+      <>
+        <span className='text-xs text-muted-foreground shrink-0'>&middot;</span>
+        <span className='text-xs font-bold text-muted-foreground shrink-0'>{phaseName}</span>
+      </>
+    )}
+    <span className='text-xs text-muted-foreground shrink-0'>&middot;</span>
+    <span className='text-xs font-medium text-muted-foreground truncate min-w-0'>{goalEvent}</span>
+  </Link>
+);
+
+const WeeklyPlan = () => {
+  const {athlete} = useStravaAuth();
+  const athleteId = athlete?.id ?? null;
+  const {
+    activePlan,
+    plans,
+    isLoading,
+    isGenerating,
+    generatePlan,
+    activatePlan,
+    deletePlan,
+    preferences,
+    setPreferences,
+    savePreferences,
+  } = useWeeklyPlan(athleteId);
+  const {activeBlock} = useTrainingBlock(athleteId);
+  const [fullPlanOpen, setFullPlanOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const blockBannerData = useMemo(() => {
+    if (!activeBlock || !activePlan?.blockId) return null;
+    const weekNumber = activePlan.weekNumber ?? 0;
+    if (weekNumber <= 0) return null;
+    type Phase = {name: string; weekNumbers: number[]};
+    const phases = activeBlock.phases as Phase[];
+    const currentPhase = phases.find((p) => p.weekNumbers.includes(weekNumber));
+    return {
+      weekNumber,
+      totalWeeks: activeBlock.totalWeeks,
+      phaseName: currentPhase?.name ?? null,
+      goalEvent: activeBlock.goalEvent,
+    };
+  }, [activeBlock, activePlan]);
+
+  const handleGenerate = () => {
+    generatePlan(undefined, preferences);
+  };
+
+  const handlePreferencesBlur = () => {
+    savePreferences();
+  };
+
+  const handleToggleFullPlan = () => {
+    setFullPlanOpen((prev) => !prev);
+  };
+
+  const handleToggleHistory = () => {
+    setHistoryOpen((prev) => !prev);
+  };
+
+  if (isLoading) {
+    return (
+      <div className='space-y-4 md:space-y-6'>
+        <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
+          Weekly Plan
+        </h1>
+        <div className='border-3 border-border bg-background shadow-neo p-8 flex items-center justify-center'>
+          <NeoLoader label='Loading plan' size='sm' />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className='space-y-4 md:space-y-6 min-w-0 max-w-full overflow-x-hidden'>
+      {/* Page title */}
+      <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
+        Weekly Plan
+      </h1>
+
+      {/* Training block context banner */}
+      {blockBannerData && activePlan && (
+        <BlockContextBanner
+          weekNumber={blockBannerData.weekNumber}
+          totalWeeks={blockBannerData.totalWeeks}
+          phaseName={blockBannerData.phaseName}
+          goalEvent={blockBannerData.goalEvent}
+        />
+      )}
+
+      {/* Empty state */}
+      {!activePlan && (
+        <EmptyState
+          onGenerate={handleGenerate}
+          isGenerating={isGenerating}
+          preferences={preferences}
+          onPreferencesChange={setPreferences}
+          onPreferencesBlur={handlePreferencesBlur}
+        />
+      )}
+
+      {/* Active plan */}
+      {activePlan && (
+        <>
+          {/* Plan header */}
+          <div className='border-3 border-border bg-background shadow-neo border-l-[6px] border-l-primary p-5 md:p-6 space-y-3 overflow-hidden'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='min-w-0 space-y-1'>
+                <span className='font-black text-[10px] uppercase tracking-widest text-primary flex items-center gap-1'>
+                  <CalendarDays className='h-3 w-3' />
+                  Active Plan
+                </span>
+                <h2 className='font-black text-xl md:text-2xl uppercase tracking-tight leading-tight'>
+                  {activePlan.title}
+                </h2>
+                {activePlan.summary && (
+                  <p className='text-sm text-muted-foreground font-medium leading-relaxed'>
+                    {activePlan.summary}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                tabIndex={0}
+                aria-label='Generate new plan'
+                className='shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
+              >
+                {isGenerating ? (
+                  <NeoLoader size='sm' />
+                ) : (
+                  <>
+                    <Sparkles className='h-3.5 w-3.5' />
+                    Regenerate
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Week range + meta pills */}
+            <div className='flex flex-wrap gap-2'>
+              <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-secondary/10 text-secondary shadow-neo-sm'>
+                <CalendarDays className='h-3 w-3' />
+                {formatWeekRange(activePlan.weekStart)}
+              </span>
+              {activePlan.goal && (
+                <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-accent/20 text-accent-foreground shadow-neo-sm'>
+                  {activePlan.goal}
+                </span>
+              )}
+              <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-muted shadow-neo-sm'>
+                {activePlan.sessions.filter((s) => s.run).length} runs · {activePlan.sessions.filter((s) => s.physio).length} physio
+              </span>
+            </div>
+          </div>
+
+          {/* Preferences */}
+          <PreferencesBox
+            preferences={preferences}
+            onChange={setPreferences}
+            onBlur={handlePreferencesBlur}
+          />
+
+          {/* Day cards */}
+          <div className='grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4'>
+            {activePlan.sessions.map((session, index) => (
+              <DayCard key={session.date ?? index} session={session} />
+            ))}
+          </div>
+
+          {/* Full plan markdown */}
+          {activePlan.content && (
+            <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
+              <button
+                onClick={handleToggleFullPlan}
+                aria-expanded={fullPlanOpen}
+                aria-label={`${fullPlanOpen ? 'Collapse' : 'Expand'} full plan details`}
+                tabIndex={0}
+                className='w-full flex items-center justify-between p-4 md:p-5 hover:bg-muted/50 transition-colors'
+              >
+                <span className='font-black text-base md:text-lg uppercase tracking-wider'>
+                  Full Plan Details
+                </span>
+                <ChevronDown
+                  className={`h-5 w-5 shrink-0 transition-transform duration-200 ${
+                    fullPlanOpen ? 'rotate-180' : ''
+                  }`}
+                  aria-hidden='true'
+                />
+              </button>
+              {fullPlanOpen && (
+                <div className='px-4 pb-4 md:px-5 md:pb-5 prose-sm max-w-none overflow-hidden break-words'>
+                  <MarkdownContent content={activePlan.content} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Plan history */}
+          {plans.length > 1 && (
+            <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
+              <button
+                onClick={handleToggleHistory}
+                aria-expanded={historyOpen}
+                aria-label={`${historyOpen ? 'Collapse' : 'Expand'} plan history`}
+                tabIndex={0}
+                className='w-full flex items-center justify-between p-4 md:p-5 hover:bg-muted/50 transition-colors'
+              >
+                <span className='font-black text-base md:text-lg uppercase tracking-wider'>
+                  Plan History ({plans.length})
+                </span>
+                <ChevronDown
+                  className={`h-5 w-5 shrink-0 transition-transform duration-200 ${
+                    historyOpen ? 'rotate-180' : ''
+                  }`}
+                  aria-hidden='true'
+                />
+              </button>
+              {historyOpen && (
+                <div className='space-y-1 p-2 overflow-hidden'>
+                  {plans.map((plan) => (
+                    <PlanHistoryItem
+                      key={plan.id}
+                      plan={plan}
+                      isActive={plan.id === activePlan?.id}
+                      onActivate={() => activatePlan(plan.id)}
+                      onDelete={() => deletePlan(plan.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+export default WeeklyPlan;

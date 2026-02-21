@@ -23,7 +23,7 @@ import {
   neonGetActivityLabel,
   neonSyncActivityLabel,
 } from '@/lib/neonSync';
-import {neonGetCoachPlans} from '@/lib/chatSync';
+import {neonGetWeeklyPlans, neonGetActiveTrainingBlock} from '@/lib/chatSync';
 import {transformActivity} from '@/lib/strava';
 
 // ----- Helpers -----
@@ -247,30 +247,70 @@ const resolveGear = async (itemId?: string): Promise<string> => {
 };
 
 const resolvePlan = async (athleteId: number): Promise<string> => {
-  const plans = await neonGetCoachPlans(athleteId);
-  if (!plans || plans.length === 0) return 'No active training plan.';
+  const plans = await neonGetWeeklyPlans(athleteId);
+  if (!plans || plans.length === 0) return 'No active weekly plan.';
 
   const plan = plans
     .filter((p) => p.isActive)
-    .sort((a, b) => b.sharedAt - a.sharedAt)[0];
-  if (!plan) return 'No active training plan.';
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  if (!plan) return 'No active weekly plan.';
 
   const lines = [
-    `Training Plan: ${plan.title}`,
+    `Weekly Plan: ${plan.title}`,
+    `Week: ${plan.weekStart}`,
     plan.goal ? `Goal: ${plan.goal}` : null,
-    plan.durationWeeks ? `Duration: ${plan.durationWeeks} weeks` : null,
+    plan.summary ? `Summary: ${plan.summary}` : null,
   ].filter(Boolean) as string[];
 
   if (plan.sessions?.length > 0) {
-    lines.push('', '| Day | Type | Workout |', '|-----|------|---------|');
     for (const s of plan.sessions) {
-      lines.push(`| ${s.day} | ${s.type} | ${s.description} |`);
+      const parts = [`### ${s.day} — ${s.date}`];
+      if (s.run) parts.push(`**Run (${s.run.type}):** ${s.run.description}`);
+      if (s.physio) {
+        parts.push(`**Physio (${s.physio.type}):** ${s.physio.exercises.map((e) => e.name).join(', ')}`);
+      }
+      if (!s.run && !s.physio) parts.push('Rest day');
+      lines.push(parts.join('\n'));
     }
   }
   if (plan.content) {
     lines.push('', plan.content);
   }
   return lines.join('\n');
+};
+
+const resolveBlock = async (athleteId: number): Promise<string> => {
+  const block = await neonGetActiveTrainingBlock(athleteId);
+  if (!block) return 'No active training block.';
+
+  const now = new Date();
+  const start = new Date(block.startDate);
+  const diffMs = now.getTime() - start.getTime();
+  const currentWeek = Math.max(1, Math.min(block.totalWeeks, Math.ceil(diffMs / (7 * 86400000))));
+
+  type Phase = {name: string; weekNumbers: number[]; focus: string; volumeDirection: string};
+  type Outline = {weekNumber: number; phase: string; weekType: string; volumeTargetKm: number; intensityLevel: string; keyWorkouts: string[]; notes: string};
+
+  const phases = block.phases as Phase[];
+  const outlines = block.weekOutlines as Outline[];
+  const currentPhase = phases.find((p) => p.weekNumbers.includes(currentWeek));
+
+  const lines = [
+    `Training Block: ${block.goalEvent}`,
+    `Goal Date: ${block.goalDate}`,
+    `Weeks: ${block.totalWeeks} (started ${block.startDate})`,
+    `Current Week: ${currentWeek} of ${block.totalWeeks}`,
+    currentPhase ? `Phase: ${currentPhase.name} — ${currentPhase.focus}` : '',
+    '',
+    'Week Outlines:',
+  ];
+
+  for (const o of outlines) {
+    const marker = o.weekNumber === currentWeek ? ' ← CURRENT' : '';
+    lines.push(`- Week ${o.weekNumber} [${o.phase}] ${o.weekType} | ${o.volumeTargetKm}km | ${o.intensityLevel}${marker}`);
+  }
+
+  return lines.filter(Boolean).join('\n');
 };
 
 // ----- Hook -----
@@ -332,6 +372,9 @@ export const useMentionResolver = () => {
             break;
           case 'plan':
             data = await resolvePlan(athleteId);
+            break;
+          case 'block':
+            data = await resolveBlock(athleteId);
             break;
           default:
             data = 'Unknown data category.';

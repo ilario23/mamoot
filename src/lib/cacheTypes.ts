@@ -163,48 +163,7 @@ export interface CachedActivityLabel {
   computedAt: number;
 }
 
-// ----- Coach plan persistence -----
-
-export interface PlanSession {
-  day: string;
-  /** ISO date for this session, e.g. "2026-02-10" */
-  date?: string;
-  type: string;
-  description: string;
-  duration?: string;
-  targetPace?: string;
-  targetZone?: string;
-  notes?: string;
-}
-
-export interface CachedCoachPlan {
-  /** UUID primary key */
-  id: string;
-  /** Strava athlete ID */
-  athleteId: number;
-  /** Short title for the plan */
-  title: string;
-  /** Brief overview */
-  summary: string | null;
-  /** Target race/goal */
-  goal: string | null;
-  /** How many weeks the plan spans */
-  durationWeeks: number | null;
-  /** Structured array of workout sessions */
-  sessions: PlanSession[];
-  /** Full markdown rendering for display */
-  content: string;
-  /** Whether this is the currently active plan */
-  isActive: boolean;
-  /** FK to chat_messages.id that produced this plan */
-  sourceMessageId: string | null;
-  /** FK to chat_sessions.id where the plan was created */
-  sourceSessionId: string | null;
-  /** Unix ms timestamp when the plan was shared */
-  sharedAt: number;
-}
-
-// ----- Physio plan persistence -----
+// ----- Weekly plan persistence -----
 
 export interface PhysioExercise {
   name: string;
@@ -214,36 +173,87 @@ export interface PhysioExercise {
   notes?: string;
 }
 
-export interface PhysioPlanSession {
+export interface UnifiedSession {
+  /** Day label, e.g. "Monday" */
   day: string;
-  date?: string;
-  type: string;
-  exercises: PhysioExercise[];
-  duration?: string;
+  /** ISO date, e.g. "2026-02-23" */
+  date: string;
+  /** Running component (from Coach) */
+  run?: {
+    type: string;
+    description: string;
+    duration?: string;
+    targetPace?: string;
+    targetZone?: string;
+    notes?: string;
+  };
+  /** Strength/mobility component (from Physio) */
+  physio?: {
+    type: string;
+    exercises: PhysioExercise[];
+    duration?: string;
+    notes?: string;
+  };
+  /** Day-level combined notes */
   notes?: string;
 }
 
-export interface CachedPhysioPlan {
+export interface CachedWeeklyPlan {
   /** UUID primary key */
   id: string;
   /** Strava athlete ID */
   athleteId: number;
+  /** ISO Monday date, e.g. "2026-02-23" */
+  weekStart: string;
   /** Short title for the plan */
   title: string;
   /** Brief overview */
   summary: string | null;
-  /** Training phase: "base", "build", "taper", etc. */
-  phase: string | null;
-  /** How many strength sessions per week */
-  strengthSessionsPerWeek: number | null;
-  /** Structured array of physio sessions */
-  sessions: PhysioPlanSession[];
+  /** Target race/goal */
+  goal: string | null;
+  /** Combined running + physio sessions for each day */
+  sessions: UnifiedSession[];
   /** Full markdown rendering for display */
   content: string;
   /** Whether this is the currently active plan */
   isActive: boolean;
-  /** FK to chat_sessions.id where the plan was created */
-  sourceSessionId: string | null;
-  /** Unix ms timestamp when the plan was shared */
-  sharedAt: number;
+  /** FK to training_blocks.id — links this week to a macro plan */
+  blockId: string | null;
+  /** 1-indexed week number within the training block */
+  weekNumber: number | null;
+  /** Unix ms timestamp when the plan was created */
+  createdAt: number;
+}
+
+// ----- Training Blocks (Macro Periodization) -----
+
+export interface TrainingPhase {
+  name: string;
+  weekNumbers: number[];
+  focus: string;
+  volumeDirection: 'build' | 'hold' | 'reduce';
+}
+
+export interface WeekOutline {
+  weekNumber: number;
+  phase: string;
+  weekType: 'build' | 'recovery' | 'peak' | 'taper' | 'race' | 'base' | 'off-load';
+  volumeTargetKm: number;
+  intensityLevel: 'low' | 'moderate' | 'high';
+  keyWorkouts: string[];
+  notes: string;
+}
+
+export interface CachedTrainingBlock {
+  id: string;
+  athleteId: number;
+  goalEvent: string;
+  goalDate: string;
+  totalWeeks: number;
+  startDate: string;
+  phases: TrainingPhase[];
+  weekOutlines: WeekOutline[];
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
 }

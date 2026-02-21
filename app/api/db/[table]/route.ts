@@ -21,8 +21,8 @@ import {
   userSettings,
   chatSessions,
   chatMessages,
-  coachPlans,
-  physioPlans,
+  trainingBlocks,
+  weeklyPlans,
 } from '@/db/schema';
 import {eq, and, sql, desc, inArray, gte} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
@@ -266,71 +266,64 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         return NextResponse.json(rows);
       }
 
-      case 'coach-plans': {
-        // GET /api/db/coach-plans?athleteId=123          → all plans for athlete
-        // GET /api/db/coach-plans?athleteId=123&active=true → active plan only
-        // GET /api/db/coach-plans?pk=uuid                → single plan by ID
+      case 'training-blocks': {
         if (pk) {
           const rows = await db
             .select()
-            .from(coachPlans)
-            .where(eq(coachPlans.id, pk));
+            .from(trainingBlocks)
+            .where(eq(trainingBlocks.id, pk));
           return NextResponse.json(rows[0] ?? null);
         }
-        const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
-        if (!athleteIdParam)
+        const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
+        if (!tbAthleteId)
           return NextResponse.json(
             {error: 'athleteId required'},
             {status: 400},
           );
-        const activeOnly = req.nextUrl.searchParams.get('active') === 'true';
-        const conditions = [eq(coachPlans.athleteId, Number(athleteIdParam))];
-        if (activeOnly) {
-          conditions.push(eq(coachPlans.isActive, true));
+        const tbActiveOnly = req.nextUrl.searchParams.get('active') === 'true';
+        const tbConditions = [eq(trainingBlocks.athleteId, Number(tbAthleteId))];
+        if (tbActiveOnly) {
+          tbConditions.push(eq(trainingBlocks.isActive, true));
         }
-        const planRows = await db
+        const tbRows = await db
           .select()
-          .from(coachPlans)
-          .where(and(...conditions))
-          .orderBy(desc(coachPlans.sharedAt));
-        // If requesting active only, return single object or null
-        if (activeOnly) {
-          return NextResponse.json(planRows[0] ?? null);
+          .from(trainingBlocks)
+          .where(and(...tbConditions))
+          .orderBy(desc(trainingBlocks.createdAt));
+        if (tbActiveOnly) {
+          return NextResponse.json(tbRows[0] ?? null);
         }
-        return NextResponse.json(planRows);
+        return NextResponse.json(tbRows);
       }
 
-      case 'physio-plans': {
-        // GET /api/db/physio-plans?athleteId=123          → all plans for athlete
-        // GET /api/db/physio-plans?athleteId=123&active=true → active plan only
-        // GET /api/db/physio-plans?pk=uuid                → single plan by ID
+      case 'weekly-plans': {
         if (pk) {
           const rows = await db
             .select()
-            .from(physioPlans)
-            .where(eq(physioPlans.id, pk));
+            .from(weeklyPlans)
+            .where(eq(weeklyPlans.id, pk));
           return NextResponse.json(rows[0] ?? null);
         }
-        const ppAthleteId = req.nextUrl.searchParams.get('athleteId');
-        if (!ppAthleteId)
+        const wpAthleteId = req.nextUrl.searchParams.get('athleteId');
+        if (!wpAthleteId)
           return NextResponse.json(
             {error: 'athleteId required'},
             {status: 400},
           );
-        const ppActiveOnly = req.nextUrl.searchParams.get('active') === 'true';
-        const ppConditions = [eq(physioPlans.athleteId, Number(ppAthleteId))];
-        if (ppActiveOnly) {
-          ppConditions.push(eq(physioPlans.isActive, true));
+        const wpActiveOnly = req.nextUrl.searchParams.get('active') === 'true';
+        const wpConditions = [eq(weeklyPlans.athleteId, Number(wpAthleteId))];
+        if (wpActiveOnly) {
+          wpConditions.push(eq(weeklyPlans.isActive, true));
         }
-        const ppRows = await db
+        const wpRows = await db
           .select()
-          .from(physioPlans)
-          .where(and(...ppConditions))
-          .orderBy(desc(physioPlans.sharedAt));
-        if (ppActiveOnly) {
-          return NextResponse.json(ppRows[0] ?? null);
+          .from(weeklyPlans)
+          .where(and(...wpConditions))
+          .orderBy(desc(weeklyPlans.createdAt));
+        if (wpActiveOnly) {
+          return NextResponse.json(wpRows[0] ?? null);
         }
-        return NextResponse.json(ppRows);
+        return NextResponse.json(wpRows);
       }
 
       default:
@@ -508,6 +501,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
               weight: sql`excluded.weight`,
               city: sql`excluded.city`,
               trainingBalance: sql`excluded.training_balance`,
+              weeklyPreferences: sql`excluded.weekly_preferences`,
               updatedAt: sql`excluded.updated_at`,
             },
           });
@@ -540,43 +534,42 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
-      case 'coach-plans':
+      case 'training-blocks':
         await db
-          .insert(coachPlans)
+          .insert(trainingBlocks)
           .values(records)
           .onConflictDoUpdate({
-            target: coachPlans.id,
+            target: trainingBlocks.id,
             set: {
-              title: sql`excluded.title`,
-              summary: sql`excluded.summary`,
-              goal: sql`excluded.goal`,
-              durationWeeks: sql`excluded.duration_weeks`,
-              sessions: sql`excluded.sessions`,
-              content: sql`excluded.content`,
+              goalEvent: sql`excluded.goal_event`,
+              goalDate: sql`excluded.goal_date`,
+              totalWeeks: sql`excluded.total_weeks`,
+              startDate: sql`excluded.start_date`,
+              phases: sql`excluded.phases`,
+              weekOutlines: sql`excluded.week_outlines`,
               isActive: sql`excluded.is_active`,
-              sourceMessageId: sql`excluded.source_message_id`,
-              sourceSessionId: sql`excluded.source_session_id`,
-              sharedAt: sql`excluded.shared_at`,
+              updatedAt: sql`excluded.updated_at`,
             },
           });
         break;
 
-      case 'physio-plans':
+      case 'weekly-plans':
         await db
-          .insert(physioPlans)
+          .insert(weeklyPlans)
           .values(records)
           .onConflictDoUpdate({
-            target: physioPlans.id,
+            target: weeklyPlans.id,
             set: {
+              weekStart: sql`excluded.week_start`,
               title: sql`excluded.title`,
               summary: sql`excluded.summary`,
-              phase: sql`excluded.phase`,
-              strengthSessionsPerWeek: sql`excluded.strength_sessions_per_week`,
+              goal: sql`excluded.goal`,
               sessions: sql`excluded.sessions`,
               content: sql`excluded.content`,
               isActive: sql`excluded.is_active`,
-              sourceSessionId: sql`excluded.source_session_id`,
-              sharedAt: sql`excluded.shared_at`,
+              blockId: sql`excluded.block_id`,
+              weekNumber: sql`excluded.week_number`,
+              createdAt: sql`excluded.created_at`,
             },
           });
         break;
@@ -612,6 +605,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         const updates: Record<string, unknown> = {};
         if (body.weight !== undefined) updates.weight = body.weight;
         if (body.city !== undefined) updates.city = body.city;
+        if (body.weeklyPreferences !== undefined) updates.weeklyPreferences = body.weeklyPreferences;
 
         if (Object.keys(updates).length === 0) {
           return NextResponse.json({success: true, updated: 0});
@@ -625,50 +619,57 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         return NextResponse.json({success: true});
       }
 
-      case 'coach-plans': {
-        // PATCH /api/db/coach-plans?id=uuid&athleteId=123 → activate this plan (deactivate others)
-        const planId = req.nextUrl.searchParams.get('id');
-        const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
-        if (!planId || !athleteIdParam)
-          return NextResponse.json(
-            {error: 'id and athleteId required'},
-            {status: 400},
-          );
+      case 'training-blocks': {
+        const body = await req.json();
+        const tbId = req.nextUrl.searchParams.get('id');
+        const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
 
-        // Deactivate all plans for this athlete
-        await db
-          .update(coachPlans)
-          .set({isActive: false})
-          .where(eq(coachPlans.athleteId, Number(athleteIdParam)));
+        if (tbId && tbAthleteId && !body.weekOutlines) {
+          await db
+            .update(trainingBlocks)
+            .set({isActive: false})
+            .where(eq(trainingBlocks.athleteId, Number(tbAthleteId)));
+          await db
+            .update(trainingBlocks)
+            .set({isActive: true})
+            .where(eq(trainingBlocks.id, tbId));
+          return NextResponse.json({success: true});
+        }
 
-        // Activate the selected plan
-        await db
-          .update(coachPlans)
-          .set({isActive: true})
-          .where(eq(coachPlans.id, planId));
+        if (tbId && body.weekOutlines) {
+          const updates: Record<string, unknown> = {
+            weekOutlines: body.weekOutlines,
+            updatedAt: body.updatedAt ?? Date.now(),
+          };
+          if (body.phases) updates.phases = body.phases;
+          await db
+            .update(trainingBlocks)
+            .set(updates)
+            .where(eq(trainingBlocks.id, tbId));
+          return NextResponse.json({success: true});
+        }
 
-        return NextResponse.json({success: true});
+        return NextResponse.json({error: 'id required'}, {status: 400});
       }
 
-      case 'physio-plans': {
-        // PATCH /api/db/physio-plans?id=uuid&athleteId=123 → activate this plan (deactivate others)
-        const ppPlanId = req.nextUrl.searchParams.get('id');
-        const ppAthleteId = req.nextUrl.searchParams.get('athleteId');
-        if (!ppPlanId || !ppAthleteId)
+      case 'weekly-plans': {
+        const wpPlanId = req.nextUrl.searchParams.get('id');
+        const wpAthleteId = req.nextUrl.searchParams.get('athleteId');
+        if (!wpPlanId || !wpAthleteId)
           return NextResponse.json(
             {error: 'id and athleteId required'},
             {status: 400},
           );
 
         await db
-          .update(physioPlans)
+          .update(weeklyPlans)
           .set({isActive: false})
-          .where(eq(physioPlans.athleteId, Number(ppAthleteId)));
+          .where(eq(weeklyPlans.athleteId, Number(wpAthleteId)));
 
         await db
-          .update(physioPlans)
+          .update(weeklyPlans)
           .set({isActive: true})
-          .where(eq(physioPlans.id, ppPlanId));
+          .where(eq(weeklyPlans.id, wpPlanId));
 
         return NextResponse.json({success: true});
       }
@@ -698,17 +699,6 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         await db
           .delete(chatMessages)
           .where(eq(chatMessages.sessionId, sessionId));
-        // Delete plans linked to this session (best-effort — table may be out of sync)
-        try {
-          await db
-            .delete(coachPlans)
-            .where(eq(coachPlans.sourceSessionId, sessionId));
-        } catch (e) {
-          console.warn(
-            '[DB DELETE /chat-sessions] Could not cascade-delete coach_plans:',
-            (e as Error).message,
-          );
-        }
         // Delete the session itself (includes memory/summary)
         await db.delete(chatSessions).where(eq(chatSessions.id, sessionId));
         return NextResponse.json({success: true});
@@ -728,21 +718,19 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         return NextResponse.json({success: true});
       }
 
-      case 'coach-plans': {
-        // DELETE /api/db/coach-plans?id=uuid → delete a specific plan
-        const planId = req.nextUrl.searchParams.get('id');
-        if (!planId)
+      case 'training-blocks': {
+        const tbBlockId = req.nextUrl.searchParams.get('id');
+        if (!tbBlockId)
           return NextResponse.json({error: 'id required'}, {status: 400});
-        await db.delete(coachPlans).where(eq(coachPlans.id, planId));
+        await db.delete(trainingBlocks).where(eq(trainingBlocks.id, tbBlockId));
         return NextResponse.json({success: true});
       }
 
-      case 'physio-plans': {
-        // DELETE /api/db/physio-plans?id=uuid → delete a specific plan
-        const ppPlanId = req.nextUrl.searchParams.get('id');
-        if (!ppPlanId)
+      case 'weekly-plans': {
+        const wpPlanId = req.nextUrl.searchParams.get('id');
+        if (!wpPlanId)
           return NextResponse.json({error: 'id required'}, {status: 400});
-        await db.delete(physioPlans).where(eq(physioPlans.id, ppPlanId));
+        await db.delete(weeklyPlans).where(eq(weeklyPlans.id, wpPlanId));
         return NextResponse.json({success: true});
       }
 
