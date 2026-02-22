@@ -25,9 +25,11 @@ const Records = () => {
   const { data: activities, isLoading } = useActivities();
 
   // Background sync: fetch activity details to extract best_efforts
-  const syncState = useSyncActivityDetails(activities, isAuthenticated);
+  const syncState = useSyncActivityDetails(activities, isAuthenticated, {
+    initialBatchSize: 30,
+  });
 
-  const [period, setPeriod] = useState<TimePeriod>("all");
+  const [period, setPeriod] = useState<TimePeriod>("4w");
   const [activeType, setActiveType] = useState<ActivityType>("Run");
 
   // Determine which activity types exist in the data
@@ -132,8 +134,8 @@ const Records = () => {
         Records
       </h1>
 
-      {/* Sync progress (shown while syncing or when rate limited) */}
-      <SyncProgress state={syncState} />
+      {/* Sync progress — hidden once we have cached data to show */}
+      <SyncProgress state={syncState} hasData={syncState.bestEfforts.length > 0} />
 
       {/* Filters row — sticky on mobile */}
       <div className="sticky top-0 z-10 bg-background py-2 -mx-3 px-3 md:static md:mx-0 md:px-0 md:py-0">

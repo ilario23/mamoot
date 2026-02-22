@@ -81,6 +81,25 @@ export const neonGetRecentActivities = async (
   }
 };
 
+/**
+ * Fetch a page of activities from Neon, sorted newest-first.
+ * Bypasses staleness checks — returns whatever is cached.
+ */
+export const neonGetActivitiesPaginated = async (
+  limit: number,
+  offset = 0,
+): Promise<CachedActivity[] | null> => {
+  try {
+    const res = await fetch(`${API}/activities?limit=${limit}&offset=${offset}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (Array.isArray(data) && data.length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
+};
+
 export const neonSyncActivities = async (
   records: CachedActivity[],
 ): Promise<void> => {

@@ -96,7 +96,7 @@ export interface SyncState {
   total: number;
   /** Number of activities already synced (cached + freshly fetched) */
   synced: number;
-  /** Whether the sync is actively fetching */
+  /** Whether the sync is actively fetching from Strava API (not Neon cache) */
   isSyncing: boolean;
   /** Whether we're paused due to rate limiting */
   isRateLimited: boolean;
@@ -162,10 +162,18 @@ const sleep = (ms: number): Promise<void> =>
 
 // ----- Hook -----
 
+interface SyncOptions {
+  /** How many activities to fetch from Neon in the first batch for fast initial results. */
+  initialBatchSize?: number;
+}
+
 export const useSyncActivityDetails = (
   activities: ActivitySummary[] | undefined,
   enabled: boolean,
+  options: SyncOptions = {},
 ) => {
+  const {initialBatchSize = 50} = options;
+
   const [state, setState] = useState<SyncState>({
     total: 0,
     synced: 0,
@@ -197,47 +205,71 @@ export const useSyncActivityDetails = (
     abortRef.current = false;
 
     // Only sync activity types that carry best_efforts / segment_efforts
+    // Activities arrive sorted newest-first from useActivities
     const syncableActivities = currentActivities.filter((a) =>
       SYNCABLE_TYPES.has(a.type),
     );
     const activityIds = syncableActivities.map((a) => Number(a.id));
     const total = activityIds.length;
 
-    setState((prev) => ({...prev, total, isSyncing: true}));
-
-    // 1. Check Neon (persistent, multi-device) for cached activity details
+    // 1. Read cached details from Neon in two phases (no progress bar for cache reads)
     const cachedIds = new Set<number>();
     const allEfforts: BestEffortWithMeta[] = [];
     const allSegmentEfforts: SegmentEffortWithMeta[] = [];
 
     if (activityIds.length > 0 && !abortRef.current) {
-      const neonDetails = await neonGetActivityDetailsBulk(activityIds);
+      const initialIds = activityIds.slice(0, initialBatchSize);
+      const remainingIds = activityIds.slice(initialBatchSize);
 
-      for (const detail of neonDetails) {
+      // Phase 1: fetch initial batch (recent activities) — fast, small payload
+      const initialDetails = await neonGetActivityDetailsBulk(initialIds);
+      for (const detail of initialDetails) {
         cachedIds.add(detail.id);
         allEfforts.push(...extractBestEfforts(detail.data));
         allSegmentEfforts.push(...extractSegmentEfforts(detail.data));
       }
+
+      // Report initial efforts so record/segment cards can render immediately
+      setState((prev) => ({
+        ...prev,
+        bestEfforts: [...allEfforts],
+        segmentEfforts: [...allSegmentEfforts],
+      }));
+
+      // Phase 2: fetch remaining activities from Neon
+      if (remainingIds.length > 0 && !abortRef.current) {
+        const remainingDetails = await neonGetActivityDetailsBulk(remainingIds);
+        for (const detail of remainingDetails) {
+          cachedIds.add(detail.id);
+          allEfforts.push(...extractBestEfforts(detail.data));
+          allSegmentEfforts.push(...extractSegmentEfforts(detail.data));
+        }
+      }
     }
 
-    let uncachedIds = activityIds.filter((id) => !cachedIds.has(id));
+    const uncachedIds = activityIds.filter((id) => !cachedIds.has(id));
 
+    // Report all Neon-cached efforts
     setState((prev) => ({
       ...prev,
-      total,
-      synced: cachedIds.size,
       bestEfforts: [...allEfforts],
       segmentEfforts: [...allSegmentEfforts],
     }));
 
-    // If everything is cached in Neon, we're done
+    // If everything is cached in Neon, we're done — no progress bar needed
     if (uncachedIds.length === 0) {
-      setState((prev) => ({...prev, isSyncing: false}));
       isSyncRunningRef.current = false;
       return;
     }
 
-    // 2. Fetch remaining uncached activities from Strava API with rate limiting
+    // 2. Fetch uncached activities from Strava API — show progress bar now
+    setState((prev) => ({
+      ...prev,
+      total: uncachedIds.length,
+      synced: 0,
+      isSyncing: true,
+    }));
+    // Fetch remaining uncached activities from Strava API with rate limiting
     let cursor = 0;
     const newlyFetchedRecords: CachedActivityDetail[] = [];
 
@@ -306,7 +338,7 @@ export const useSyncActivityDetails = (
 
       setState((prev) => ({
         ...prev,
-        synced: prev.synced + successCount,
+        synced: Math.min(prev.synced + successCount, prev.total),
         bestEfforts: [...allEfforts],
         segmentEfforts: [...allSegmentEfforts],
       }));

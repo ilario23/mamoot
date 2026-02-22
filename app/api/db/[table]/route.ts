@@ -56,6 +56,18 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
             .where(gte(activities.date, after));
           return NextResponse.json(rows);
         }
+        // Paginated fetch: GET /api/db/activities?limit=20&offset=0
+        const limitParam = req.nextUrl.searchParams.get('limit');
+        if (limitParam) {
+          const offsetParam = req.nextUrl.searchParams.get('offset');
+          const rows = await db
+            .select()
+            .from(activities)
+            .orderBy(desc(activities.date))
+            .limit(Number(limitParam))
+            .offset(Number(offsetParam ?? 0));
+          return NextResponse.json(rows);
+        }
         const rows = await db.select().from(activities);
         return NextResponse.json(rows);
       }

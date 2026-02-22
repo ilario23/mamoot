@@ -38,6 +38,7 @@ import type {FitnessDataPoint} from '@/utils/trainingLoad';
 import {
   neonGetActivities,
   neonGetRecentActivities,
+  neonGetActivitiesPaginated,
   neonSyncActivities,
   neonGetActivityDetail,
   neonSyncActivityDetail,
@@ -136,6 +137,20 @@ export const cachedGetAllActivities = async (
     b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
   );
   return sorted.map((record) => transformActivity(record.data));
+};
+
+/**
+ * Fast path: fetch a page of activities from Neon (newest-first).
+ * Skips staleness checks — returns whatever is cached to speed up
+ * initial render while the full dataset loads via cachedGetAllActivities.
+ */
+export const cachedGetActivitiesPage = async (
+  limit: number,
+  offset = 0,
+): Promise<ActivitySummary[]> => {
+  const neonData = await neonGetActivitiesPaginated(limit, offset);
+  if (!neonData || neonData.length === 0) return [];
+  return neonData.map((record) => transformActivity(record.data));
 };
 
 // ----- Activity Detail -----

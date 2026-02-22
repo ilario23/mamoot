@@ -6,6 +6,7 @@ import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import LoginWall from '@/components/auth/LoginWall';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {SidebarProvider} from '@/contexts/SidebarContext';
+import {useActivities} from '@/hooks/useStrava';
 import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
 import usePageTheme from '@/hooks/usePageTheme';
 import useServiceWorker from '@/hooks/useServiceWorker';
@@ -19,6 +20,9 @@ const AppShell = ({children}: {children: ReactNode}) => {
   const {activePlan} = useWeeklyPlan(athlete?.id ?? null);
   const pageTheme = usePageTheme();
   useServiceWorker();
+  // Prefetch activities as soon as auth resolves so the data is ready
+  // when the user navigates to Dashboard or any page that needs it
+  useActivities();
 
   const themeStyle = {
     '--page-accent': `var(${pageTheme.accent})`,

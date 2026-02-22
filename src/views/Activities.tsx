@@ -1,7 +1,7 @@
 'use client';
 
 import {useMemo, useState} from 'react';
-import {useActivities} from '@/hooks/useStrava';
+import {useActivitiesPaginated} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {getAvailableActivityTypes} from '@/lib/records';
 import type {ActivityType} from '@/lib/mockData';
@@ -14,7 +14,7 @@ import {NeoLoader} from '@/components/ui/neo-loader';
 
 const Activities = () => {
   const {isAuthenticated} = useStravaAuth();
-  const {data: activities, isLoading} = useActivities();
+  const {data: activities, isLoading, isFullyLoaded} = useActivitiesPaginated(20);
 
   // --- Filter state ---
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -153,6 +153,11 @@ const Activities = () => {
         <p className='text-sm font-bold text-muted-foreground'>
           {filteredActivities.length}{' '}
           {filteredActivities.length === 1 ? 'activity' : 'activities'} found
+          {!isFullyLoaded && (
+            <span className='ml-2 text-xs text-muted-foreground/70 animate-pulse'>
+              Loading more...
+            </span>
+          )}
         </p>
       </div>
 

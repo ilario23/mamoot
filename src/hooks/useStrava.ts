@@ -1,8 +1,9 @@
 import {useQuery, useQueryClient} from '@tanstack/react-query';
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {
   cachedGetAllActivities,
+  cachedGetActivitiesPage,
   cachedGetActivityDetail,
   cachedGetActivityStreams,
   cachedGetAthleteStats,
@@ -15,7 +16,7 @@ import {
 import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
 import type {FitnessDataPoint} from '@/utils/trainingLoad';
 import {fetchStarredSegments, fetchSegmentDetail} from '@/lib/strava';
-import {aggregateZoneBreakdowns} from '@/lib/zoneCompute';
+import {aggregateZoneBreakdowns, hashZoneSettings} from '@/lib/zoneCompute';
 import type {AggregatedZoneTotals, ZoneBreakdown} from '@/lib/zoneCompute';
 import {useSettings} from '@/contexts/SettingsContext';
 import type {
@@ -47,6 +48,32 @@ export const useActivities = () => {
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
   });
+};
+
+/**
+ * Fast initial load for the Activities page: fetches first `pageSize`
+ * activities from Neon immediately, while the full dataset loads in
+ * parallel via useActivities(). Once full data is available, switches
+ * to using it.
+ */
+export const useActivitiesPaginated = (pageSize = 20) => {
+  const {isAuthenticated} = useStravaAuth();
+  const allActivities = useActivities();
+
+  const firstPage = useQuery<ActivitySummary[]>({
+    queryKey: ['strava', 'activities-page', pageSize],
+    queryFn: () => cachedGetActivitiesPage(pageSize),
+    enabled: isAuthenticated && !allActivities.data,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_DAY,
+    refetchOnWindowFocus: false,
+  });
+
+  return {
+    data: allActivities.data ?? firstPage.data,
+    isLoading: firstPage.isLoading && allActivities.isLoading,
+    isFullyLoaded: !!allActivities.data,
+  };
 };
 
 /** Fetch single activity detail — cached forever in Neon */
@@ -207,6 +234,44 @@ export const useZoneBreakdowns = (weeks: number): UseZoneBreakdownsResult => {
 
 // ----- Per-Activity Zone Breakdowns (for charts that need per-activity data) -----
 
+// Module-level progress store for zone breakdown fetches.
+// Updated from the React Query queryFn, read by components via useZoneProgressSubscription.
+const _zoneProgress = new Map<string, ZoneBreakdownProgress>();
+const _zoneListeners = new Set<() => void>();
+
+const setZoneProgress = (key: string, done: number, total: number) => {
+  _zoneProgress.set(key, {done, total});
+  _zoneListeners.forEach((fn) => fn());
+};
+
+const useZoneProgressSubscription = (
+  key: string,
+): ZoneBreakdownProgress => {
+  const [progress, setProgress] = useState<ZoneBreakdownProgress>(
+    () => _zoneProgress.get(key) ?? {done: 0, total: 0},
+  );
+
+  useEffect(() => {
+    const handler = () => {
+      const current = _zoneProgress.get(key);
+      if (current) {
+        setProgress((prev) =>
+          prev.done === current.done && prev.total === current.total
+            ? prev
+            : {done: current.done, total: current.total},
+        );
+      }
+    };
+    _zoneListeners.add(handler);
+    handler();
+    return () => {
+      _zoneListeners.delete(handler);
+    };
+  }, [key]);
+
+  return progress;
+};
+
 interface UsePerActivityZoneBreakdownsResult {
   /** Map of activityId -> ZoneBreakdown (only for activities that succeeded) */
   data: Map<string, ZoneBreakdown> | undefined;
@@ -216,7 +281,8 @@ interface UsePerActivityZoneBreakdownsResult {
 
 /**
  * Returns per-activity zone breakdowns (not aggregated) for activities
- * within a time window. Useful for charts that need to group by week/date.
+ * within a time window. Uses React Query for automatic deduplication —
+ * multiple components calling this with the same `weeks` share one fetch.
  */
 export const usePerActivityZoneBreakdowns = (
   weeks: number,
@@ -225,94 +291,63 @@ export const usePerActivityZoneBreakdowns = (
   const {settings} = useSettings();
   const {data: activities, isLoading: activitiesLoading} = useActivities();
 
-  const [result, setResult] = useState<Map<string, ZoneBreakdown> | undefined>(
-    undefined,
+  const zonesHash = useMemo(
+    () => hashZoneSettings(settings.zones),
+    [settings.zones],
   );
-  const [isLoading, setIsLoading] = useState(true);
-  const [progress, setProgress] = useState<ZoneBreakdownProgress>({
-    done: 0,
-    total: 0,
-  });
 
-  const abortRef = useRef(0);
+  const progressKey = `${weeks}-${zonesHash}`;
+  const progress = useZoneProgressSubscription(progressKey);
 
-  const handleProgress = useCallback((done: number, total: number) => {
-    setProgress({done, total});
-  }, []);
-
-  useEffect(() => {
-    if (!isAuthenticated || activitiesLoading || !activities) {
-      setIsLoading(activitiesLoading);
-      return;
-    }
-
-    const runId = ++abortRef.current;
-
-    const compute = async () => {
-      setIsLoading(true);
-      setProgress({done: 0, total: 0});
-
+  const query = useQuery<Map<string, ZoneBreakdown>>({
+    queryKey: [
+      'dashboard',
+      'zone-breakdowns',
+      weeks,
+      zonesHash,
+      activities?.[0]?.id,
+    ],
+    queryFn: async () => {
       const now = new Date();
       const cutoff = new Date(now.getTime() - weeks * 7 * 24 * 60 * 60 * 1000);
 
-      const filtered = activities.filter((a) => {
+      const filtered = activities!.filter((a) => {
         const actDate = new Date(a.date);
         return actDate >= cutoff && a.avgHr > 0;
       });
 
-      if (filtered.length === 0) {
-        if (abortRef.current === runId) {
-          setResult(new Map());
-          setIsLoading(false);
-          setProgress({done: 0, total: 0});
-        }
-        return;
-      }
+      if (filtered.length === 0) return new Map<string, ZoneBreakdown>();
 
       const activityIds = filtered.map((a) => Number(a.id));
 
-      try {
-        const breakdownMap = await batchGetZoneBreakdowns(
-          activityIds,
-          settings.zones,
-          (done, total) => {
-            if (abortRef.current === runId) {
-              handleProgress(done, total);
-            }
-          },
-        );
+      const breakdownMap = await batchGetZoneBreakdowns(
+        activityIds,
+        settings.zones,
+        (done, total) => setZoneProgress(progressKey, done, total),
+      );
 
-        if (abortRef.current !== runId) return;
-
-        // Convert numeric keys to string keys to match ActivitySummary.id
-        const stringKeyedMap = new Map<string, ZoneBreakdown>();
-        for (const [id, breakdown] of breakdownMap) {
-          stringKeyedMap.set(String(id), breakdown);
-        }
-
-        setResult(stringKeyedMap);
-      } catch {
-        if (abortRef.current === runId) {
-          setResult(undefined);
-        }
-      } finally {
-        if (abortRef.current === runId) {
-          setIsLoading(false);
-        }
+      const stringKeyedMap = new Map<string, ZoneBreakdown>();
+      for (const [id, breakdown] of breakdownMap) {
+        stringKeyedMap.set(String(id), breakdown);
       }
-    };
+      return stringKeyedMap;
+    },
+    enabled:
+      isAuthenticated &&
+      !activitiesLoading &&
+      !!activities &&
+      activities.length > 0,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_DAY,
+    refetchOnWindowFocus: false,
+    structuralSharing: false,
+  });
 
-    compute();
-  }, [
-    isAuthenticated,
-    activitiesLoading,
-    activities,
-    weeks,
-    settings.zones,
-    handleProgress,
-  ]);
-
-  return {data: result, isLoading, progress};
+  return {
+    data: query.data,
+    isLoading: query.isLoading || activitiesLoading,
+    progress,
+  };
 };
 
 /** Hook to force-refresh activities from the API, bypassing cache freshness */

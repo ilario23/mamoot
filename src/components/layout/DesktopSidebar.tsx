@@ -1,9 +1,8 @@
 'use client';
 
-import {useState} from 'react';
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {PanelLeftClose, PanelLeftOpen, ChevronDown} from 'lucide-react';
+import {PanelLeftClose, PanelLeftOpen} from 'lucide-react';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
 import {useSidebarCollapse} from '@/contexts/SidebarContext';
 import {
@@ -12,14 +11,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {Popover, PopoverTrigger, PopoverContent} from '@/components/ui/popover';
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from '@/components/ui/collapsible';
 import {desktopNavEntries, isNavGroup} from '@/lib/navConfig';
-import type {NavItem, NavGroup} from '@/lib/navConfig';
+import type {NavItem} from '@/lib/navConfig';
 
 const isItemActive = (href: string, pathname: string) =>
   href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -28,12 +21,10 @@ const SidebarLink = ({
   item,
   pathname,
   isCollapsed,
-  indented = false,
 }: {
   item: NavItem;
   pathname: string;
   isCollapsed: boolean;
-  indented?: boolean;
 }) => {
   const isActive = isItemActive(item.href, pathname);
 
@@ -41,7 +32,7 @@ const SidebarLink = ({
     <Link
       href={item.href}
       className={`flex items-center gap-3 font-bold text-sm border-3 border-border transition-all ${
-        isCollapsed ? 'justify-center px-0 py-3' : indented ? 'px-4 py-2.5 ml-4' : 'px-4 py-3'
+        isCollapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'
       } ${
         isActive
           ? `${item.activeClass} shadow-neo-sm`
@@ -55,115 +46,24 @@ const SidebarLink = ({
   );
 };
 
-const SidebarGroupExpanded = ({
-  group,
-  pathname,
+const SidebarGroupDivider = ({
+  label,
+  isCollapsed,
 }: {
-  group: NavGroup;
-  pathname: string;
+  label: string;
+  isCollapsed: boolean;
 }) => {
-  const activeChild = group.children.find((c) =>
-    isItemActive(c.href, pathname),
-  );
-  const [open, setOpen] = useState(!!activeChild);
+  if (isCollapsed) {
+    return <hr className='border-t-2 border-border my-1' />;
+  }
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger asChild>
-        <button
-          type='button'
-          aria-label={group.label}
-          className={`w-full flex items-center gap-3 px-4 py-3 font-bold text-sm border-3 border-border transition-all ${
-            activeChild && !open
-              ? `${activeChild.activeClass} shadow-neo-sm`
-              : 'bg-background hover:bg-muted'
-          }`}
-        >
-          <group.icon className='h-5 w-5 shrink-0' />
-          <span>{group.label}</span>
-          <ChevronDown
-            className={`h-4 w-4 ml-auto shrink-0 transition-transform duration-200 ${
-              open ? 'rotate-180' : ''
-            }`}
-          />
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className='space-y-1 mt-1'>
-        {group.children.map((child) => (
-          <SidebarLink
-            key={child.href}
-            item={child}
-            pathname={pathname}
-            isCollapsed={false}
-            indented
-          />
-        ))}
-      </CollapsibleContent>
-    </Collapsible>
-  );
-};
-
-const SidebarGroupCollapsed = ({
-  group,
-  pathname,
-}: {
-  group: NavGroup;
-  pathname: string;
-}) => {
-  const activeChild = group.children.find((c) =>
-    isItemActive(c.href, pathname),
-  );
-
-  return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <button
-              type='button'
-              aria-label={group.label}
-              className={`w-full flex items-center justify-center py-3 font-bold text-sm border-3 border-border transition-all ${
-                activeChild
-                  ? `${activeChild.activeClass} shadow-neo-sm`
-                  : 'bg-background hover:bg-muted'
-              }`}
-            >
-              <group.icon className='h-5 w-5 shrink-0' />
-            </button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side='right'>
-          <p>{group.label}</p>
-        </TooltipContent>
-      </Tooltip>
-      <PopoverContent
-        side='right'
-        sideOffset={8}
-        className='w-auto min-w-[180px] p-0 border-3 border-border shadow-neo bg-background'
-      >
-        <div className='flex flex-col'>
-          {group.children.map((child) => {
-            const isActive = isItemActive(child.href, pathname);
-            return (
-              <Link
-                key={child.href}
-                href={child.href}
-                aria-label={child.label}
-                aria-current={isActive ? 'page' : undefined}
-                className={`flex items-center gap-3 px-4 py-3 font-bold text-sm transition-colors border-b-3 border-border last:border-b-0 ${
-                  isActive
-                    ? child.activeClass
-                    : 'bg-background hover:bg-muted'
-                }`}
-              >
-                <child.icon className='h-5 w-5 shrink-0' aria-hidden='true' />
-                <span>{child.label}</span>
-              </Link>
-            );
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div className='flex items-center gap-2 pt-2'>
+      <span className='text-[10px] font-black uppercase tracking-widest text-muted-foreground select-none whitespace-nowrap'>
+        {label}
+      </span>
+      <div className='flex-1 border-t-2 border-border' />
+    </div>
   );
 };
 
@@ -242,24 +142,36 @@ const DesktopSidebar = () => {
         )}
 
         {/* Nav links */}
-        <nav className={`space-y-2 ${isCollapsed ? 'p-2' : 'p-3'}`}>
+        <nav className={`space-y-1 ${isCollapsed ? 'p-2' : 'p-3'}`}>
           {desktopNavEntries.map((entry) => {
             if (isNavGroup(entry)) {
-              if (isCollapsed) {
-                return (
-                  <SidebarGroupCollapsed
-                    key={entry.id}
-                    group={entry}
-                    pathname={pathname}
-                  />
-                );
-              }
               return (
-                <SidebarGroupExpanded
-                  key={entry.id}
-                  group={entry}
-                  pathname={pathname}
-                />
+                <div key={entry.id} className='space-y-1'>
+                  <SidebarGroupDivider label={entry.label} isCollapsed={isCollapsed} />
+                  {entry.children.map((child) => {
+                    const linkContent = (
+                      <SidebarLink
+                        key={child.href}
+                        item={child}
+                        pathname={pathname}
+                        isCollapsed={isCollapsed}
+                      />
+                    );
+
+                    if (isCollapsed) {
+                      return (
+                        <Tooltip key={child.href}>
+                          <TooltipTrigger asChild>{linkContent}</TooltipTrigger>
+                          <TooltipContent side='right'>
+                            <p>{child.label}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      );
+                    }
+
+                    return linkContent;
+                  })}
+                </div>
               );
             }
 

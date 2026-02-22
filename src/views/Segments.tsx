@@ -38,9 +38,11 @@ const Segments = () => {
   const searchParams = useSearchParams();
 
   // Background sync for segment efforts
-  const syncState = useSyncActivityDetails(activities, isAuthenticated);
+  const syncState = useSyncActivityDetails(activities, isAuthenticated, {
+    initialBatchSize: 30,
+  });
 
-  const [period, setPeriod] = useState<TimePeriod>("all");
+  const [period, setPeriod] = useState<TimePeriod>("4w");
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(
     null,
   );
@@ -153,8 +155,8 @@ const Segments = () => {
         Segments
       </h1>
 
-      {/* Sync progress */}
-      <SyncProgress state={syncState} />
+      {/* Sync progress — hidden once we have cached data to show */}
+      <SyncProgress state={syncState} hasData={syncState.segmentEfforts.length > 0} />
 
       {/* Period filter */}
       <div className="flex items-center justify-end">
