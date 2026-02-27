@@ -15,6 +15,7 @@ import {
   Check,
   MessageSquareText,
   Target,
+  X,
 } from 'lucide-react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -34,6 +35,23 @@ const formatWeekRange = (weekStart: string): string => {
     d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
   const year = end.getFullYear();
   return `${fmt(start)} – ${fmt(end)}, ${year}`;
+};
+
+const toIsoDate = (d: Date): string => d.toISOString().slice(0, 10);
+
+const getCurrentMonday = (): string => {
+  const now = new Date();
+  const day = now.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - daysSinceMonday);
+  return toIsoDate(monday);
+};
+
+const getNextMonday = (): string => {
+  const currentMonday = new Date(getCurrentMonday());
+  currentMonday.setDate(currentMonday.getDate() + 7);
+  return toIsoDate(currentMonday);
 };
 
 const DayCard = ({session}: {session: UnifiedSession}) => {
@@ -384,6 +402,9 @@ const WeeklyPlan = () => {
   const {activeBlock} = useTrainingBlock(athleteId);
   const [fullPlanOpen, setFullPlanOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [regenerateOpen, setRegenerateOpen] = useState(false);
+  const [regenerationMode, setRegenerationMode] = useState<'full' | 'remaining_days'>('full');
+  const [targetWeekStart, setTargetWeekStart] = useState('');
 
   const blockBannerData = useMemo(() => {
     if (!activeBlock || !activePlan?.blockId) return null;
@@ -401,7 +422,24 @@ const WeeklyPlan = () => {
   }, [activeBlock, activePlan]);
 
   const handleGenerate = () => {
-    generatePlan(undefined, preferences);
+    handleOpenRegenerate();
+  };
+
+  const handleOpenRegenerate = () => {
+    const defaultWeek = activePlan?.weekStart ?? '';
+    setTargetWeekStart(defaultWeek);
+    setRegenerationMode('full');
+    setRegenerateOpen(true);
+  };
+
+  const handleRegenerateSubmit = () => {
+    generatePlan({
+      weekStartDate: targetWeekStart || undefined,
+      preferences,
+      mode: regenerationMode,
+      sourcePlanId: activePlan?.id,
+    });
+    setRegenerateOpen(false);
   };
 
   const handlePreferencesBlur = () => {
@@ -446,6 +484,111 @@ const WeeklyPlan = () => {
         />
       )}
 
+      {regenerateOpen && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
+          <div className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-5 space-y-4'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='space-y-1'>
+                <h3 className='font-black text-base uppercase tracking-wider'>Regenerate Weekly Plan</h3>
+                <p className='text-xs text-muted-foreground font-medium'>
+                  Choose whether to regenerate the full week or only the remaining days.
+                </p>
+              </div>
+              <button
+                onClick={() => setRegenerateOpen(false)}
+                tabIndex={0}
+                aria-label='Close regenerate dialog'
+                className='p-1.5 border-2 border-border bg-background hover:bg-muted'
+              >
+                <X className='h-3.5 w-3.5' />
+              </button>
+            </div>
+
+            <div className='space-y-2'>
+              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                Mode
+              </label>
+              <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
+                <button
+                  onClick={() => setRegenerationMode('full')}
+                  tabIndex={0}
+                  aria-label='Regenerate full week mode'
+                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold ${
+                    regenerationMode === 'full' ? 'bg-primary/10' : 'bg-background hover:bg-muted'
+                  }`}
+                >
+                  Full week
+                </button>
+                <button
+                  onClick={() => setRegenerationMode('remaining_days')}
+                  tabIndex={0}
+                  aria-label='Regenerate remaining days mode'
+                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold ${
+                    regenerationMode === 'remaining_days' ? 'bg-primary/10' : 'bg-background hover:bg-muted'
+                  }`}
+                >
+                  Remaining days (uses completed activities)
+                </button>
+              </div>
+            </div>
+
+            <div className='space-y-2'>
+              <label
+                htmlFor='target-week-start'
+                className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'
+              >
+                Target Week (Monday)
+              </label>
+              <input
+                id='target-week-start'
+                type='date'
+                value={targetWeekStart}
+                onChange={(e) => setTargetWeekStart(e.target.value)}
+                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
+              />
+              <p className='text-[11px] text-muted-foreground font-medium'>
+                Leave empty to use smart default (current week if missing, otherwise next week).
+              </p>
+            </div>
+
+            <div className='flex flex-wrap gap-2'>
+              <button
+                onClick={handleRegenerateSubmit}
+                disabled={isGenerating}
+                tabIndex={0}
+                aria-label='Confirm regenerate weekly plan'
+                className='inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm disabled:opacity-50'
+              >
+                {isGenerating ? <NeoLoader size='sm' /> : <Sparkles className='h-3.5 w-3.5' />}
+                Generate
+              </button>
+              <button
+                onClick={() => {
+                  setTargetWeekStart(getCurrentMonday());
+                  setRegenerationMode('full');
+                }}
+                tabIndex={0}
+                aria-label='Use current week'
+                className='px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background hover:bg-muted'
+              >
+                Current Week
+              </button>
+              <button
+                onClick={() => {
+                  setTargetWeekStart(getNextMonday());
+                  setRegenerationMode('full');
+                }}
+                tabIndex={0}
+                aria-label='Use next week'
+                className='px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background hover:bg-muted'
+              >
+                Next Week
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Empty state */}
       {!activePlan && (
         <EmptyState
@@ -478,10 +621,10 @@ const WeeklyPlan = () => {
                 )}
               </div>
               <button
-                onClick={handleGenerate}
+                onClick={handleOpenRegenerate}
                 disabled={isGenerating}
                 tabIndex={0}
-                aria-label='Generate new plan'
+                aria-label='Open regenerate plan options'
                 className='shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
               >
                 {isGenerating ? (

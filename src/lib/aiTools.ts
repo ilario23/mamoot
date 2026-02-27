@@ -143,3 +143,19 @@ export const updateTrainingBlockSchema = z.object({
 });
 
 export type UpdateTrainingBlockInput = z.infer<typeof updateTrainingBlockSchema>;
+
+export const adaptTrainingBlockSchema = z.object({
+  adaptationType: z.enum([
+    'recalibrate_remaining_weeks',
+    'insert_event',
+    'shift_target_date',
+  ]),
+  effectiveFromWeek: z.number().optional(),
+  eventName: z.string().optional(),
+  eventDate: z.string().optional(),
+  eventDistanceKm: z.number().optional(),
+  eventPriority: z.enum(['A', 'B', 'C']).optional(),
+  goalDate: z.string().optional(),
+});
+
+export type AdaptTrainingBlockInput = z.infer<typeof adaptTrainingBlockSchema>;

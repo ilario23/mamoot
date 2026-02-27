@@ -16,6 +16,15 @@ interface ActivePlanRef {
 }
 
 export type WeeklyPlan = CachedWeeklyPlan;
+export type WeeklyGenerationMode = 'full' | 'remaining_days';
+
+export interface GeneratePlanOptions {
+  weekStartDate?: string;
+  preferences?: string;
+  mode?: WeeklyGenerationMode;
+  sourcePlanId?: string;
+  today?: string;
+}
 
 export interface UseWeeklyPlanResult {
   plans: WeeklyPlan[];
@@ -24,7 +33,7 @@ export interface UseWeeklyPlanResult {
   deletePlan: (planId: string) => Promise<void>;
   isLoading: boolean;
   isGenerating: boolean;
-  generatePlan: (weekStartDate?: string, preferences?: string) => Promise<WeeklyPlan | null>;
+  generatePlan: (options?: GeneratePlanOptions) => Promise<WeeklyPlan | null>;
   refresh: () => Promise<void>;
   preferences: string;
   setPreferences: (value: string) => void;
@@ -134,17 +143,25 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   }, [athleteId, loadPlans]);
 
   const generatePlan = useCallback(
-    async (weekStartDate?: string, genPreferences?: string): Promise<WeeklyPlan | null> => {
+    async (options?: GeneratePlanOptions): Promise<WeeklyPlan | null> => {
       if (!athleteId) return null;
       setIsGenerating(true);
 
-      const prefsToSend = genPreferences ?? (preferences || undefined);
+      const prefsToSend = options?.preferences ?? (preferences || undefined);
+      const payload = {
+        athleteId,
+        weekStartDate: options?.weekStartDate,
+        preferences: prefsToSend,
+        mode: options?.mode ?? 'full',
+        sourcePlanId: options?.sourcePlanId,
+        today: options?.today,
+      };
 
       try {
         const res = await fetch('/api/ai/weekly-plan', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({athleteId, weekStartDate, preferences: prefsToSend}),
+          body: JSON.stringify(payload),
         });
 
         if (!res.ok) {

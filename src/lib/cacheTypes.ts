@@ -196,6 +196,26 @@ export interface UnifiedSession {
   };
   /** Day-level combined notes */
   notes?: string;
+  /** Optional completed activity metadata used for retrospective matching */
+  actualActivity?: {
+    id: string;
+    name: string;
+    type: string;
+    distanceKm: number;
+    durationSec: number;
+    date: string;
+  };
+  /** Snapshot of block-week intent when this plan was generated */
+  blockIntent?: {
+    blockId: string;
+    weekNumber: number;
+    goalEvent: string;
+    goalDate: string;
+    weekType: string;
+    volumeTargetKm: number;
+    intensityLevel: string;
+    keyWorkouts: string[];
+  };
 }
 
 export interface CachedWeeklyPlan {

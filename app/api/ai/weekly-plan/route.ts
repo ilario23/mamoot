@@ -12,7 +12,7 @@ import {eq, desc, and, ne} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
-import {formatPace, formatDuration, type UserSettings} from '@/lib/mockData';
+import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/mockData';
 import {buildCoachPipelinePrompt, buildPhysioPipelinePrompt} from '@/lib/weeklyPlanPrompts';
 import {
   coachWeekOutputSchema,
@@ -23,6 +23,7 @@ import {
 } from '@/lib/weeklyPlanSchema';
 import type {UnifiedSession} from '@/lib/cacheTypes';
 import {buildWeekReview} from '@/lib/weekReview';
+import {buildActualizedWeekContext} from '@/lib/weekActualization';
 import {NextResponse} from 'next/server';
 
 export const maxDuration = 120;
@@ -59,6 +60,15 @@ const getNextMonday = (): string => {
   return monday.toISOString().slice(0, 10);
 };
 
+const getCurrentMonday = (): string => {
+  const now = new Date();
+  const day = now.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - daysSinceMonday);
+  return monday.toISOString().slice(0, 10);
+};
+
 const getSunday = (mondayStr: string): string => {
   const d = new Date(mondayStr);
   d.setDate(d.getDate() + 6);
@@ -83,32 +93,52 @@ export async function POST(req: Request) {
     weekStartDate,
     model: clientModel,
     preferences: clientPreferences,
+    mode: generationMode,
+    sourcePlanId,
+    today,
   }: {
     athleteId: number;
     weekStartDate?: string;
     model?: string;
     preferences?: string;
+    mode?: 'full' | 'remaining_days';
+    sourcePlanId?: string;
+    today?: string;
   } = body;
 
   if (!athleteId) {
     return NextResponse.json({error: 'athleteId required'}, {status: 400});
   }
 
-  const weekStart = weekStartDate ?? getNextMonday();
-  const weekEnd = getSunday(weekStart);
-  const weekDates = getDatesForWeek(weekStart);
+  const mode = generationMode ?? 'full';
+  const todayIso = today ?? new Date().toISOString().slice(0, 10);
   const model = getModel(clientModel);
-
-  console.log(`\n[WeeklyPlan] ========== Generating Plan ==========`);
-  console.log(`[WeeklyPlan] Athlete: ${athleteId}`);
-  console.log(`[WeeklyPlan] Week: ${weekStart} to ${weekEnd}`);
 
   try {
     // Step 1: Load context
-    const [settingsRows, activityRows] = await Promise.all([
+    const [settingsRows, activityRows, planRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
       db.select().from(activitiesTable).orderBy(desc(activitiesTable.date)),
+      db
+        .select()
+        .from(weeklyPlans)
+        .where(eq(weeklyPlans.athleteId, athleteId))
+        .orderBy(desc(weeklyPlans.createdAt)),
     ]);
+
+    const currentMonday = getCurrentMonday();
+    const hasActiveCurrentWeekPlan = planRows.some(
+      (plan) => plan.isActive && plan.weekStart === currentMonday,
+    );
+    const weekStart = weekStartDate
+      ?? (hasActiveCurrentWeekPlan ? getNextMonday() : currentMonday);
+    const weekEnd = getSunday(weekStart);
+    const weekDates = getDatesForWeek(weekStart);
+
+    console.log(`\n[WeeklyPlan] ========== Generating Plan ==========`);
+    console.log(`[WeeklyPlan] Athlete: ${athleteId}`);
+    console.log(`[WeeklyPlan] Mode: ${mode}`);
+    console.log(`[WeeklyPlan] Week: ${weekStart} to ${weekEnd}`);
 
     const settings = settingsRows[0];
     const preferences = clientPreferences || settings?.weeklyPreferences || null;
@@ -195,14 +225,7 @@ export async function POST(req: Request) {
     // Step 1b: Build last-week review (only for new-week generation, not retries)
     let lastWeekReview: string | null = null;
     try {
-      const prevPlans = await db
-        .select()
-        .from(weeklyPlans)
-        .where(eq(weeklyPlans.athleteId, athleteId))
-        .orderBy(desc(weeklyPlans.createdAt))
-        .limit(1);
-
-      const prevPlan = prevPlans[0];
+      const prevPlan = planRows[0];
       if (prevPlan && prevPlan.weekStart !== weekStart) {
         console.log(`[WeeklyPlan] New week detected (prev: ${prevPlan.weekStart}, new: ${weekStart}). Building review...`);
         lastWeekReview = await buildWeekReview(
@@ -227,6 +250,9 @@ export async function POST(req: Request) {
     let trainingBlockContext: string | null = null;
     let activeBlockId: string | null = null;
     let blockWeekNumber: number | null = null;
+    let currentBlockWeek: BlockOutline | null = null;
+    let currentBlockGoalEvent: string | null = null;
+    let currentBlockGoalDate: string | null = null;
 
     try {
       const blockRows = await db
@@ -257,6 +283,9 @@ export async function POST(req: Request) {
         const currentPhase = phases.find((p) => p.weekNumbers.includes(weekNum));
 
         if (thisWeek) {
+          currentBlockWeek = thisWeek;
+          currentBlockGoalEvent = block.goalEvent;
+          currentBlockGoalDate = block.goalDate;
           const lines = [
             `- Goal: ${block.goalEvent} — ${block.goalDate}`,
             currentPhase ? `- Phase: ${currentPhase.name} (weeks ${currentPhase.weekNumbers.join('-')})` : '',
@@ -275,8 +304,49 @@ export async function POST(req: Request) {
       console.log(`[WeeklyPlan] Could not load training block (non-blocking)`);
     }
 
+    // Step 1d: In remaining-days mode, lock past days using completed activities
+    let lockedPastByDate = new Map<string, UnifiedSession>();
+    let sourcePlanForReplan: typeof weeklyPlans.$inferSelect | null = null;
+    let remainingDaysNote: string | null = null;
+
+    if (mode === 'remaining_days') {
+      sourcePlanForReplan = sourcePlanId
+        ? planRows.find((plan) => plan.id === sourcePlanId) ?? null
+        : planRows.find((plan) => plan.weekStart === weekStart && plan.isActive) ?? planRows[0] ?? null;
+
+      if (!sourcePlanForReplan) {
+        return NextResponse.json(
+          {error: 'No source weekly plan found for remaining-days replan'},
+          {status: 400},
+        );
+      }
+
+      const weekActivities = allActivities.filter(
+        (activity) => activity.date >= weekStart && activity.date <= weekEnd,
+      );
+      const actualized = buildActualizedWeekContext({
+        weekDates,
+        sourceSessions: sourcePlanForReplan.sessions as UnifiedSession[],
+        activities: weekActivities,
+        todayIso,
+      });
+      lockedPastByDate = actualized.lockedByDate;
+      remainingDaysNote = actualized.summary;
+      console.log(`[WeeklyPlan] Remaining-days lock summary: ${actualized.summary}`);
+    }
+
     // Step 2: Coach generates running sessions
     console.log(`[WeeklyPlan] Step 2: Coach generateObject...`);
+    const generationPreferences = [
+      preferences,
+      mode === 'remaining_days'
+        ? `Generation mode: remaining days only. Keep past days as historical truth and regenerate only from ${todayIso} onward.`
+        : null,
+      remainingDaysNote ? `Past-week actualization summary: ${remainingDaysNote}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
     const coachPrompt = buildCoachPipelinePrompt({
       athleteName: null,
       hrZones: hrZonesText,
@@ -288,7 +358,7 @@ export async function POST(req: Request) {
       injuries: injuriesText,
       goal: settings?.goal ?? null,
       personalRecords: prText,
-      preferences,
+      preferences: generationPreferences || null,
       lastWeekReview,
       trainingBlockContext,
     });
@@ -316,7 +386,7 @@ export async function POST(req: Request) {
       weekEnd,
       injuries: injuriesText,
       coachSessions: coachSessionsSummary,
-      preferences,
+      preferences: generationPreferences || null,
     });
 
     const physioResult = await generateObject({
@@ -334,7 +404,7 @@ export async function POST(req: Request) {
     // Convert nullable fields (null → undefined) for the UnifiedSession interface
     const n2u = <T,>(v: T | null | undefined): T | undefined => v ?? undefined;
 
-    const unifiedSessions: UnifiedSession[] = weekDates.map(({day, date}) => {
+    const generatedSessions: UnifiedSession[] = weekDates.map(({day, date}) => {
       const coach = coachSessions.find((s) => s.date === date);
       const physio = physioByDate.get(date);
 
@@ -371,6 +441,69 @@ export async function POST(req: Request) {
       }
 
       return session;
+    });
+
+    const activitiesByDate = new Map<string, ActivitySummary[]>();
+    for (const activity of allActivities) {
+      if (activity.date < weekStart || activity.date > weekEnd) continue;
+      const list = activitiesByDate.get(activity.date) ?? [];
+      list.push(activity);
+      activitiesByDate.set(activity.date, list);
+    }
+
+    const blockIntent =
+      activeBlockId && blockWeekNumber && currentBlockWeek && currentBlockGoalEvent && currentBlockGoalDate
+        ? {
+            blockId: activeBlockId,
+            weekNumber: blockWeekNumber,
+            goalEvent: currentBlockGoalEvent,
+            goalDate: currentBlockGoalDate,
+            weekType: currentBlockWeek.weekType,
+            volumeTargetKm: currentBlockWeek.volumeTargetKm,
+            intensityLevel: currentBlockWeek.intensityLevel,
+            keyWorkouts: currentBlockWeek.keyWorkouts,
+          }
+        : null;
+
+    const unifiedSessions: UnifiedSession[] = generatedSessions.map((session) => {
+      if (mode === 'remaining_days' && session.date < todayIso) {
+        const locked = lockedPastByDate.get(session.date);
+        if (locked) {
+          const activity = (activitiesByDate.get(session.date) ?? [])[0];
+          const lockedWithMeta: UnifiedSession = {
+            ...locked,
+            actualActivity: activity
+              ? {
+                  id: activity.id,
+                  name: activity.name,
+                  type: activity.type,
+                  distanceKm: activity.distance,
+                  durationSec: activity.duration,
+                  date: activity.date,
+                }
+              : undefined,
+            blockIntent: blockIntent ?? undefined,
+          };
+          return lockedWithMeta;
+        }
+      }
+
+      const activity = (activitiesByDate.get(session.date) ?? [])[0];
+      return {
+        ...session,
+        actualActivity:
+          mode === 'remaining_days' && activity && session.date < todayIso
+            ? {
+                id: activity.id,
+                name: activity.name,
+                type: activity.type,
+                distanceKm: activity.distance,
+                durationSec: activity.duration,
+                date: activity.date,
+              }
+            : undefined,
+        blockIntent: blockIntent ?? undefined,
+      };
     });
 
     // Step 5: Generate title + summary
@@ -465,10 +598,13 @@ export async function POST(req: Request) {
       weekStart,
       title: metaResult.object.title,
       summary: metaResult.object.summary,
+      goal: settings?.goal ?? null,
       sessions: unifiedSessions,
       content,
       blockId: activeBlockId,
       weekNumber: blockWeekNumber,
+      mode,
+      sourcePlanId: sourcePlanForReplan?.id ?? null,
       createdAt: now2,
     });
   } catch (error) {

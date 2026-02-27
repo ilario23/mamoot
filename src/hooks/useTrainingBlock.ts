@@ -7,6 +7,23 @@ import {
 } from '@/lib/chatSync';
 
 export type TrainingBlock = CachedTrainingBlock;
+export type TrainingBlockAdaptationType =
+  | 'recalibrate_remaining_weeks'
+  | 'insert_event'
+  | 'shift_target_date';
+
+export interface AdaptTrainingBlockOptions {
+  adaptationType: TrainingBlockAdaptationType;
+  sourceBlockId?: string;
+  effectiveFromWeek?: number;
+  event?: {
+    name: string;
+    date: string;
+    distanceKm?: number;
+    priority?: 'A' | 'B' | 'C';
+  };
+  goalDate?: string;
+}
 
 export interface UseTrainingBlockResult {
   blocks: TrainingBlock[];
@@ -16,6 +33,7 @@ export interface UseTrainingBlockResult {
   isLoading: boolean;
   isGenerating: boolean;
   generateBlock: (goalEvent: string, goalDate: string, totalWeeks?: number) => Promise<TrainingBlock | null>;
+  adaptBlock: (options: AdaptTrainingBlockOptions) => Promise<TrainingBlock | null>;
   refresh: () => Promise<void>;
 }
 
@@ -97,6 +115,58 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
     [athleteId],
   );
 
+  const adaptBlock = useCallback(
+    async (options: AdaptTrainingBlockOptions): Promise<TrainingBlock | null> => {
+      if (!athleteId) return null;
+      setIsGenerating(true);
+
+      try {
+        const res = await fetch('/api/ai/training-block', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            athleteId,
+            mode: 'adapt',
+            ...options,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error('[useTrainingBlock] Adaptation failed:', res.status);
+          return null;
+        }
+
+        const data = await res.json();
+        const newBlock: TrainingBlock = {
+          id: data.id,
+          athleteId,
+          goalEvent: data.goalEvent,
+          goalDate: data.goalDate,
+          totalWeeks: data.totalWeeks,
+          startDate: data.startDate,
+          phases: data.phases,
+          weekOutlines: data.weekOutlines,
+          isActive: true,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        };
+
+        setBlocks((prev) => {
+          const deactivated = prev.map((b) => ({...b, isActive: false}));
+          return [newBlock, ...deactivated];
+        });
+
+        return newBlock;
+      } catch (err) {
+        console.error('[useTrainingBlock] Adaptation error:', err);
+        return null;
+      } finally {
+        setIsGenerating(false);
+      }
+    },
+    [athleteId],
+  );
+
   const activateBlock = useCallback(
     (blockId: string) => {
       setBlocks((prev) =>
@@ -136,5 +206,5 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
     await loadBlocks();
   }, [loadBlocks]);
 
-  return {blocks, activeBlock, activateBlock, deleteBlock, isLoading, isGenerating, generateBlock, refresh};
+  return {blocks, activeBlock, activateBlock, deleteBlock, isLoading, isGenerating, generateBlock, adaptBlock, refresh};
 };

@@ -336,14 +336,19 @@ const TrainingBlockView = () => {
     isLoading,
     isGenerating,
     generateBlock,
+    adaptBlock,
     activateBlock,
     deleteBlock,
   } = useTrainingBlock(athleteId);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [editGoalEvent, setEditGoalEvent] = useState('');
-  const [editGoalDate, setEditGoalDate] = useState('');
-  const [editTotalWeeks, setEditTotalWeeks] = useState('');
+  const [adaptationType, setAdaptationType] = useState<'recalibrate_remaining_weeks' | 'insert_event' | 'shift_target_date'>('recalibrate_remaining_weeks');
+  const [effectiveFromWeek, setEffectiveFromWeek] = useState('');
+  const [eventName, setEventName] = useState('');
+  const [eventDate, setEventDate] = useState('');
+  const [eventDistanceKm, setEventDistanceKm] = useState('');
+  const [eventPriority, setEventPriority] = useState<'A' | 'B' | 'C'>('B');
+  const [newGoalDate, setNewGoalDate] = useState('');
 
   const currentWeek = useMemo(
     () =>
@@ -416,15 +421,19 @@ const TrainingBlockView = () => {
                   if (editOpen) {
                     setEditOpen(false);
                   } else {
-                    setEditGoalEvent(activeBlock.goalEvent);
-                    setEditGoalDate(activeBlock.goalDate);
-                    setEditTotalWeeks(String(activeBlock.totalWeeks));
+                    setAdaptationType('recalibrate_remaining_weeks');
+                    setEffectiveFromWeek(String(currentWeek));
+                    setEventName('');
+                    setEventDate('');
+                    setEventDistanceKm('');
+                    setEventPriority('B');
+                    setNewGoalDate(activeBlock.goalDate);
                     setEditOpen(true);
                   }
                 }}
                 disabled={isGenerating}
                 tabIndex={0}
-                aria-label={editOpen ? 'Cancel editing' : 'Edit goal and regenerate'}
+                aria-label={editOpen ? 'Cancel editing' : 'Adjust training block'}
                 className="shrink-0 p-2.5 text-muted-foreground hover:text-primary hover:bg-primary/10 border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none"
               >
                 {editOpen ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
@@ -433,69 +442,161 @@ const TrainingBlockView = () => {
 
             {editOpen && (
               <div className="space-y-3 border-t-3 border-border pt-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label
-                      htmlFor="edit-event"
+                      htmlFor="adaptation-type"
                       className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
                     >
-                      Goal Event
+                      Adaptation Mode
                     </label>
-                    <input
-                      id="edit-event"
-                      type="text"
-                      value={editGoalEvent}
-                      onChange={(e) => setEditGoalEvent(e.target.value)}
+                    <select
+                      id="adaptation-type"
+                      value={adaptationType}
+                      onChange={(e) => setAdaptationType(e.target.value as 'recalibrate_remaining_weeks' | 'insert_event' | 'shift_target_date')}
                       className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    />
+                    >
+                      <option value="recalibrate_remaining_weeks">Recalibrate remaining weeks</option>
+                      <option value="insert_event">Insert mid-block race/event</option>
+                      <option value="shift_target_date">Shift target date</option>
+                    </select>
                   </div>
                   <div>
                     <label
-                      htmlFor="edit-date"
+                      htmlFor="effective-week"
                       className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
                     >
-                      Event Date
+                      Effective From Week
                     </label>
                     <input
-                      id="edit-date"
-                      type="date"
-                      value={editGoalDate}
-                      onChange={(e) => setEditGoalDate(e.target.value)}
-                      className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      htmlFor="edit-weeks"
-                      className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
-                    >
-                      Total Weeks
-                    </label>
-                    <input
-                      id="edit-weeks"
+                      id="effective-week"
                       type="number"
-                      min={4}
-                      max={52}
-                      value={editTotalWeeks}
-                      onChange={(e) => setEditTotalWeeks(e.target.value)}
+                      min={1}
+                      max={activeBlock.totalWeeks}
+                      value={effectiveFromWeek}
+                      onChange={(e) => setEffectiveFromWeek(e.target.value)}
                       className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
                   </div>
                 </div>
+
+                {adaptationType === 'insert_event' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div className="sm:col-span-2">
+                      <label
+                        htmlFor="event-name"
+                        className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                      >
+                        Event Name
+                      </label>
+                      <input
+                        id="event-name"
+                        type="text"
+                        value={eventName}
+                        onChange={(e) => setEventName(e.target.value)}
+                        placeholder="Half Marathon tune-up"
+                        className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="event-date"
+                        className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                      >
+                        Event Date
+                      </label>
+                      <input
+                        id="event-date"
+                        type="date"
+                        value={eventDate}
+                        onChange={(e) => setEventDate(e.target.value)}
+                        className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="event-priority"
+                        className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                      >
+                        Priority
+                      </label>
+                      <select
+                        id="event-priority"
+                        value={eventPriority}
+                        onChange={(e) => setEventPriority(e.target.value as 'A' | 'B' | 'C')}
+                        className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      >
+                        <option value="B">B (default tune-up)</option>
+                        <option value="A">A</option>
+                        <option value="C">C</option>
+                      </select>
+                    </div>
+                  <div>
+                    <label
+                      htmlFor="event-distance"
+                      className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                    >
+                      Distance (km)
+                    </label>
+                    <input
+                      id="event-distance"
+                      type="number"
+                      min={1}
+                      value={eventDistanceKm}
+                      onChange={(e) => setEventDistanceKm(e.target.value)}
+                      className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                  </div>
+                )}
+
+                {adaptationType === 'shift_target_date' && (
+                  <div>
+                    <label
+                      htmlFor="new-goal-date"
+                      className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                    >
+                      New Goal Date
+                    </label>
+                    <input
+                      id="new-goal-date"
+                      type="date"
+                      value={newGoalDate}
+                      onChange={(e) => setNewGoalDate(e.target.value)}
+                      className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button
-                    onClick={() => {
-                      if (!editGoalEvent.trim() || !editGoalDate) return;
+                    onClick={async () => {
+                      if (!activeBlock) return;
+                      if (adaptationType === 'insert_event' && (!eventName.trim() || !eventDate)) return;
+                      if (adaptationType === 'shift_target_date' && !newGoalDate) return;
+
                       setEditOpen(false);
-                      handleGenerate(
-                        editGoalEvent.trim(),
-                        editGoalDate,
-                        editTotalWeeks ? Number(editTotalWeeks) : undefined,
-                      );
+                      await adaptBlock({
+                        adaptationType,
+                        sourceBlockId: activeBlock.id,
+                        effectiveFromWeek: effectiveFromWeek ? Number(effectiveFromWeek) : undefined,
+                        goalDate: adaptationType === 'shift_target_date' ? newGoalDate : undefined,
+                        event: adaptationType === 'insert_event'
+                          ? {
+                              name: eventName.trim(),
+                              date: eventDate,
+                              distanceKm: eventDistanceKm ? Number(eventDistanceKm) : undefined,
+                              priority: eventPriority,
+                            }
+                          : undefined,
+                      });
                     }}
-                    disabled={isGenerating || !editGoalEvent.trim() || !editGoalDate}
+                    disabled={
+                      isGenerating
+                      || (adaptationType === 'insert_event' && (!eventName.trim() || !eventDate))
+                      || (adaptationType === 'shift_target_date' && !newGoalDate)
+                    }
                     tabIndex={0}
-                    aria-label="Regenerate block with changes"
+                    aria-label="Apply block adaptation"
                     className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none"
                   >
                     {isGenerating ? (
@@ -503,7 +604,7 @@ const TrainingBlockView = () => {
                     ) : (
                       <>
                         <Sparkles className="h-3.5 w-3.5" />
-                        Regenerate with Changes
+                        Apply Adaptation
                       </>
                     )}
                   </button>

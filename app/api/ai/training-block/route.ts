@@ -59,35 +59,208 @@ export async function POST(req: Request) {
   const body = await req.json();
   const {
     athleteId,
+    mode,
     goalEvent,
     goalDate,
     totalWeeks: clientWeeks,
     model: clientModel,
+    adaptationType,
+    sourceBlockId,
+    effectiveFromWeek,
+    event,
   }: {
     athleteId: number;
+    mode?: 'create' | 'adapt';
     goalEvent: string;
     goalDate: string;
     totalWeeks?: number;
     model?: string;
+    adaptationType?: 'recalibrate_remaining_weeks' | 'insert_event' | 'shift_target_date';
+    sourceBlockId?: string;
+    effectiveFromWeek?: number;
+    event?: {
+      name: string;
+      date: string;
+      distanceKm?: number;
+      priority?: 'A' | 'B' | 'C';
+    };
   } = body;
 
-  if (!athleteId || !goalEvent || !goalDate) {
+  if (!athleteId) {
+    return NextResponse.json(
+      {error: 'athleteId required'},
+      {status: 400},
+    );
+  }
+
+  const resolvedMode = mode ?? 'create';
+  const model = getModel(clientModel);
+
+  if (resolvedMode === 'create' && (!goalEvent || !goalDate)) {
     return NextResponse.json(
       {error: 'athleteId, goalEvent, and goalDate required'},
       {status: 400},
     );
   }
 
-  const startDate = getNextMonday();
-  const totalWeeks = clientWeeks ?? weeksUntil(startDate, goalDate);
-  const model = getModel(clientModel);
+  if (resolvedMode === 'adapt' && !adaptationType) {
+    return NextResponse.json(
+      {error: 'adaptationType required in adapt mode'},
+      {status: 400},
+    );
+  }
 
   console.log(`\n[TrainingBlock] ========== Generating Block ==========`);
   console.log(`[TrainingBlock] Athlete: ${athleteId}`);
-  console.log(`[TrainingBlock] Goal: ${goalEvent} on ${goalDate}`);
-  console.log(`[TrainingBlock] Weeks: ${totalWeeks}, starts ${startDate}`);
+  console.log(`[TrainingBlock] Mode: ${resolvedMode}`);
 
   try {
+    if (resolvedMode === 'adapt') {
+      const sourceRows = sourceBlockId
+        ? await db
+            .select()
+            .from(trainingBlocks)
+            .where(eq(trainingBlocks.id, sourceBlockId))
+            .limit(1)
+        : await db
+            .select()
+            .from(trainingBlocks)
+            .where(
+              and(
+                eq(trainingBlocks.athleteId, athleteId),
+                eq(trainingBlocks.isActive, true),
+              ),
+            )
+            .orderBy(desc(trainingBlocks.createdAt))
+            .limit(1);
+
+      const sourceBlock = sourceRows[0];
+      if (!sourceBlock) {
+        return NextResponse.json(
+          {error: 'No source training block found for adaptation'},
+          {status: 400},
+        );
+      }
+
+      const [settingsRows, activityRows] = await Promise.all([
+        db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
+        db.select().from(activitiesTable).orderBy(desc(activitiesTable.date)),
+      ]);
+
+      const settings = settingsRows[0];
+      const allActivities = activityRows.map((row) =>
+        transformActivity(row.data as StravaSummaryActivity),
+      );
+
+      const startDate = sourceBlock.startDate;
+      const now = new Date();
+      const start = new Date(startDate);
+      const currentWeek = Math.max(
+        1,
+        Math.min(
+          sourceBlock.totalWeeks,
+          Math.ceil((now.getTime() - start.getTime()) / (7 * 86400000)),
+        ),
+      );
+      const effectiveWeek = Math.max(1, effectiveFromWeek ?? currentWeek);
+      const eventPriority = event?.priority ?? 'B';
+
+      const recentActivities = allActivities.filter((a) => {
+        const d = new Date(a.date);
+        return d >= new Date(now.getTime() - 28 * 86400000);
+      });
+      const recentVolume = recentActivities.reduce((sum, a) => sum + a.distance, 0);
+      const avgWeeklyVolume = recentVolume > 0 ? recentVolume / 4 : 0;
+
+      const adaptationPrompt = `You are adapting an existing running training block while preserving history.
+
+## Adaptation Request
+- Type: ${adaptationType}
+- Effective from week: ${effectiveWeek}
+${event ? `- Inserted event: ${event.name} on ${event.date} (${event.distanceKm ?? 'unknown'} km), priority ${eventPriority}` : ''}
+${adaptationType === 'insert_event' ? '- For B-race, apply a mini taper and short post-race recovery while keeping the main goal unchanged.' : ''}
+${adaptationType === 'shift_target_date' ? `- New goal date requested: ${goalDate ?? sourceBlock.goalDate}` : ''}
+
+## Existing Block (source of truth for past weeks)
+- Goal Event: ${sourceBlock.goalEvent}
+- Goal Date: ${sourceBlock.goalDate}
+- Total Weeks: ${sourceBlock.totalWeeks}
+- Start Date: ${sourceBlock.startDate}
+- Current Week: ${currentWeek}
+- Avg weekly volume (last 4 weeks): ${avgWeeklyVolume.toFixed(1)} km
+
+## Athlete Context
+${settings?.goal ? `- Athlete goal: ${settings.goal}` : ''}
+${settings?.injuries ? `- Injuries: ${JSON.stringify(settings.injuries)}` : ''}
+
+## Existing Phases JSON
+${JSON.stringify(sourceBlock.phases)}
+
+## Existing Week Outlines JSON
+${JSON.stringify(sourceBlock.weekOutlines)}
+
+## Instructions
+- Preserve all weeks before effective week as historical (do not rewrite intent drastically).
+- Recalculate weeks from effective week onward according to adaptation request.
+- Maintain progressive overload with periodic deload/recovery and safe taper logic.
+- Return full block output for all weeks (week numbers remain 1..${sourceBlock.totalWeeks}).
+- Keep exactly ${sourceBlock.totalWeeks} week outlines.`;
+
+      const adapted = await generateObject({
+        model,
+        schema: trainingBlockOutputSchema,
+        prompt: adaptationPrompt,
+      });
+
+      const blockId = crypto.randomUUID();
+      const nowMs = Date.now();
+      const resolvedGoalDate = goalDate || sourceBlock.goalDate;
+      const resolvedGoalEvent = goalEvent || sourceBlock.goalEvent;
+
+      await db.insert(trainingBlocks).values({
+        id: blockId,
+        athleteId,
+        goalEvent: resolvedGoalEvent,
+        goalDate: resolvedGoalDate,
+        totalWeeks: sourceBlock.totalWeeks,
+        startDate,
+        phases: adapted.object.phases,
+        weekOutlines: adapted.object.weekOutlines,
+        isActive: true,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      });
+
+      await db
+        .update(trainingBlocks)
+        .set({isActive: false})
+        .where(
+          and(
+            eq(trainingBlocks.athleteId, athleteId),
+            ne(trainingBlocks.id, blockId),
+          ),
+        );
+
+      return NextResponse.json({
+        id: blockId,
+        athleteId,
+        goalEvent: resolvedGoalEvent,
+        goalDate: resolvedGoalDate,
+        totalWeeks: sourceBlock.totalWeeks,
+        startDate,
+        phases: adapted.object.phases,
+        weekOutlines: adapted.object.weekOutlines,
+        isActive: true,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      });
+    }
+
+    const startDate = getNextMonday();
+    const totalWeeks = clientWeeks ?? weeksUntil(startDate, goalDate);
+    console.log(`[TrainingBlock] Goal: ${goalEvent} on ${goalDate}`);
+    console.log(`[TrainingBlock] Weeks: ${totalWeeks}, starts ${startDate}`);
+
     const [settingsRows, activityRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
       db.select().from(activitiesTable).orderBy(desc(activitiesTable.date)),
