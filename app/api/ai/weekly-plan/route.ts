@@ -27,6 +27,8 @@ import {buildActualizedWeekContext} from '@/lib/weekActualization';
 import {NextResponse} from 'next/server';
 
 export const maxDuration = 120;
+const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
+const PLAN_PREFERENCES_SUFFIX = '-->';
 
 const ALLOWED_MODELS: Record<string, () => ReturnType<typeof openai | typeof anthropic>> = {
   'gpt-4o-mini': () => openai('gpt-4o-mini'),
@@ -558,7 +560,9 @@ export async function POST(req: Request) {
       markdownLines.push('');
     }
 
-    const content = markdownLines.join('\n');
+    const markdownContent = markdownLines.join('\n');
+    const encodedPreferences = encodeURIComponent(generationPreferences || '');
+    const content = `${PLAN_PREFERENCES_PREFIX}${encodedPreferences}${PLAN_PREFERENCES_SUFFIX}\n${markdownContent}`;
 
     // Step 6: Save
     const planId = crypto.randomUUID();

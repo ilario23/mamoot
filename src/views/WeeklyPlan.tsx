@@ -54,6 +54,30 @@ const getNextMonday = (): string => {
   return toIsoDate(currentMonday);
 };
 
+const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
+const PLAN_PREFERENCES_SUFFIX = '-->';
+
+const extractPreferencesFromPlanContent = (content?: string | null): string => {
+  if (!content) return '';
+  const escapedPrefix = PLAN_PREFERENCES_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedSuffix = PLAN_PREFERENCES_SUFFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`^${escapedPrefix}(.*?)${escapedSuffix}\\n?`);
+  const match = content.match(regex);
+  if (!match?.[1]) return '';
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return '';
+  }
+};
+
+const stripPreferencesFromPlanContent = (content?: string | null): string => {
+  if (!content) return '';
+  const escapedPrefix = PLAN_PREFERENCES_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedSuffix = PLAN_PREFERENCES_SUFFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return content.replace(new RegExp(`^${escapedPrefix}(.*?)${escapedSuffix}\\n?`), '');
+};
+
 const DayCard = ({session}: {session: UnifiedSession}) => {
   const hasRun = !!session.run;
   const hasPhysio = !!session.physio;
@@ -202,45 +226,12 @@ const DayCard = ({session}: {session: UnifiedSession}) => {
   );
 };
 
-const PreferencesBox = ({
-  preferences,
-  onChange,
-  onBlur,
-}: {
-  preferences: string;
-  onChange: (value: string) => void;
-  onBlur: () => void;
-}) => (
-  <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
-    <div className='flex items-center gap-1.5'>
-      <MessageSquareText className='h-3.5 w-3.5 text-primary' />
-      <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
-        Preferences
-      </span>
-    </div>
-    <textarea
-      value={preferences}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={onBlur}
-      placeholder="No preferences set. Chat with the Coach to set constraints, or type them here (e.g. &quot;Can't run Tuesday, focus on tempo work&quot;)."
-      rows={2}
-      className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none'
-    />
-  </div>
-);
-
 const EmptyState = ({
   onGenerate,
   isGenerating,
-  preferences,
-  onPreferencesChange,
-  onPreferencesBlur,
 }: {
   onGenerate: () => void;
   isGenerating: boolean;
-  preferences: string;
-  onPreferencesChange: (value: string) => void;
-  onPreferencesBlur: () => void;
 }) => (
   <div className='border-3 border-border bg-background shadow-neo p-8 md:p-12 text-center space-y-4'>
     <div className='w-16 h-16 mx-auto bg-muted border-3 border-border shadow-neo-sm flex items-center justify-center'>
@@ -254,13 +245,6 @@ const EmptyState = ({
         Generate a unified weekly plan that combines running sessions from your
         Coach with strength and mobility work from your Physio.
       </p>
-    </div>
-    <div className='max-w-md mx-auto w-full'>
-      <PreferencesBox
-        preferences={preferences}
-        onChange={onPreferencesChange}
-        onBlur={onPreferencesBlur}
-      />
     </div>
     <button
       onClick={onGenerate}
@@ -405,6 +389,16 @@ const WeeklyPlan = () => {
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [regenerationMode, setRegenerationMode] = useState<'full' | 'remaining_days'>('full');
   const [targetWeekStart, setTargetWeekStart] = useState('');
+  const [targetWeekSelection, setTargetWeekSelection] = useState<'current' | 'next'>('current');
+  const [regenerationPreferences, setRegenerationPreferences] = useState('');
+  const activePlanPreferences = useMemo(
+    () => extractPreferencesFromPlanContent(activePlan?.content),
+    [activePlan?.content],
+  );
+  const activePlanContent = useMemo(
+    () => stripPreferencesFromPlanContent(activePlan?.content),
+    [activePlan?.content],
+  );
 
   const blockBannerData = useMemo(() => {
     if (!activeBlock || !activePlan?.blockId) return null;
@@ -426,24 +420,37 @@ const WeeklyPlan = () => {
   };
 
   const handleOpenRegenerate = () => {
-    const defaultWeek = activePlan?.weekStart ?? '';
-    setTargetWeekStart(defaultWeek);
+    const currentMonday = getCurrentMonday();
+    const nextMonday = getNextMonday();
+    const defaultSelection: 'current' | 'next' =
+      activePlan?.weekStart === nextMonday ? 'next' : 'current';
+    setTargetWeekSelection(defaultSelection);
+    setTargetWeekStart(defaultSelection === 'next' ? nextMonday : currentMonday);
     setRegenerationMode('full');
+    setRegenerationPreferences(activePlanPreferences || preferences || '');
     setRegenerateOpen(true);
   };
 
+  const handleSelectCurrentWeek = () => {
+    setTargetWeekSelection('current');
+    setTargetWeekStart(getCurrentMonday());
+  };
+
+  const handleSelectNextWeek = () => {
+    setTargetWeekSelection('next');
+    setTargetWeekStart(getNextMonday());
+  };
+
   const handleRegenerateSubmit = () => {
+    setPreferences(regenerationPreferences);
+    savePreferences();
     generatePlan({
       weekStartDate: targetWeekStart || undefined,
-      preferences,
+      preferences: regenerationPreferences,
       mode: regenerationMode,
       sourcePlanId: activePlan?.id,
     });
     setRegenerateOpen(false);
-  };
-
-  const handlePreferencesBlur = () => {
-    savePreferences();
   };
 
   const handleToggleFullPlan = () => {
@@ -489,7 +496,9 @@ const WeeklyPlan = () => {
           <div className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-5 space-y-4'>
             <div className='flex items-start justify-between gap-3'>
               <div className='space-y-1'>
-                <h3 className='font-black text-base uppercase tracking-wider'>Regenerate Weekly Plan</h3>
+                <h3 className='font-black text-base uppercase tracking-wider'>
+                  Regenerate Weekly Plan
+                </h3>
                 <p className='text-xs text-muted-foreground font-medium'>
                   Choose whether to regenerate the full week or only the remaining days.
                 </p>
@@ -513,8 +522,10 @@ const WeeklyPlan = () => {
                   onClick={() => setRegenerationMode('full')}
                   tabIndex={0}
                   aria-label='Regenerate full week mode'
-                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold ${
-                    regenerationMode === 'full' ? 'bg-primary/10' : 'bg-background hover:bg-muted'
+                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold transition-colors ${
+                    regenerationMode === 'full'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-background hover:bg-muted'
                   }`}
                 >
                   Full week
@@ -523,8 +534,10 @@ const WeeklyPlan = () => {
                   onClick={() => setRegenerationMode('remaining_days')}
                   tabIndex={0}
                   aria-label='Regenerate remaining days mode'
-                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold ${
-                    regenerationMode === 'remaining_days' ? 'bg-primary/10' : 'bg-background hover:bg-muted'
+                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold transition-colors ${
+                    regenerationMode === 'remaining_days'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-background hover:bg-muted'
                   }`}
                 >
                   Remaining days (uses completed activities)
@@ -533,22 +546,35 @@ const WeeklyPlan = () => {
             </div>
 
             <div className='space-y-2'>
-              <label
-                htmlFor='target-week-start'
-                className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'
-              >
+              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
                 Target Week (Monday)
               </label>
-              <input
-                id='target-week-start'
-                type='date'
-                value={targetWeekStart}
-                onChange={(e) => setTargetWeekStart(e.target.value)}
-                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
-              />
+              <div
+                aria-label='Selected target week'
+                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium'
+              >
+                {targetWeekStart ? `${formatWeekRange(targetWeekStart)} (${targetWeekStart})` : 'Select a week'}
+              </div>
               <p className='text-[11px] text-muted-foreground font-medium'>
-                Leave empty to use smart default (current week if missing, otherwise next week).
+                Choose either current or next week.
               </p>
+            </div>
+
+            <div className='space-y-2'>
+              <label
+                htmlFor='regenerate-preferences'
+                className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'
+              >
+                Preferences
+              </label>
+              <textarea
+                id='regenerate-preferences'
+                value={regenerationPreferences}
+                onChange={(e) => setRegenerationPreferences(e.target.value)}
+                rows={3}
+                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none'
+                placeholder='Add weekly constraints/preferences for this plan generation'
+              />
             </div>
 
             <div className='flex flex-wrap gap-2'>
@@ -557,30 +583,32 @@ const WeeklyPlan = () => {
                 disabled={isGenerating}
                 tabIndex={0}
                 aria-label='Confirm regenerate weekly plan'
-                className='inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm disabled:opacity-50'
+                className='inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all disabled:opacity-50 disabled:pointer-events-none'
               >
                 {isGenerating ? <NeoLoader size='sm' /> : <Sparkles className='h-3.5 w-3.5' />}
                 Generate
               </button>
               <button
-                onClick={() => {
-                  setTargetWeekStart(getCurrentMonday());
-                  setRegenerationMode('full');
-                }}
+                onClick={handleSelectCurrentWeek}
                 tabIndex={0}
                 aria-label='Use current week'
-                className='px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background hover:bg-muted'
+                className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
+                  targetWeekSelection === 'current'
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-background hover:bg-muted'
+                }`}
               >
                 Current Week
               </button>
               <button
-                onClick={() => {
-                  setTargetWeekStart(getNextMonday());
-                  setRegenerationMode('full');
-                }}
+                onClick={handleSelectNextWeek}
                 tabIndex={0}
                 aria-label='Use next week'
-                className='px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background hover:bg-muted'
+                className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
+                  targetWeekSelection === 'next'
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-background hover:bg-muted'
+                }`}
               >
                 Next Week
               </button>
@@ -594,9 +622,6 @@ const WeeklyPlan = () => {
         <EmptyState
           onGenerate={handleGenerate}
           isGenerating={isGenerating}
-          preferences={preferences}
-          onPreferencesChange={setPreferences}
-          onPreferencesBlur={handlePreferencesBlur}
         />
       )}
 
@@ -655,12 +680,18 @@ const WeeklyPlan = () => {
             </div>
           </div>
 
-          {/* Preferences */}
-          <PreferencesBox
-            preferences={preferences}
-            onChange={setPreferences}
-            onBlur={handlePreferencesBlur}
-          />
+          {/* Preferences used to generate this plan */}
+          <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
+            <div className='flex items-center gap-1.5'>
+              <MessageSquareText className='h-3.5 w-3.5 text-primary' />
+              <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
+                Preferences Used
+              </span>
+            </div>
+            <p className='text-sm font-medium whitespace-pre-wrap'>
+              {activePlanPreferences || 'No preferences were provided for this plan.'}
+            </p>
+          </div>
 
           {/* Day cards */}
           <div className='grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4'>
@@ -670,7 +701,7 @@ const WeeklyPlan = () => {
           </div>
 
           {/* Full plan markdown */}
-          {activePlan.content && (
+          {activePlanContent && (
             <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
               <button
                 onClick={handleToggleFullPlan}
@@ -691,7 +722,7 @@ const WeeklyPlan = () => {
               </button>
               {fullPlanOpen && (
                 <div className='px-4 pb-4 md:px-5 md:pb-5 prose-sm max-w-none overflow-hidden break-words'>
-                  <MarkdownContent content={activePlan.content} />
+                  <MarkdownContent content={activePlanContent} />
                 </div>
               )}
             </div>
