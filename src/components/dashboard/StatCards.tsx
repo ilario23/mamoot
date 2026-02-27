@@ -1,7 +1,7 @@
 'use client';
 
 import {formatDuration} from '@/lib/mockData';
-import {useActivities, useAthleteStats} from '@/hooks/useStrava';
+import {useDashboardActivities, useAthleteStats} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {calcStreak} from '@/utils/trainingLoad';
@@ -19,7 +19,7 @@ interface StatCard {
 
 const StatCards = () => {
   const {isAuthenticated} = useStravaAuth();
-  const {data: activities, isLoading} = useActivities();
+  const {data: activities, isLoading} = useDashboardActivities();
   const {data: stats} = useAthleteStats();
   const {settings} = useSettings();
   const isMobile = useIsMobile();

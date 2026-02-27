@@ -36,6 +36,13 @@ import type {
 const ONE_HOUR = 60 * 60 * 1000;
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
+const getDashboardAfterDate = (): string => {
+  const cutoff = new Date();
+  // Keep ~13 months for dashboard trends while reducing payload size.
+  cutoff.setDate(cutoff.getDate() - 400);
+  return cutoff.toISOString().slice(0, 10);
+};
+
 /** Fetch all activities, served from Neon cache when fresh */
 export const useActivities = () => {
   const {isAuthenticated} = useStravaAuth();
@@ -43,6 +50,21 @@ export const useActivities = () => {
   return useQuery<ActivitySummary[]>({
     queryKey: ['strava', 'activities'],
     queryFn: () => cachedGetAllActivities(),
+    enabled: isAuthenticated,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_DAY,
+    refetchOnWindowFocus: false,
+  });
+};
+
+/** Dashboard-optimized activity query (rolling window only). */
+export const useDashboardActivities = () => {
+  const {isAuthenticated} = useStravaAuth();
+  const afterDate = getDashboardAfterDate();
+
+  return useQuery<ActivitySummary[]>({
+    queryKey: ['strava', 'activities', 'dashboard', afterDate],
+    queryFn: () => cachedGetAllActivities(afterDate),
     enabled: isAuthenticated,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
@@ -186,7 +208,7 @@ export const useAthleteGear = () => {
 export const useFitnessData = () => {
   const {isAuthenticated, athlete} = useStravaAuth();
   const {settings} = useSettings();
-  const {data: activities} = useActivities();
+  const {data: activities} = useDashboardActivities();
 
   return useQuery<FitnessDataPoint[]>({
     queryKey: ['dashboard', 'fitness', athlete?.id],
@@ -289,7 +311,7 @@ export const usePerActivityZoneBreakdowns = (
 ): UsePerActivityZoneBreakdownsResult => {
   const {isAuthenticated} = useStravaAuth();
   const {settings} = useSettings();
-  const {data: activities, isLoading: activitiesLoading} = useActivities();
+  const {data: activities, isLoading: activitiesLoading} = useDashboardActivities();
 
   const zonesHash = useMemo(
     () => hashZoneSettings(settings.zones),

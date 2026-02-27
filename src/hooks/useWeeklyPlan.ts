@@ -5,6 +5,7 @@ import {
   neonDeleteWeeklyPlan,
   neonActivateWeeklyPlan,
 } from '@/lib/chatSync';
+import {fetchUserSettingsRow} from '@/lib/userSettingsSync';
 
 const STORAGE_KEY = 'mamoot-weekly-plan-active';
 
@@ -90,12 +91,13 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   const loadPreferences = useCallback(async () => {
     if (!athleteId) return;
     try {
-      const res = await fetch(`/api/db/user-settings?athleteId=${athleteId}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.weeklyPreferences) {
-          setPreferences(data.weeklyPreferences);
-        }
+      const data = await fetchUserSettingsRow(athleteId);
+      const savedPreferences =
+        typeof data?.weeklyPreferences === 'string'
+          ? data.weeklyPreferences
+          : '';
+      if (savedPreferences) {
+        setPreferences(savedPreferences);
       }
     } catch {
       // Non-blocking

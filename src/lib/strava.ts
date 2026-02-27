@@ -408,11 +408,34 @@ export const fetchActivities = (
 export const fetchAllActivities = async (
   maxPages = 10
 ): Promise<StravaSummaryActivity[]> => {
-  const all: StravaSummaryActivity[] = [];
-  for (let page = 1; page <= maxPages; page++) {
-    const batch = await fetchActivities(page, 100);
-    all.push(...batch);
-    if (batch.length < 100) break; // no more pages
+  const firstPage = await fetchActivities(1, 100);
+
+  if (firstPage.length < 100 || maxPages <= 1) {
+    return firstPage;
+  }
+
+  const all: StravaSummaryActivity[] = [...firstPage];
+  const CONCURRENCY = 3;
+  const pages = Array.from({length: maxPages - 1}, (_, i) => i + 2);
+
+  for (let i = 0; i < pages.length; i += CONCURRENCY) {
+    const chunk = pages.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map(async (page) => {
+        const batch = await fetchActivities(page, 100);
+        return {page, batch};
+      }),
+    );
+
+    chunkResults.sort((a, b) => a.page - b.page);
+    for (const {batch} of chunkResults) {
+      all.push(...batch);
+    }
+
+    // Once a page is not full, there are no more activities.
+    if (chunkResults.some((result) => result.batch.length < 100)) {
+      break;
+    }
   }
   return all;
 };

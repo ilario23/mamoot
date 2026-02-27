@@ -1,14 +1,60 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+import {useEffect, useState} from 'react';
 import StatCards from '@/components/dashboard/StatCards';
-import VolumeChart from '@/components/dashboard/VolumeChart';
-import PaceZoneDistribution from '@/components/dashboard/PaceZoneDistribution';
-import FitnessChart from '@/components/dashboard/FitnessChart';
-import PaceProgressionChart from '@/components/dashboard/PaceProgressionChart';
-import ACWRChart from '@/components/dashboard/ACWRChart';
 import CollapsibleSection from '@/components/ui/collapsible-section';
+import {NeoLoader} from '@/components/ui/neo-loader';
+
+const SectionLoading = ({label}: {label: string}) => (
+  <div className="border-3 border-border p-5 bg-background shadow-neo flex items-center justify-center min-h-[220px] md:min-h-[280px]">
+    <NeoLoader label={label} size="sm" colorClass="bg-primary" />
+  </div>
+);
+
+const VolumeChart = dynamic(() => import('@/components/dashboard/VolumeChart'), {
+  ssr: false,
+  loading: () => <SectionLoading label="Loading volume" />,
+});
+
+const PaceZoneDistribution = dynamic(
+  () => import('@/components/dashboard/PaceZoneDistribution'),
+  {
+    ssr: false,
+    loading: () => <SectionLoading label="Loading zones" />,
+  },
+);
+
+const FitnessChart = dynamic(() => import('@/components/dashboard/FitnessChart'), {
+  ssr: false,
+  loading: () => <SectionLoading label="Loading training metrics" />,
+});
+
+const PaceProgressionChart = dynamic(
+  () => import('@/components/dashboard/PaceProgressionChart'),
+  {
+    ssr: false,
+    loading: () => <SectionLoading label="Loading pace progression" />,
+  },
+);
+
+const ACWRChart = dynamic(() => import('@/components/dashboard/ACWRChart'), {
+  ssr: false,
+  loading: () => <SectionLoading label="Loading workload ratio" />,
+});
 
 const Dashboard = () => {
+  const [showDeferredSections, setShowDeferredSections] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setShowDeferredSections(true);
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   return (
     <div className="space-y-4 md:space-y-6">
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
@@ -41,7 +87,11 @@ const Dashboard = () => {
         defaultOpenMobile={false}
         defaultOpenDesktop={true}
       >
-        <PaceProgressionChart embedded />
+        {showDeferredSections ? (
+          <PaceProgressionChart embedded />
+        ) : (
+          <SectionLoading label="Loading pace progression" />
+        )}
       </CollapsibleSection>
 
       {/* Row 6: Workload Ratio — collapsed on mobile */}
@@ -51,7 +101,11 @@ const Dashboard = () => {
         defaultOpenMobile={false}
         defaultOpenDesktop={true}
       >
-        <ACWRChart embedded />
+        {showDeferredSections ? (
+          <ACWRChart embedded />
+        ) : (
+          <SectionLoading label="Loading workload ratio" />
+        )}
       </CollapsibleSection>
     </div>
   );

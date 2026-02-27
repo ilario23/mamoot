@@ -13,7 +13,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import {formatPace} from '@/lib/mockData';
-import {useActivities} from '@/hooks/useStrava';
+import {useDashboardActivities} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useIsMobile} from '@/hooks/use-mobile';
 import {NeoLoader} from '@/components/ui/neo-loader';
@@ -67,7 +67,7 @@ const linearRegression = (
 
 const PaceProgressionChart = ({embedded = false}: {embedded?: boolean}) => {
   const {isAuthenticated} = useStravaAuth();
-  const {data: activities, isLoading} = useActivities();
+  const {data: activities, isLoading} = useDashboardActivities();
   const isMobile = useIsMobile();
   const [daysBack, setDaysBack] = useState(180);
 

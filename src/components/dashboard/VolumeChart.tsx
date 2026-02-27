@@ -12,7 +12,7 @@ import {
   Legend,
 } from "recharts";
 import { ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
-import { useActivities, usePerActivityZoneBreakdowns } from "@/hooks/useStrava";
+import { useDashboardActivities, usePerActivityZoneBreakdowns } from "@/hooks/useStrava";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import { NeoLoader } from "@/components/ui/neo-loader";
 
@@ -20,7 +20,7 @@ const WEEKS_WINDOW = 4;
 
 const VolumeChart = () => {
   const { isAuthenticated } = useStravaAuth();
-  const { data: activities, isLoading: activitiesLoading } = useActivities();
+  const { data: activities, isLoading: activitiesLoading } = useDashboardActivities();
   const {
     data: breakdownMap,
     isLoading: breakdownsLoading,

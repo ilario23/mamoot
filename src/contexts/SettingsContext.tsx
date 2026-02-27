@@ -6,6 +6,7 @@ import {
   ReactNode,
 } from 'react';
 import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/mockData';
+import {clearUserSettingsRowCache, fetchUserSettingsRow} from '@/lib/userSettingsSync';
 
 const LS_KEY = 'mamoot-settings';
 
@@ -92,13 +93,10 @@ const saveToNeon = async (
   let existingWeight: number | null = null;
   let existingCity: string | null = null;
   try {
-    const res = await fetch(`/api/db/user-settings?athleteId=${athleteId}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data) {
-        existingWeight = data.weight ?? null;
-        existingCity = data.city ?? null;
-      }
+    const data = await fetchUserSettingsRow(athleteId);
+    if (data) {
+      existingWeight = (data.weight as number | null | undefined) ?? null;
+      existingCity = (data.city as string | null | undefined) ?? null;
     }
   } catch {
     // Non-blocking — proceed without existing profile data
@@ -126,19 +124,14 @@ const saveToNeon = async (
   if (!res.ok) {
     throw new Error(`Failed to save settings: ${res.status}`);
   }
+  clearUserSettingsRowCache(athleteId);
 };
 
 /** GET settings from Neon. Returns null if no row exists. */
 const fetchFromNeon = async (
   athleteId: number,
 ): Promise<UserSettings | null> => {
-  const res = await fetch(
-    `/api/db/user-settings?athleteId=${athleteId}`,
-  );
-  if (!res.ok) {
-    throw new Error(`Failed to fetch settings: ${res.status}`);
-  }
-  const data = await res.json();
+  const data = await fetchUserSettingsRow(athleteId);
   if (!data) return null;
   return neonRowToSettings(data);
 };
