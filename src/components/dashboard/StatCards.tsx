@@ -1,10 +1,13 @@
 'use client';
 
 import {formatDuration} from '@/lib/mockData';
-import {useDashboardActivities, useAthleteStats} from '@/hooks/useStrava';
+import {
+  useDashboardActivities,
+  useAthleteStats,
+  useAdvancedMetricsData,
+} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
-import {calcStreak} from '@/utils/trainingLoad';
 import {ChevronDown} from 'lucide-react';
 import {NeoSkeleton} from '@/components/ui/skeleton';
 import {useMemo, useState} from 'react';
@@ -22,6 +25,7 @@ const StatCards = () => {
   const {data: activities, isLoading} = useDashboardActivities();
   const {data: stats} = useAthleteStats();
   const {settings} = useSettings();
+  const metrics = useAdvancedMetricsData();
   const isMobile = useIsMobile();
   const [showAll, setShowAll] = useState(false);
 
@@ -79,8 +83,7 @@ const StatCards = () => {
             .reduce((sum, a) => sum + a.distance, 0);
         })();
 
-    // Training streak
-    const streak = calcStreak(allActivities);
+    const latestMetrics = metrics[metrics.length - 1];
 
     return [
       {
@@ -90,9 +93,17 @@ const StatCards = () => {
         accentClass: 'bg-secondary',
       },
       {
-        label: 'Acute Load',
-        value: `${loadRatio}%`,
-        sub: `${weekDistance.toFixed(1)} vs ${prevWeeksAvg.toFixed(1)} km/wk`,
+        label: 'Readiness (TSB)',
+        value:
+          latestMetrics?.tsb != null ? `${latestMetrics.tsb.toFixed(1)}` : '—',
+        sub:
+          latestMetrics?.tsb != null
+            ? latestMetrics.tsb < -12
+              ? 'high fatigue'
+              : latestMetrics.tsb < -5
+                ? 'moderate fatigue'
+                : 'ready to absorb load'
+            : 'insufficient data',
         accentClass: 'bg-accent',
       },
       {
@@ -108,19 +119,19 @@ const StatCards = () => {
         accentClass: 'bg-secondary',
       },
       {
-        label: 'YTD Distance',
-        value: `${ytdDistance.toFixed(0)} km`,
-        sub: `${new Date().getFullYear()} total`,
+        label: 'Acute Load',
+        value: `${loadRatio}%`,
+        sub: `${weekDistance.toFixed(1)} vs ${prevWeeksAvg.toFixed(1)} km/wk`,
         accentClass: 'bg-accent',
       },
       {
-        label: 'Streak',
-        value: `${streak.weeks} wk`,
-        sub: `${streak.days} consecutive days`,
+        label: 'YTD Distance',
+        value: `${ytdDistance.toFixed(0)} km`,
+        sub: `${new Date().getFullYear()} total`,
         accentClass: 'bg-primary',
       },
     ];
-  }, [activities, stats, settings]);
+  }, [activities, stats, settings, metrics]);
 
   if (!isAuthenticated) {
     return (
