@@ -21,11 +21,23 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {NeoLoader} from '@/components/ui/neo-loader';
+import WeeklyPlanDistribution from '@/components/weekly-plan/WeeklyPlanDistribution';
 import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
 import {useTrainingBlock} from '@/hooks/useTrainingBlock';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
+import {useSettings} from '@/contexts/SettingsContext';
 import {SESSION_TYPE_COLORS, SESSION_TYPE_BORDER_COLORS} from '@/lib/planConstants';
 import type {UnifiedSession, PhysioExercise} from '@/lib/cacheTypes';
+import {
+  AUTO_STRATEGY_LABEL,
+  STRATEGY_PRESET_LABELS,
+  OPTIMIZATION_PRIORITY_LABELS,
+  describeAutoStrategySelection,
+  describeStrategyPreset,
+  type OptimizationPriority,
+  type StrategySelectionMode,
+  type TrainingStrategyPreset,
+} from '@/lib/trainingStrategy';
 
 const formatWeekRange = (weekStart: string): string => {
   const start = new Date(weekStart);
@@ -56,6 +68,8 @@ const getNextMonday = (): string => {
 
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
+const PLAN_STRATEGY_PREFIX = '<!-- weekly-plan-strategy:';
+const PLAN_STRATEGY_SUFFIX = '-->';
 
 const extractPreferencesFromPlanContent = (content?: string | null): string => {
   if (!content) return '';
@@ -71,11 +85,56 @@ const extractPreferencesFromPlanContent = (content?: string | null): string => {
   }
 };
 
-const stripPreferencesFromPlanContent = (content?: string | null): string => {
+interface StrategyMeta {
+  mode: StrategySelectionMode;
+  preset: TrainingStrategyPreset;
+  strategyLabel: string;
+  optimizationPriority: OptimizationPriority;
+  optimizationPriorityLabel: string;
+  autoRationale: string | null;
+}
+
+const extractStrategyMeta = (content?: string | null): StrategyMeta | null => {
+  if (!content) return null;
+  const escapedPrefix = PLAN_STRATEGY_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapedSuffix = PLAN_STRATEGY_SUFFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`${escapedPrefix}(.*?)${escapedSuffix}`);
+  const match = content.match(regex);
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(decodeURIComponent(match[1])) as StrategyMeta;
+  } catch {
+    return null;
+  }
+};
+
+const stripPlanMetaFromContent = (content?: string | null): string => {
   if (!content) return '';
-  const escapedPrefix = PLAN_PREFERENCES_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const escapedSuffix = PLAN_PREFERENCES_SUFFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return content.replace(new RegExp(`^${escapedPrefix}(.*?)${escapedSuffix}\\n?`), '');
+  const escapedPreferencesPrefix = PLAN_PREFERENCES_PREFIX.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&',
+  );
+  const escapedPreferencesSuffix = PLAN_PREFERENCES_SUFFIX.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&',
+  );
+  const escapedStrategyPrefix = PLAN_STRATEGY_PREFIX.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&',
+  );
+  const escapedStrategySuffix = PLAN_STRATEGY_SUFFIX.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&',
+  );
+  return content
+    .replace(
+      new RegExp(`^${escapedPreferencesPrefix}(.*?)${escapedPreferencesSuffix}\\n?`),
+      '',
+    )
+    .replace(
+      new RegExp(`^${escapedStrategyPrefix}(.*?)${escapedStrategySuffix}\\n?`),
+      '',
+    );
 };
 
 const DayCard = ({session}: {session: UnifiedSession}) => {
@@ -384,6 +443,7 @@ const WeeklyPlan = () => {
     savePreferences,
   } = useWeeklyPlan(athleteId);
   const {activeBlock} = useTrainingBlock(athleteId);
+  const {settings} = useSettings();
   const [fullPlanOpen, setFullPlanOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [regenerateOpen, setRegenerateOpen] = useState(false);
@@ -391,12 +451,22 @@ const WeeklyPlan = () => {
   const [targetWeekStart, setTargetWeekStart] = useState('');
   const [targetWeekSelection, setTargetWeekSelection] = useState<'current' | 'next'>('current');
   const [regenerationPreferences, setRegenerationPreferences] = useState('');
+  const [strategySelectionMode, setStrategySelectionMode] =
+    useState<StrategySelectionMode>('auto');
+  const [strategyPreset, setStrategyPreset] =
+    useState<TrainingStrategyPreset>('polarized_80_20');
+  const [optimizationPriority, setOptimizationPriority] =
+    useState<OptimizationPriority>('race_performance');
   const activePlanPreferences = useMemo(
     () => extractPreferencesFromPlanContent(activePlan?.content),
     [activePlan?.content],
   );
+  const activePlanStrategyMeta = useMemo(
+    () => extractStrategyMeta(activePlan?.content),
+    [activePlan?.content],
+  );
   const activePlanContent = useMemo(
-    () => stripPreferencesFromPlanContent(activePlan?.content),
+    () => stripPlanMetaFromContent(activePlan?.content),
     [activePlan?.content],
   );
 
@@ -428,6 +498,11 @@ const WeeklyPlan = () => {
     setTargetWeekStart(defaultSelection === 'next' ? nextMonday : currentMonday);
     setRegenerationMode('full');
     setRegenerationPreferences(activePlanPreferences || preferences || '');
+    setStrategySelectionMode(settings.strategySelectionMode ?? 'auto');
+    setStrategyPreset(settings.strategyPreset ?? 'polarized_80_20');
+    setOptimizationPriority(
+      settings.optimizationPriority ?? 'race_performance',
+    );
     setRegenerateOpen(true);
   };
 
@@ -449,6 +524,9 @@ const WeeklyPlan = () => {
       preferences: regenerationPreferences,
       mode: regenerationMode,
       sourcePlanId: activePlan?.id,
+      strategySelectionMode,
+      strategyPreset,
+      optimizationPriority,
     });
     setRegenerateOpen(false);
   };
@@ -543,6 +621,64 @@ const WeeklyPlan = () => {
                   Remaining days (uses completed activities)
                 </button>
               </div>
+            </div>
+
+            <div className='space-y-2'>
+              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                Strategy
+              </label>
+              <select
+                value={
+                  strategySelectionMode === 'auto' ? 'auto' : strategyPreset
+                }
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === 'auto') {
+                    setStrategySelectionMode('auto');
+                    return;
+                  }
+                  setStrategySelectionMode('preset');
+                  setStrategyPreset(value as TrainingStrategyPreset);
+                }}
+                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
+                aria-label='Select strategy'
+              >
+                <option value='auto'>{AUTO_STRATEGY_LABEL}</option>
+                {Object.entries(STRATEGY_PRESET_LABELS).map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <p className='text-xs text-muted-foreground font-medium'>
+                {strategySelectionMode === 'auto'
+                  ? describeAutoStrategySelection()
+                  : describeStrategyPreset(strategyPreset)}
+              </p>
+            </div>
+
+            <div className='space-y-2'>
+              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                Optimization Priority
+              </label>
+              <select
+                value={optimizationPriority}
+                onChange={(e) =>
+                  setOptimizationPriority(
+                    e.target.value as OptimizationPriority,
+                  )
+                }
+                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
+                aria-label='Select optimization priority'
+              >
+                {Object.entries(OPTIMIZATION_PRIORITY_LABELS).map(
+                  ([id, label]) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ),
+                )}
+              </select>
             </div>
 
             <div className='space-y-2'>
@@ -650,15 +786,12 @@ const WeeklyPlan = () => {
                 disabled={isGenerating}
                 tabIndex={0}
                 aria-label='Open regenerate plan options'
-                className='shrink-0 inline-flex items-center gap-1.5 px-3 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
+                className='shrink-0 p-2.5 text-muted-foreground hover:text-primary hover:bg-primary/10 border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
               >
                 {isGenerating ? (
                   <NeoLoader size='sm' />
                 ) : (
-                  <>
-                    <Sparkles className='h-3.5 w-3.5' />
-                    Regenerate
-                  </>
+                  <Sparkles className='h-4 w-4' />
                 )}
               </button>
             </div>
@@ -692,6 +825,33 @@ const WeeklyPlan = () => {
               {activePlanPreferences || 'No preferences were provided for this plan.'}
             </p>
           </div>
+
+          {activePlanStrategyMeta && (
+            <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
+              <div className='flex items-center gap-1.5'>
+                <Target className='h-3.5 w-3.5 text-primary' />
+                <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
+                  Strategy Rationale
+                </span>
+              </div>
+              <p className='text-sm font-medium'>
+                <span className='font-bold'>Strategy:</span>{' '}
+                {activePlanStrategyMeta.strategyLabel}{' '}
+                <span className='text-muted-foreground'>
+                  ({activePlanStrategyMeta.mode === 'auto' ? 'auto-selected' : 'manual'})
+                </span>
+              </p>
+              <p className='text-sm font-medium'>
+                <span className='font-bold'>Priority:</span>{' '}
+                {activePlanStrategyMeta.optimizationPriorityLabel}
+              </p>
+              {activePlanStrategyMeta.autoRationale && (
+                <p className='text-sm text-muted-foreground font-medium'>
+                  {activePlanStrategyMeta.autoRationale}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Day cards */}
           <div className='grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4'>
@@ -763,6 +923,11 @@ const WeeklyPlan = () => {
               )}
             </div>
           )}
+
+          <WeeklyPlanDistribution
+            weekStart={activePlan.weekStart}
+            sessions={activePlan.sessions}
+          />
         </>
       )}
     </div>
