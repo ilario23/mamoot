@@ -12,7 +12,7 @@ import {
   Line,
   ComposedChart,
 } from 'recharts';
-import {formatPace} from '@/lib/mockData';
+import {formatPace} from '@/lib/activityModel';
 import {useDashboardActivities} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useIsMobile} from '@/hooks/use-mobile';

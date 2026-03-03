@@ -14,7 +14,7 @@ import {
   Area,
   Brush,
 } from "recharts";
-import { StreamPoint, ZONE_COLORS } from "@/lib/mockData";
+import { StreamPoint, ZONE_COLORS } from "@/lib/activityModel";
 import { useSettings } from "@/contexts/SettingsContext";
 
 interface Props {

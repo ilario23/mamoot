@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Star, Ruler, Mountain, Hash, TrendingUp, MapPin } from "lucide-react";
 import { NeoLoader } from "@/components/ui/neo-loader";
-import { formatDuration } from "@/lib/mockData";
+import { formatDuration } from "@/lib/activityModel";
 import { useActivities, useStarredSegments, useSegmentDetail } from "@/hooks/useStrava";
 
 const ActivityMap = dynamic(

@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { ZONE_COLORS, ZONE_NAMES } from "@/lib/mockData";
+import { ZONE_COLORS, ZONE_NAMES } from "@/lib/activityModel";
 import { useDashboardActivities, usePerActivityZoneBreakdowns } from "@/hooks/useStrava";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import { NeoLoader } from "@/components/ui/neo-loader";

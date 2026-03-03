@@ -5,7 +5,7 @@ import {
   useCallback,
   ReactNode,
 } from 'react';
-import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/mockData';
+import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/activityModel';
 import {clearUserSettingsRowCache, fetchUserSettingsRow} from '@/lib/userSettingsSync';
 
 const LS_KEY = 'mamoot-settings';

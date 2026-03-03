@@ -4,7 +4,7 @@ import {useMemo, useState} from 'react';
 import {useActivitiesPaginated} from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {getAvailableActivityTypes} from '@/lib/records';
-import type {ActivityType} from '@/lib/mockData';
+import type {ActivityType} from '@/lib/activityModel';
 import ActivityFilters, {
   type SortOption,
 } from '@/components/activities/ActivityFilters';

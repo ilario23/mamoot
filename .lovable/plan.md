@@ -65,12 +65,14 @@ A bold, multi-page running analytics app with a Neo-Brutalist visual identity, f
 
 ---
 
-## 🗂️ Mock Data Layer
+## 🗂️ Data Layer
 
-- `src/lib/mockData.ts` containing:
-  - 20 recent runs with summary stats (distance, time, pace, HR, date, elevation)
-  - Detailed time-series streams for 3 runs (time, distance, velocity, heartrate, altitude at 10-second intervals)
+- `src/lib/activityModel.ts` containing shared domain types, defaults, and utilities:
+  - Activity summaries/streams/splits typings
   - User settings object with HR zones and max/resting HR defaults
+  - Formatting and zone helper functions used across UI and API routes
+- `src/lib/aiMocks.ts` containing mock AI team conversation content:
+  - Pre-written persona conversation history and sample replies
 - All data is client-side only — no backend needed
 
 ---

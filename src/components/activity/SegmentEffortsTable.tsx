@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Trophy } from "lucide-react";
-import { formatPace, formatDuration } from "@/lib/mockData";
+import { formatPace, formatDuration } from "@/lib/activityModel";
 import type { StravaSegmentEffort } from "@/lib/strava";
 
 interface Props {

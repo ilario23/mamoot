@@ -1,6 +1,6 @@
 'use client';
 
-import {formatDuration} from '@/lib/mockData';
+import {formatDuration} from '@/lib/activityModel';
 import {
   useDashboardActivities,
   useAthleteStats,

@@ -8,7 +8,7 @@ import {
   formatPace,
   formatDuration,
   computeSplits,
-} from "@/lib/mockData";
+} from "@/lib/activityModel";
 import { useActivities, useActivityDetail, useActivityStreams } from "@/hooks/useStrava";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import ActivityCharts from "@/components/activity/ActivityCharts";

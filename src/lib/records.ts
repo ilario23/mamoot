@@ -2,7 +2,7 @@
 // Records — Compute personal bests from Strava best_efforts data
 // ============================================================
 
-import type { ActivityType } from "./mockData";
+import type { ActivityType } from "./activityModel";
 import type { BestEffortWithMeta } from "@/hooks/useSyncActivityDetails";
 import { mapSportType } from "./strava";
 
@@ -188,7 +188,7 @@ const computeEffortRanksByBucket = (
 
 // ----- Fallback: bucket matching for types without best_efforts -----
 
-import type { ActivitySummary } from "./mockData";
+import type { ActivitySummary } from "./activityModel";
 
 const TOLERANCE_PCT = 0.10;
 

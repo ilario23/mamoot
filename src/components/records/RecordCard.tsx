@@ -1,8 +1,8 @@
 "use client";
 
-import { formatDuration, formatPace } from "@/lib/mockData";
+import { formatDuration, formatPace } from "@/lib/activityModel";
 import type { DistanceRecord, DistanceBucket } from "@/lib/records";
-import type { ActivityType } from "@/lib/mockData";
+import type { ActivityType } from "@/lib/activityModel";
 import { Trophy, Gauge, Ruler, Calendar } from "lucide-react";
 
 const ACCENT_CLASS: Record<ActivityType, string> = {

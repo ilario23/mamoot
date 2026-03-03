@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Trophy, Clock } from "lucide-react";
-import { formatDuration, formatPace } from "@/lib/mockData";
+import { formatDuration, formatPace } from "@/lib/activityModel";
 import type { SegmentSummary } from "@/lib/segments";
 
 interface SegmentEffortHistoryProps {

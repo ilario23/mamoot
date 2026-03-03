@@ -1,7 +1,7 @@
 "use client";
 
-import type { ActivityType } from "@/lib/mockData";
-import { ACTIVITY_TYPE_CONFIG } from "@/lib/mockData";
+import type { ActivityType } from "@/lib/activityModel";
+import { ACTIVITY_TYPE_CONFIG } from "@/lib/activityModel";
 import { Footprints, Bike, Mountain, Waves } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {

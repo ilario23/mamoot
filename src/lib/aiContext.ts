@@ -6,8 +6,8 @@
 // This is sent to the chat API route as structured context
 // so the LLM can give personalized coaching advice.
 
-import type {ActivitySummary, UserSettings, Injury} from './mockData';
-import {formatPace, formatDuration, ZONE_NAMES} from './mockData';
+import type {ActivitySummary, UserSettings, Injury} from './activityModel';
+import {formatPace, formatDuration, ZONE_NAMES} from './activityModel';
 import type {AggregatedZoneTotals} from './zoneCompute';
 import type {FitnessDataPoint, ACWRDataPoint} from '@/utils/trainingLoad';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';

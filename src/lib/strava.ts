@@ -2,7 +2,7 @@
 // Strava API Client
 // ============================================================
 
-import type { ActivitySummary, ActivityType, StreamPoint } from "./mockData";
+import type { ActivitySummary, ActivityType, StreamPoint } from "./activityModel";
 
 // ----- Constants -----
 

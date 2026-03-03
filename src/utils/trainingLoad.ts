@@ -5,8 +5,8 @@
 // Derived from activity summary data (no extra API calls needed)
 // ============================================================
 
-import type {ActivitySummary, UserSettings} from '@/lib/mockData';
-import {getZoneForHr} from '@/lib/mockData';
+import type {ActivitySummary, UserSettings} from '@/lib/activityModel';
+import {getZoneForHr} from '@/lib/activityModel';
 import {hashZoneSettings} from '@/lib/zoneCompute';
 
 // ----- Types -----

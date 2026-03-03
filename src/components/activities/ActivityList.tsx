@@ -8,7 +8,7 @@ import {
   formatDuration,
   type ActivityType,
   type ActivitySummary,
-} from '@/lib/mockData';
+} from '@/lib/activityModel';
 import {Footprints, Bike, Mountain, Waves, type LucideIcon} from 'lucide-react';
 import RoutePreview from '@/components/dashboard/RoutePreview';
 

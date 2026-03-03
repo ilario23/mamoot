@@ -4,8 +4,8 @@
 // giving accurate zone distribution instead of using avgHr.
 // ============================================================
 
-import type {StreamPoint, UserSettings} from './mockData';
-import {getZoneForHr} from './mockData';
+import type {StreamPoint, UserSettings} from './activityModel';
+import {getZoneForHr} from './activityModel';
 
 // ----- Types -----
 

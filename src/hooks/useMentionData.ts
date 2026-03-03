@@ -9,8 +9,8 @@
 import {useCallback} from 'react';
 import {useSettings} from '@/contexts/SettingsContext';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
-import {formatPace, formatDuration, ZONE_NAMES} from '@/lib/mockData';
-import type {ActivitySummary, UserSettings} from '@/lib/mockData';
+import {formatPace, formatDuration, ZONE_NAMES} from '@/lib/activityModel';
+import type {ActivitySummary, UserSettings} from '@/lib/activityModel';
 import type {StravaSummaryGear} from '@/lib/strava';
 import type {MentionReference, ResolvedMention} from '@/lib/mentionTypes';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';

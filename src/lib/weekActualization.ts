@@ -1,5 +1,5 @@
-import type {ActivitySummary} from '@/lib/mockData';
-import {formatPace} from '@/lib/mockData';
+import type {ActivitySummary} from '@/lib/activityModel';
+import {formatPace} from '@/lib/activityModel';
 import type {UnifiedSession} from '@/lib/cacheTypes';
 
 type SourceSession = UnifiedSession | undefined;

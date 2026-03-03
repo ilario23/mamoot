@@ -1,7 +1,7 @@
 'use client';
 
-import type {ActivitySummary} from '@/lib/mockData';
-import {formatDuration} from '@/lib/mockData';
+import type {ActivitySummary} from '@/lib/activityModel';
+import {formatDuration} from '@/lib/activityModel';
 import {Activity, Route, Clock, TrendingUp, ChevronDown} from 'lucide-react';
 import {useMemo, useState} from 'react';
 import {useIsMobile} from '@/hooks/use-mobile';

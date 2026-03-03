@@ -1,4 +1,4 @@
-import { Split, formatPace } from "@/lib/mockData";
+import { Split, formatPace } from "@/lib/activityModel";
 
 interface Props {
   splits: Split[];

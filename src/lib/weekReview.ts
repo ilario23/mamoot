@@ -9,8 +9,8 @@ import {
   activityLabels as activityLabelsTable,
 } from '@/db/schema';
 import {inArray} from 'drizzle-orm';
-import type {ActivitySummary, UserSettings} from './mockData';
-import {formatPace} from './mockData';
+import type {ActivitySummary, UserSettings} from './activityModel';
+import {formatPace} from './activityModel';
 import {
   classifyWorkout,
   formatLabelForAI,

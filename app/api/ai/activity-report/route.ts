@@ -25,8 +25,8 @@ import type {
   StravaBestEffort,
   StravaLap,
 } from '@/lib/strava';
-import type {UserSettings} from '@/lib/mockData';
-import {formatPace, formatDuration} from '@/lib/mockData';
+import type {UserSettings} from '@/lib/activityModel';
+import {formatPace, formatDuration} from '@/lib/activityModel';
 import {classifyWorkout, formatLabelForAI} from '@/lib/workoutLabel';
 
 export const maxDuration = 60;

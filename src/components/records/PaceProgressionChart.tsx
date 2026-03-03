@@ -11,8 +11,8 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { formatPace } from "@/lib/mockData";
-import type { ActivityType } from "@/lib/mockData";
+import { formatPace } from "@/lib/activityModel";
+import type { ActivityType } from "@/lib/activityModel";
 import type { ProgressionPoint } from "@/lib/records";
 import { BUCKETS_BY_TYPE } from "@/lib/records";
 

@@ -13,7 +13,7 @@ import {
   forceRefreshActivities,
   batchGetZoneBreakdowns,
 } from '@/lib/stravaCache';
-import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
+import type {ActivitySummary, StreamPoint} from '@/lib/activityModel';
 import type {FitnessDataPoint, AdvancedMetricsDataPoint} from '@/utils/trainingLoad';
 import {calcAdvancedMetricsData} from '@/utils/trainingLoad';
 import {fetchStarredSegments, fetchSegmentDetail} from '@/lib/strava';

@@ -6,7 +6,7 @@ import {useSearchParams, useRouter} from 'next/navigation';
 import {useSettings} from '@/contexts/SettingsContext';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useForceRefreshActivities} from '@/hooks/useStrava';
-import {UserSettings, ZONE_COLORS, ZONE_NAMES} from '@/lib/mockData';
+import {UserSettings, ZONE_COLORS, ZONE_NAMES} from '@/lib/activityModel';
 import {useQueryClient} from '@tanstack/react-query';
 import {toast} from '@/hooks/use-toast';
 import {Switch} from '@/components/ui/switch';

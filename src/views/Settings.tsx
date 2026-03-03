@@ -14,7 +14,7 @@ import {
   DEFAULT_MODEL,
   type ModelOption,
   type Injury,
-} from '@/lib/mockData';
+} from '@/lib/activityModel';
 import {useQueryClient} from '@tanstack/react-query';
 import {toast} from '@/hooks/use-toast';
 import {Switch} from '@/components/ui/switch';

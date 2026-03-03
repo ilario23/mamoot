@@ -20,7 +20,7 @@ import {
   type ActivityType,
   ACTIVITY_TYPE_CONFIG,
   formatDuration,
-} from '@/lib/mockData';
+} from '@/lib/activityModel';
 
 // ----- Icon map -----
 

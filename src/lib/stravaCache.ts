@@ -26,7 +26,7 @@ import type {
   StravaAthleteZones,
   StravaSummaryGear,
 } from './strava';
-import type {ActivitySummary, StreamPoint, UserSettings} from './mockData';
+import type {ActivitySummary, StreamPoint, UserSettings} from './activityModel';
 import {computeZoneBreakdown, hashZoneSettings} from './zoneCompute';
 import type {ZoneBreakdown} from './zoneCompute';
 import {

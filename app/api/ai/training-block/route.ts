@@ -16,7 +16,7 @@ import {
   calcAdvancedMetricsData,
   getLatestMetricsSnapshot,
 } from '@/utils/trainingLoad';
-import {formatPace, formatDuration, type UserSettings} from '@/lib/mockData';
+import {formatPace, formatDuration, type UserSettings} from '@/lib/activityModel';
 import {trainingBlockOutputSchema} from '@/lib/trainingBlockSchema';
 import {NextResponse} from 'next/server';
 import {

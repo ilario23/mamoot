@@ -1,7 +1,7 @@
 "use client";
 
 import { Star, Ruler, TrendingUp, Mountain, Clock, Hash } from "lucide-react";
-import { formatDuration, formatPace } from "@/lib/mockData";
+import { formatDuration, formatPace } from "@/lib/activityModel";
 import type { SegmentSummary } from "@/lib/segments";
 
 interface StarredSegmentCardProps {

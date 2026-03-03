@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import {
   formatDuration,
   ZONE_COLORS,
-} from "@/lib/mockData";
+} from "@/lib/activityModel";
 import { useStravaAuth } from "@/contexts/StravaAuthContext";
 import { useZoneBreakdowns } from "@/hooks/useStrava";
 import { NeoLoader } from "@/components/ui/neo-loader";

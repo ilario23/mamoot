@@ -26,7 +26,7 @@ import {
 import {useMentionResolver} from '@/hooks/useMentionData';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
-import {DEFAULT_MODEL} from '@/lib/mockData';
+import {DEFAULT_MODEL} from '@/lib/activityModel';
 import type {PersonaId} from '@/lib/aiPrompts';
 import {
   getMentionCategory,

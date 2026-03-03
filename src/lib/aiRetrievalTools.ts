@@ -20,8 +20,8 @@ import {
   weeklyPlans,
 } from '@/db/schema';
 import {eq, desc, and, inArray, isNull} from 'drizzle-orm';
-import type {ActivitySummary, UserSettings} from './mockData';
-import {formatPace, formatDuration, ZONE_NAMES} from './mockData';
+import type {ActivitySummary, UserSettings} from './activityModel';
+import {formatPace, formatDuration, ZONE_NAMES} from './activityModel';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
 import type {
   StravaDetailedActivity,

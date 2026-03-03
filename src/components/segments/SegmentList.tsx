@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Search, ChevronRight, Mountain, Star, MapPin } from "lucide-react";
-import { formatDuration } from "@/lib/mockData";
+import { formatDuration } from "@/lib/activityModel";
 import { filterSegmentsByQuery } from "@/lib/segments";
 import type { SegmentSummary } from "@/lib/segments";
 

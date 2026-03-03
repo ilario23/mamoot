@@ -10,8 +10,8 @@
 // Entirely deterministic — no LLM calls.
 
 import type {StravaSplit, StravaDetailedActivity} from './strava';
-import type {UserSettings} from './mockData';
-import {getZoneForHr, formatPace} from './mockData';
+import type {UserSettings} from './activityModel';
+import {getZoneForHr, formatPace} from './activityModel';
 
 // ----- Types -----
 

@@ -5,7 +5,7 @@ import type {CachedActivityDetail} from '@/lib/cacheTypes';
 import {fetchActivityDetail} from '@/lib/strava';
 import {neonGetActivityDetailsBulk, neonSyncActivityDetailsBulk} from '@/lib/neonSync';
 import type {StravaDetailedActivity, StravaBestEffort, StravaSegmentEffort} from '@/lib/strava';
-import type {ActivitySummary} from '@/lib/mockData';
+import type {ActivitySummary} from '@/lib/activityModel';
 
 // ----- Constants -----
 

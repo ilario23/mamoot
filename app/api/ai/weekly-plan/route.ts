@@ -17,7 +17,7 @@ import {
   calcAdvancedMetricsData,
   getLatestMetricsSnapshot,
 } from '@/utils/trainingLoad';
-import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/mockData';
+import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/activityModel';
 import {buildCoachPipelinePrompt, buildPhysioPipelinePrompt} from '@/lib/weeklyPlanPrompts';
 import {
   coachWeekOutputSchema,

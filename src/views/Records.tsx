@@ -11,7 +11,7 @@ import {
   BUCKETS_BY_TYPE,
 } from "@/lib/records";
 import type { TimePeriod } from "@/lib/records";
-import type { ActivityType } from "@/lib/mockData";
+import type { ActivityType } from "@/lib/activityModel";
 import RecordCard from "@/components/records/RecordCard";
 import TimePeriodSelector from "@/components/records/TimePeriodSelector";
 import ActivityTypeFilter from "@/components/records/ActivityTypeFilter";

@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { TrendingUp } from "lucide-react";
-import { formatPace, formatDuration } from "@/lib/mockData";
+import { formatPace, formatDuration } from "@/lib/activityModel";
 import { computeSegmentProgression } from "@/lib/segments";
 import type { SegmentSummary } from "@/lib/segments";
 

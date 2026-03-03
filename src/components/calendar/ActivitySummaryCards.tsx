@@ -4,7 +4,7 @@ import {
   type ActivitySummary,
   type ActivityType,
   ACTIVITY_TYPE_CONFIG,
-} from '@/lib/mockData';
+} from '@/lib/activityModel';
 
 // ----- Icon map -----
 

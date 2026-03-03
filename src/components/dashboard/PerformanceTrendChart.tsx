@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import {useAdvancedMetricsData} from '@/hooks/useStrava';
 import {useIsMobile} from '@/hooks/use-mobile';
-import {formatPace} from '@/lib/mockData';
+import {formatPace} from '@/lib/activityModel';
 
 const PERIOD_OPTIONS = [
   {label: '8 weeks', value: 56},
