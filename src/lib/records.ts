@@ -22,6 +22,8 @@ export interface DistanceBucket {
 export interface DistanceRecord {
   bucket: DistanceBucket;
   effort: BestEffortWithMeta;
+  /** Locally computed rank among matching efforts for this bucket. */
+  computedRank: number | null;
 }
 
 export interface ProgressionPoint {
@@ -148,6 +150,42 @@ const matchesEffortName = (
   return bucket.effortNames.some((n) => n.toLowerCase() === name);
 };
 
+const compareEffortsForRank = (
+  a: BestEffortWithMeta,
+  b: BestEffortWithMeta
+): number => {
+  if (a.elapsed_time !== b.elapsed_time) {
+    return a.elapsed_time - b.elapsed_time;
+  }
+
+  const aDate = new Date(a.activityDate).getTime();
+  const bDate = new Date(b.activityDate).getTime();
+  if (aDate !== bDate) {
+    return aDate - bDate;
+  }
+
+  return a.id - b.id;
+};
+
+const computeEffortRanksByBucket = (
+  efforts: BestEffortWithMeta[],
+  buckets: DistanceBucket[]
+): Map<number, number> => {
+  const rankByEffortId = new Map<number, number>();
+
+  for (const bucket of buckets) {
+    const sorted = efforts
+      .filter((e) => matchesEffortName(e, bucket))
+      .sort(compareEffortsForRank);
+
+    sorted.forEach((effort, idx) => {
+      rankByEffortId.set(effort.id, idx + 1);
+    });
+  }
+
+  return rankByEffortId;
+};
+
 // ----- Fallback: bucket matching for types without best_efforts -----
 
 import type { ActivitySummary } from "./mockData";
@@ -176,6 +214,7 @@ export const computeRecordsFromEfforts = (
     filterEffortsByPeriod(efforts, period),
     activityType
   );
+  const rankByEffortId = computeEffortRanksByBucket(filtered, buckets);
 
   return buckets.map((bucket) => {
     const matching = filtered.filter((e) => matchesEffortName(e, bucket));
@@ -186,7 +225,11 @@ export const computeRecordsFromEfforts = (
       curr.elapsed_time < prev.elapsed_time ? curr : prev
     );
 
-    return { bucket, effort: best };
+    return {
+      bucket,
+      effort: best,
+      computedRank: rankByEffortId.get(best.id) ?? null,
+    };
   });
 };
 
@@ -235,7 +278,7 @@ export const computeRecordsFromActivities = (
       activityName: best.name,
     };
 
-    return { bucket, effort };
+    return { bucket, effort, computedRank: null };
   });
 };
 

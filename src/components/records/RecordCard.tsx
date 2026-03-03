@@ -42,7 +42,7 @@ const RecordCard = ({ record, bucket, activityType }: RecordCardProps) => {
     day: "numeric",
     year: "numeric",
   });
-  const isPR = effort.pr_rank === 1;
+  const isPR = record.computedRank === 1;
 
   return (
     <div className="border-3 border-border bg-background p-3 md:p-5 shadow-neo hover:shadow-neo-lg transition-shadow">
