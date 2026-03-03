@@ -62,6 +62,9 @@ const ACWRChart = ({embedded = false}: {embedded?: boolean}) => {
     const d = new Date(dateStr + 'T00:00:00');
     return d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
   };
+  const formatYTick = (value: number) => {
+    return Number(value.toFixed(2)).toString();
+  };
 
   const tickInterval = Math.max(1, Math.floor(chartData.length / 10));
 
@@ -220,6 +223,7 @@ const ACWRChart = ({embedded = false}: {embedded?: boolean}) => {
           />
           <YAxis
             domain={[0, maxACWR]}
+            tickFormatter={formatYTick}
             tick={{fontWeight: 700, fontSize: 12}}
             stroke='#000'
             strokeWidth={2}
