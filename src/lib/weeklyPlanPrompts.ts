@@ -14,6 +14,10 @@ export const buildCoachPipelinePrompt = (context: {
   preferences: string | null;
   lastWeekReview: string | null;
   trainingBlockContext: string | null;
+  strategyLabel: string;
+  strategyDescription: string;
+  optimizationPriorityLabel: string;
+  metricsSummary: string | null;
 }) => `You are an expert running coach. Generate a 7-day running plan for the week of ${context.weekStart} to ${context.weekEnd}.
 
 ## Athlete
@@ -22,6 +26,11 @@ ${context.hrZones ? `- HR Zones: ${context.hrZones}` : ''}
 ${context.weight ? `- Weight: ${context.weight} kg` : ''}
 ${context.trainingBalance != null ? `- Training Balance: ${context.trainingBalance}/80 (20=run-focused, 80=gym-focused)` : ''}
 ${context.goal ? `- Goal: ${context.goal}` : ''}
+${context.metricsSummary ? `\n## Current Hybrid Metrics Snapshot\n${context.metricsSummary}` : ''}
+## Strategy Constraints
+- Strategy to follow: ${context.strategyLabel}
+- Strategy intent: ${context.strategyDescription}
+- Primary optimization priority: ${context.optimizationPriorityLabel}
 ${context.trainingBlockContext ? `\n## Training Block Context\nThis week is part of a periodized training block. Follow the volume target, intensity level, and key workouts specified below. These are the guardrails — you decide exact session placement, paces, and structure.\n${context.trainingBlockContext}\n` : ''}
 ## Recent Training (last 4 weeks)
 ${context.recentTraining}
@@ -39,6 +48,8 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 - Honor the training balance: lower values (closer to 20) = more running days; higher values (closer to 80) = fewer runs, more rest/strength days.
 - Base pace targets on the athlete's personal records.
 - If ACWR is high (>1.3) or volume has been increasing rapidly, include extra rest.
+- If TSB is strongly negative (< -12), bias toward recovery/low-intensity placement.
+- Keep weekly load ramp conservative when monotony or strain is elevated.
 - If injuries are reported, avoid aggravating movements and reduce load.
 - If a Last Week Review is provided, factor adherence into your plan: if sessions were missed, consider whether load should stay flat or catch up; if everything was hit, consider progressing; if the week was an intentional deload (check athlete preferences), plan a return to normal or increased load.
 - If a Training Block Context is provided, your plan MUST respect the volume target and intensity level. Include the specified key workouts. The week type (build/recovery/taper/etc.) should guide overall session selection.
@@ -53,12 +64,14 @@ export const buildPhysioPipelinePrompt = (context: {
   injuries: string;
   coachSessions: string;
   preferences: string | null;
+  optimizationPriorityLabel: string;
 }) => `You are a sports physiotherapist. Generate strength and mobility sessions to complement the running plan below for the week of ${context.weekStart} to ${context.weekEnd}.
 
 ## Athlete
 ${context.athleteName ? `- Name: ${context.athleteName}` : ''}
 ${context.weight ? `- Weight: ${context.weight} kg` : ''}
 ${context.trainingBalance != null ? `- Training Balance: ${context.trainingBalance}/80 (20=run-focused, 80=gym-focused)` : ''}
+- Optimization priority: ${context.optimizationPriorityLabel}
 
 ## Injuries
 ${context.injuries || 'None reported'}

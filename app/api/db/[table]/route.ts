@@ -24,7 +24,7 @@ import {
   trainingBlocks,
   weeklyPlans,
 } from '@/db/schema';
-import {eq, and, sql, desc, inArray, gte} from 'drizzle-orm';
+import {eq, and, sql, desc, inArray, gte, isNull} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
 
 type RouteContext = {params: Promise<{table: string}>};
@@ -216,11 +216,39 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
             {error: 'athleteId or pk required'},
             {status: 400},
           );
-        const settingsRows = await db
-          .select()
-          .from(userSettings)
-          .where(eq(userSettings.athleteId, Number(settingsAthleteId)));
-        return NextResponse.json(settingsRows[0] ?? null);
+        try {
+          const settingsRows = await db
+            .select()
+            .from(userSettings)
+            .where(eq(userSettings.athleteId, Number(settingsAthleteId)));
+          return NextResponse.json(settingsRows[0] ?? null);
+        } catch {
+          // Backward compatibility: older DBs may not have newly added settings columns.
+          const legacyRows = await db.execute(sql`
+            SELECT
+              athlete_id,
+              max_hr,
+              resting_hr,
+              zones,
+              goal,
+              allergies,
+              food_preferences,
+              injuries,
+              ai_model,
+              weight,
+              city,
+              training_balance,
+              weekly_preferences,
+              updated_at
+            FROM user_settings
+            WHERE athlete_id = ${Number(settingsAthleteId)}
+            LIMIT 1
+          `);
+          const firstRow =
+            (legacyRows as unknown as {rows?: Record<string, unknown>[]}).rows?.[0] ??
+            null;
+          return NextResponse.json(firstRow);
+        }
       }
 
       case 'chat-sessions': {
@@ -283,7 +311,7 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           const rows = await db
             .select()
             .from(trainingBlocks)
-            .where(eq(trainingBlocks.id, pk));
+            .where(and(eq(trainingBlocks.id, pk), isNull(trainingBlocks.deletedAt)));
           return NextResponse.json(rows[0] ?? null);
         }
         const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
@@ -293,7 +321,10 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
             {status: 400},
           );
         const tbActiveOnly = req.nextUrl.searchParams.get('active') === 'true';
-        const tbConditions = [eq(trainingBlocks.athleteId, Number(tbAthleteId))];
+        const tbConditions = [
+          eq(trainingBlocks.athleteId, Number(tbAthleteId)),
+          isNull(trainingBlocks.deletedAt),
+        ];
         if (tbActiveOnly) {
           tbConditions.push(eq(trainingBlocks.isActive, true));
         }
@@ -496,27 +527,75 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
         break;
 
       case 'user-settings':
-        await db
-          .insert(userSettings)
-          .values(records)
-          .onConflictDoUpdate({
-            target: userSettings.athleteId,
-            set: {
-              maxHr: sql`excluded.max_hr`,
-              restingHr: sql`excluded.resting_hr`,
-              zones: sql`excluded.zones`,
-              goal: sql`excluded.goal`,
-              allergies: sql`excluded.allergies`,
-              foodPreferences: sql`excluded.food_preferences`,
-              injuries: sql`excluded.injuries`,
-              aiModel: sql`excluded.ai_model`,
-              weight: sql`excluded.weight`,
-              city: sql`excluded.city`,
-              trainingBalance: sql`excluded.training_balance`,
-              weeklyPreferences: sql`excluded.weekly_preferences`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
+        try {
+          await db
+            .insert(userSettings)
+            .values(records)
+            .onConflictDoUpdate({
+              target: userSettings.athleteId,
+              set: {
+                maxHr: sql`excluded.max_hr`,
+                restingHr: sql`excluded.resting_hr`,
+                zones: sql`excluded.zones`,
+                goal: sql`excluded.goal`,
+                allergies: sql`excluded.allergies`,
+                foodPreferences: sql`excluded.food_preferences`,
+                injuries: sql`excluded.injuries`,
+                aiModel: sql`excluded.ai_model`,
+                weight: sql`excluded.weight`,
+                city: sql`excluded.city`,
+                trainingBalance: sql`excluded.training_balance`,
+                weeklyPreferences: sql`excluded.weekly_preferences`,
+                strategySelectionMode: sql`excluded.strategy_selection_mode`,
+                strategyPreset: sql`excluded.strategy_preset`,
+                optimizationPriority: sql`excluded.optimization_priority`,
+                updatedAt: sql`excluded.updated_at`,
+              },
+            });
+        } catch {
+          // Backward compatibility for older DB schemas without strategy columns.
+          const legacyRecords = records.map((record) => {
+            const r = record as Record<string, unknown>;
+            return {
+              athleteId: r.athleteId,
+              maxHr: r.maxHr,
+              restingHr: r.restingHr,
+              zones: r.zones,
+              goal: r.goal,
+              allergies: r.allergies,
+              foodPreferences: r.foodPreferences,
+              injuries: r.injuries,
+              aiModel: r.aiModel,
+              weight: r.weight,
+              city: r.city,
+              trainingBalance: r.trainingBalance,
+              weeklyPreferences: r.weeklyPreferences,
+              updatedAt: r.updatedAt,
+            };
+          }) as Array<typeof userSettings.$inferInsert>;
+
+          await db
+            .insert(userSettings)
+            .values(legacyRecords)
+            .onConflictDoUpdate({
+              target: userSettings.athleteId,
+              set: {
+                maxHr: sql`excluded.max_hr`,
+                restingHr: sql`excluded.resting_hr`,
+                zones: sql`excluded.zones`,
+                goal: sql`excluded.goal`,
+                allergies: sql`excluded.allergies`,
+                foodPreferences: sql`excluded.food_preferences`,
+                injuries: sql`excluded.injuries`,
+                aiModel: sql`excluded.ai_model`,
+                weight: sql`excluded.weight`,
+                city: sql`excluded.city`,
+                trainingBalance: sql`excluded.training_balance`,
+                weeklyPreferences: sql`excluded.weekly_preferences`,
+                updatedAt: sql`excluded.updated_at`,
+              },
+            });
+        }
         break;
 
       case 'chat-sessions':
@@ -618,15 +697,30 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         if (body.weight !== undefined) updates.weight = body.weight;
         if (body.city !== undefined) updates.city = body.city;
         if (body.weeklyPreferences !== undefined) updates.weeklyPreferences = body.weeklyPreferences;
+        if (body.strategySelectionMode !== undefined) updates.strategySelectionMode = body.strategySelectionMode;
+        if (body.strategyPreset !== undefined) updates.strategyPreset = body.strategyPreset;
+        if (body.optimizationPriority !== undefined) updates.optimizationPriority = body.optimizationPriority;
 
         if (Object.keys(updates).length === 0) {
           return NextResponse.json({success: true, updated: 0});
         }
 
-        await db
-          .update(userSettings)
-          .set(updates)
-          .where(eq(userSettings.athleteId, Number(athleteIdParam)));
+        try {
+          await db
+            .update(userSettings)
+            .set(updates)
+            .where(eq(userSettings.athleteId, Number(athleteIdParam)));
+        } catch {
+          // Backward compatibility for older DB schemas without strategy columns.
+          const legacyUpdates = {...updates};
+          delete legacyUpdates.strategySelectionMode;
+          delete legacyUpdates.strategyPreset;
+          delete legacyUpdates.optimizationPriority;
+          await db
+            .update(userSettings)
+            .set(legacyUpdates)
+            .where(eq(userSettings.athleteId, Number(athleteIdParam)));
+        }
 
         return NextResponse.json({success: true});
       }
@@ -640,11 +734,22 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
           await db
             .update(trainingBlocks)
             .set({isActive: false})
-            .where(eq(trainingBlocks.athleteId, Number(tbAthleteId)));
+            .where(
+              and(
+                eq(trainingBlocks.athleteId, Number(tbAthleteId)),
+                isNull(trainingBlocks.deletedAt),
+              ),
+            );
           await db
             .update(trainingBlocks)
             .set({isActive: true})
-            .where(eq(trainingBlocks.id, tbId));
+            .where(
+              and(
+                eq(trainingBlocks.id, tbId),
+                eq(trainingBlocks.athleteId, Number(tbAthleteId)),
+                isNull(trainingBlocks.deletedAt),
+              ),
+            );
           return NextResponse.json({success: true});
         }
 
@@ -657,7 +762,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
           await db
             .update(trainingBlocks)
             .set(updates)
-            .where(eq(trainingBlocks.id, tbId));
+            .where(and(eq(trainingBlocks.id, tbId), isNull(trainingBlocks.deletedAt)));
           return NextResponse.json({success: true});
         }
 
@@ -732,9 +837,41 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
 
       case 'training-blocks': {
         const tbBlockId = req.nextUrl.searchParams.get('id');
-        if (!tbBlockId)
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        await db.delete(trainingBlocks).where(eq(trainingBlocks.id, tbBlockId));
+        const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
+        if (!tbBlockId || !tbAthleteId)
+          return NextResponse.json(
+            {error: 'id and athleteId required'},
+            {status: 400},
+          );
+
+        const athleteIdNum = Number(tbAthleteId);
+        const now = Date.now();
+        const updated = await db
+          .update(trainingBlocks)
+          .set({isActive: false, deletedAt: now, updatedAt: now})
+          .where(
+            and(
+              eq(trainingBlocks.id, tbBlockId),
+              eq(trainingBlocks.athleteId, athleteIdNum),
+              isNull(trainingBlocks.deletedAt),
+            ),
+          )
+          .returning({id: trainingBlocks.id});
+
+        if (updated.length === 0) {
+          throw new Error('TRAINING_BLOCK_NOT_FOUND');
+        }
+
+        await db
+          .update(weeklyPlans)
+          .set({blockId: null, weekNumber: null})
+          .where(
+            and(
+              eq(weeklyPlans.athleteId, athleteIdNum),
+              eq(weeklyPlans.blockId, tbBlockId),
+            ),
+          );
+
         return NextResponse.json({success: true});
       }
 
@@ -750,6 +887,12 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         return NextResponse.json({error: 'Unknown table'}, {status: 404});
     }
   } catch (error) {
+    if (error instanceof Error && error.message === 'TRAINING_BLOCK_NOT_FOUND') {
+      return NextResponse.json(
+        {error: 'Training block not found'},
+        {status: 404},
+      );
+    }
     console.error(`[DB DELETE /${table}]`, error);
     return NextResponse.json({error: 'Database error'}, {status: 500});
   }

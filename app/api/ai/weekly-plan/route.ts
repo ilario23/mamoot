@@ -8,10 +8,15 @@ import {
   trainingBlocks,
   weeklyPlans,
 } from '@/db/schema';
-import {eq, desc, and, ne} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
-import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
+import {
+  calcFitnessData,
+  calcACWRData,
+  calcAdvancedMetricsData,
+  getLatestMetricsSnapshot,
+} from '@/utils/trainingLoad';
 import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/mockData';
 import {buildCoachPipelinePrompt, buildPhysioPipelinePrompt} from '@/lib/weeklyPlanPrompts';
 import {
@@ -25,10 +30,21 @@ import type {UnifiedSession} from '@/lib/cacheTypes';
 import {buildWeekReview} from '@/lib/weekReview';
 import {buildActualizedWeekContext} from '@/lib/weekActualization';
 import {NextResponse} from 'next/server';
+import {
+  describeStrategyPreset,
+  OPTIMIZATION_PRIORITY_LABELS,
+  recommendStrategy,
+  STRATEGY_PRESET_LABELS,
+  type OptimizationPriority,
+  type StrategySelectionMode,
+  type TrainingStrategyPreset,
+} from '@/lib/trainingStrategy';
 
 export const maxDuration = 120;
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
+const PLAN_STRATEGY_PREFIX = '<!-- weekly-plan-strategy:';
+const PLAN_STRATEGY_SUFFIX = '-->';
 
 const ALLOWED_MODELS: Record<string, () => ReturnType<typeof openai | typeof anthropic>> = {
   'gpt-4o-mini': () => openai('gpt-4o-mini'),
@@ -98,6 +114,9 @@ export async function POST(req: Request) {
     mode: generationMode,
     sourcePlanId,
     today,
+    strategySelectionMode,
+    strategyPreset,
+    optimizationPriority,
   }: {
     athleteId: number;
     weekStartDate?: string;
@@ -106,6 +125,9 @@ export async function POST(req: Request) {
     mode?: 'full' | 'remaining_days';
     sourcePlanId?: string;
     today?: string;
+    strategySelectionMode?: StrategySelectionMode;
+    strategyPreset?: TrainingStrategyPreset;
+    optimizationPriority?: OptimizationPriority;
   } = body;
 
   if (!athleteId) {
@@ -149,8 +171,10 @@ export async function POST(req: Request) {
     const hrZonesText = zonesRaw
       ? Object.entries(zonesRaw).map(([k, [min, max]]) => `${k.toUpperCase()} ${min}-${max}`).join(' | ')
       : null;
-    const injuries = settings?.injuries as string[] | undefined;
-    const injuriesText = injuries?.length ? injuries.join(', ') : '';
+    const injuries = settings?.injuries as Array<{name?: string; notes?: string}> | undefined;
+    const injuriesText = injuries?.length
+      ? injuries.map((item) => item?.name || '').filter(Boolean).join(', ')
+      : '';
 
     const allActivities = activityRows.map((r) =>
       transformActivity(r.data as StravaSummaryActivity),
@@ -183,6 +207,8 @@ export async function POST(req: Request) {
 
     // ACWR
     let acwrText = '';
+    let metricsSummary: string | null = null;
+    let latestSnapshot = getLatestMetricsSnapshot([]);
     if (settings) {
       try {
         const fitnessResult = calcFitnessData(
@@ -193,10 +219,37 @@ export async function POST(req: Request) {
           typedZones,
         );
         const acwrData = calcACWRData(fitnessResult.data);
+        const advancedData = calcAdvancedMetricsData(fitnessResult.data, allActivities);
+        latestSnapshot = getLatestMetricsSnapshot(advancedData);
         const latestAcwr = acwrData[acwrData.length - 1];
         if (latestAcwr) {
           acwrText = `\n- ACWR: ${latestAcwr.acwr.toFixed(2)} (BF: ${latestAcwr.bf.toFixed(1)}, LI: ${latestAcwr.li.toFixed(1)})`;
         }
+        metricsSummary = [
+          latestSnapshot.ctl != null
+            ? `- CTL/ATL/TSB: ${latestSnapshot.ctl.toFixed(1)} / ${latestSnapshot.atl?.toFixed(1)} / ${latestSnapshot.tsb?.toFixed(1)}`
+            : null,
+          latestSnapshot.rampRate != null
+            ? `- Ramp rate: ${latestSnapshot.rampRate.toFixed(1)}%`
+            : null,
+          latestSnapshot.monotony != null
+            ? `- Monotony: ${latestSnapshot.monotony.toFixed(2)}`
+            : null,
+          latestSnapshot.strain != null
+            ? `- Strain: ${latestSnapshot.strain.toFixed(1)}`
+            : null,
+          latestSnapshot.thresholdPace != null
+            ? `- Threshold pace estimate: ${formatPace(latestSnapshot.thresholdPace)}/km`
+            : null,
+          latestSnapshot.efficiencyFactor != null
+            ? `- Efficiency factor proxy: ${latestSnapshot.efficiencyFactor.toFixed(4)} m/s/bpm`
+            : null,
+          latestSnapshot.decoupling != null
+            ? `- Decoupling proxy: ${latestSnapshot.decoupling.toFixed(1)}%`
+            : null,
+        ]
+          .filter(Boolean)
+          .join('\n');
       } catch {
         // Non-blocking
       }
@@ -223,6 +276,33 @@ export async function POST(req: Request) {
     }
 
     const recentTraining = `${recentTrainingLines}${acwrText}`;
+    const resolvedPriority: OptimizationPriority =
+      optimizationPriority ??
+      (settings?.optimizationPriority as OptimizationPriority | undefined) ??
+      'race_performance';
+    const resolvedStrategyMode: StrategySelectionMode =
+      strategySelectionMode ??
+      (settings?.strategySelectionMode as StrategySelectionMode | undefined) ??
+      'auto';
+    const defaultPreset =
+      (settings?.strategyPreset as TrainingStrategyPreset | undefined) ??
+      'polarized_80_20';
+    const strategyRecommendation = recommendStrategy({
+      acwr: latestSnapshot.acwr,
+      tsb: latestSnapshot.tsb,
+      monotony: latestSnapshot.monotony,
+      goal: settings?.goal ?? null,
+      priority: resolvedPriority,
+    });
+    const resolvedPreset: TrainingStrategyPreset =
+      resolvedStrategyMode === 'preset'
+        ? strategyPreset ?? defaultPreset
+        : strategyRecommendation.strategy;
+    const strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
+    const strategyDescription = `${describeStrategyPreset(
+      resolvedPreset,
+    )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${strategyRecommendation.rationale}` : ''}`.trim();
+    const optimizationPriorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
 
     // Step 1b: Build last-week review (only for new-week generation, not retries)
     let lastWeekReview: string | null = null;
@@ -264,6 +344,7 @@ export async function POST(req: Request) {
           and(
             eq(trainingBlocks.athleteId, athleteId),
             eq(trainingBlocks.isActive, true),
+                isNull(trainingBlocks.deletedAt),
           ),
         )
         .orderBy(desc(trainingBlocks.createdAt))
@@ -363,6 +444,10 @@ export async function POST(req: Request) {
       preferences: generationPreferences || null,
       lastWeekReview,
       trainingBlockContext,
+      strategyLabel,
+      strategyDescription,
+      optimizationPriorityLabel,
+      metricsSummary,
     });
 
     const coachResult = await generateObject({
@@ -389,6 +474,7 @@ export async function POST(req: Request) {
       injuries: injuriesText,
       coachSessions: coachSessionsSummary,
       preferences: generationPreferences || null,
+      optimizationPriorityLabel,
     });
 
     const physioResult = await generateObject({
@@ -562,7 +648,20 @@ export async function POST(req: Request) {
 
     const markdownContent = markdownLines.join('\n');
     const encodedPreferences = encodeURIComponent(generationPreferences || '');
-    const content = `${PLAN_PREFERENCES_PREFIX}${encodedPreferences}${PLAN_PREFERENCES_SUFFIX}\n${markdownContent}`;
+    const strategyMetaPayload = encodeURIComponent(
+      JSON.stringify({
+        mode: resolvedStrategyMode,
+        preset: resolvedPreset,
+        strategyLabel,
+        optimizationPriority: resolvedPriority,
+        optimizationPriorityLabel,
+        autoRationale:
+          resolvedStrategyMode === 'auto'
+            ? strategyRecommendation.rationale
+            : null,
+      }),
+    );
+    const content = `${PLAN_PREFERENCES_PREFIX}${encodedPreferences}${PLAN_PREFERENCES_SUFFIX}\n${PLAN_STRATEGY_PREFIX}${strategyMetaPayload}${PLAN_STRATEGY_SUFFIX}\n${markdownContent}`;
 
     // Step 6: Save
     const planId = crypto.randomUUID();

@@ -5,71 +5,78 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1770728930229,
-      "tag": "0000_open_war_machine",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
       "when": 1770732576577,
       "tag": "0001_lyrical_jetstream",
       "breakpoints": true
     },
     {
-      "idx": 2,
+      "idx": 1,
       "version": "7",
       "when": 1770760431851,
       "tag": "0002_bright_tarot",
       "breakpoints": true
     },
     {
-      "idx": 3,
+      "idx": 2,
       "version": "7",
       "when": 1770817327366,
       "tag": "0003_marvelous_king_bedlam",
       "breakpoints": true
     },
     {
-      "idx": 4,
+      "idx": 3,
       "version": "7",
       "when": 1770844447872,
       "tag": "0004_keen_shadowcat",
       "breakpoints": true
     },
     {
-      "idx": 5,
+      "idx": 4,
       "version": "7",
       "when": 1770889166932,
       "tag": "0005_striped_ikaris",
       "breakpoints": true
     },
     {
-      "idx": 6,
+      "idx": 5,
       "version": "7",
       "when": 1770930312664,
       "tag": "0006_broad_dragon_lord",
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 6,
       "version": "7",
       "when": 1771009295494,
       "tag": "0007_empty_skrulls",
       "breakpoints": true
     },
     {
-      "idx": 8,
+      "idx": 7,
       "version": "7",
       "when": 1771718400000,
       "tag": "0008_unified_weekly_plans",
       "breakpoints": true
     },
     {
-      "idx": 9,
+      "idx": 8,
       "version": "7",
       "when": 1771804800000,
       "tag": "0009_training_blocks",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1771891200000,
+      "tag": "0010_strategy_and_priority_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1772496000000,
+      "tag": "0011_training_block_soft_delete",
       "breakpoints": true
     }
   ]

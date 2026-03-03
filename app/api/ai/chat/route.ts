@@ -15,7 +15,7 @@ import {
 import {createRetrievalTools} from '@/lib/aiRetrievalTools';
 import {db} from '@/db';
 import {userSettings, trainingBlocks} from '@/db/schema';
-import {eq, and} from 'drizzle-orm';
+import {eq, and, isNull} from 'drizzle-orm';
 import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 
@@ -247,6 +247,7 @@ export async function POST(req: Request) {
                   and(
                     eq(trainingBlocks.athleteId, athleteId),
                     eq(trainingBlocks.isActive, true),
+                    isNull(trainingBlocks.deletedAt),
                   ),
                 )
                 .limit(1);
@@ -275,7 +276,12 @@ export async function POST(req: Request) {
               await db
                 .update(trainingBlocks)
                 .set({weekOutlines: newOutlines, updatedAt: Date.now()})
-                .where(eq(trainingBlocks.id, block.id));
+                .where(
+                  and(
+                    eq(trainingBlocks.id, block.id),
+                    isNull(trainingBlocks.deletedAt),
+                  ),
+                );
 
               return {
                 updated: true,

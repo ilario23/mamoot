@@ -66,6 +66,10 @@ const migrateSettings = (parsed: unknown): UserSettings => {
   if (s.injuries === undefined) s.injuries = [];
   if (s.aiModel === undefined) s.aiModel = DEFAULT_MODEL;
   if (s.trainingBalance === undefined) s.trainingBalance = 50;
+  if (s.strategySelectionMode === undefined) s.strategySelectionMode = 'auto';
+  if (s.strategyPreset === undefined) s.strategyPreset = 'polarized_80_20';
+  if (s.optimizationPriority === undefined)
+    s.optimizationPriority = 'race_performance';
   return s;
 };
 
@@ -81,6 +85,14 @@ const neonRowToSettings = (row: Record<string, unknown>): UserSettings => {
     injuries: row.injuries ?? [],
     aiModel: row.aiModel ?? row.ai_model ?? DEFAULT_MODEL,
     trainingBalance: row.trainingBalance ?? row.training_balance ?? 50,
+    strategySelectionMode:
+      row.strategySelectionMode ?? row.strategy_selection_mode ?? 'auto',
+    strategyPreset:
+      row.strategyPreset ?? row.strategy_preset ?? 'polarized_80_20',
+    optimizationPriority:
+      row.optimizationPriority ??
+      row.optimization_priority ??
+      'race_performance',
   });
 };
 
@@ -116,6 +128,9 @@ const saveToNeon = async (
       injuries: settings.injuries ?? [],
       aiModel: settings.aiModel ?? null,
       trainingBalance: settings.trainingBalance ?? 50,
+      strategySelectionMode: settings.strategySelectionMode ?? 'auto',
+      strategyPreset: settings.strategyPreset ?? 'polarized_80_20',
+      optimizationPriority: settings.optimizationPriority ?? 'race_performance',
       weight: existingWeight,
       city: existingCity,
       updatedAt: Date.now(),

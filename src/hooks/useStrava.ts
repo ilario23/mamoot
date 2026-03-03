@@ -14,7 +14,8 @@ import {
   batchGetZoneBreakdowns,
 } from '@/lib/stravaCache';
 import type {ActivitySummary, StreamPoint} from '@/lib/mockData';
-import type {FitnessDataPoint} from '@/utils/trainingLoad';
+import type {FitnessDataPoint, AdvancedMetricsDataPoint} from '@/utils/trainingLoad';
+import {calcAdvancedMetricsData} from '@/utils/trainingLoad';
 import {fetchStarredSegments, fetchSegmentDetail} from '@/lib/strava';
 import {aggregateZoneBreakdowns, hashZoneSettings} from '@/lib/zoneCompute';
 import type {AggregatedZoneTotals, ZoneBreakdown} from '@/lib/zoneCompute';
@@ -219,6 +220,17 @@ export const useFitnessData = () => {
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
   });
+};
+
+/** Derived hybrid metrics (CTL/ATL/TSB + ramp/monotony/strain + performance proxies). */
+export const useAdvancedMetricsData = (): AdvancedMetricsDataPoint[] => {
+  const {data: fitnessData} = useFitnessData();
+  const {data: activities} = useDashboardActivities();
+
+  return useMemo(() => {
+    if (!fitnessData || fitnessData.length === 0 || !activities) return [];
+    return calcAdvancedMetricsData(fitnessData, activities);
+  }, [fitnessData, activities]);
 };
 
 // ----- Zone Breakdowns (stream-based) -----

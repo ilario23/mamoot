@@ -1,5 +1,10 @@
 import {useState, useEffect, useCallback, useRef} from 'react';
 import type {CachedWeeklyPlan} from '@/lib/cacheTypes';
+import type {
+  OptimizationPriority,
+  StrategySelectionMode,
+  TrainingStrategyPreset,
+} from '@/lib/trainingStrategy';
 import {
   neonGetWeeklyPlans,
   neonDeleteWeeklyPlan,
@@ -25,6 +30,9 @@ export interface GeneratePlanOptions {
   mode?: WeeklyGenerationMode;
   sourcePlanId?: string;
   today?: string;
+  strategySelectionMode?: StrategySelectionMode;
+  strategyPreset?: TrainingStrategyPreset;
+  optimizationPriority?: OptimizationPriority;
 }
 
 export interface UseWeeklyPlanResult {
@@ -80,11 +88,18 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   const loadPlans = useCallback(async () => {
     if (!athleteId) return;
     const remote = await neonGetWeeklyPlans(athleteId);
-    if (remote && remote.length > 0) {
-      const sorted = [...remote].sort((a, b) => b.createdAt - a.createdAt);
-      setPlans(sorted);
-      const active = sorted.find((p) => p.isActive);
-      if (active) writeActiveRef(active);
+    if (!remote || remote.length === 0) {
+      setPlans([]);
+      removeActiveRef();
+      return;
+    }
+    const sorted = [...remote].sort((a, b) => b.createdAt - a.createdAt);
+    setPlans(sorted);
+    const active = sorted.find((p) => p.isActive);
+    if (active) {
+      writeActiveRef(active);
+    } else {
+      removeActiveRef();
     }
   }, [athleteId]);
 
@@ -157,6 +172,9 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
         mode: options?.mode ?? 'full',
         sourcePlanId: options?.sourcePlanId,
         today: options?.today,
+        strategySelectionMode: options?.strategySelectionMode,
+        strategyPreset: options?.strategyPreset,
+        optimizationPriority: options?.optimizationPriority,
       };
 
       try {

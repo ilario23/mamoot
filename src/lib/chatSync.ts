@@ -159,9 +159,14 @@ export const neonSyncTrainingBlock = async (record: CachedTrainingBlock): Promis
   await postToNeon('training-blocks', record);
 };
 
-export const neonDeleteTrainingBlock = async (blockId: string): Promise<void> => {
+export const neonDeleteTrainingBlock = async (
+  blockId: string,
+  athleteId: number,
+): Promise<void> => {
   try {
-    await fetch(`${API}/training-blocks?id=${blockId}`, {method: 'DELETE'});
+    await fetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
+      method: 'DELETE',
+    });
   } catch (err) {
     console.warn('[chatSync] DELETE training-block error:', err);
   }

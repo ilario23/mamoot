@@ -122,6 +122,12 @@ export interface UserSettings {
   aiModel?: string;
   /** Training focus: 20 = run-centric, 80 = gym-centric, 50 = balanced */
   trainingBalance?: number;
+  /** Strategy selection mode for plan generation. */
+  strategySelectionMode?: import('./trainingStrategy').StrategySelectionMode;
+  /** Default strategy preset when manual mode is selected. */
+  strategyPreset?: import('./trainingStrategy').TrainingStrategyPreset;
+  /** Default optimization priority when generating plans. */
+  optimizationPriority?: import('./trainingStrategy').OptimizationPriority;
 }
 
 export interface AIMessage {
@@ -150,6 +156,9 @@ export const defaultSettings: UserSettings = {
   injuries: [],
   aiModel: DEFAULT_MODEL,
   trainingBalance: 50,
+  strategySelectionMode: 'auto',
+  strategyPreset: 'polarized_80_20',
+  optimizationPriority: 'race_performance',
 };
 
 // ----- Utility functions -----

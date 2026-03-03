@@ -22,6 +22,16 @@ import {useTrainingBlock} from '@/hooks/useTrainingBlock';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import type {WeekOutline, TrainingPhase} from '@/lib/cacheTypes';
+import {
+  AUTO_STRATEGY_LABEL,
+  STRATEGY_PRESET_LABELS,
+  OPTIMIZATION_PRIORITY_LABELS,
+  describeAutoStrategySelection,
+  describeStrategyPreset,
+  type OptimizationPriority,
+  type StrategySelectionMode,
+  type TrainingStrategyPreset,
+} from '@/lib/trainingStrategy';
 
 const WEEK_TYPE_COLORS: Record<string, string> = {
   base: 'bg-zone-1/20 text-zone-1',
@@ -63,6 +73,23 @@ const getWeekStartDate = (blockStart: string, weekNumber: number): string => {
   const d = new Date(blockStart);
   d.setDate(d.getDate() + (weekNumber - 1) * 7);
   return d.toISOString().slice(0, 10);
+};
+
+const extractAppliedStrategyMeta = (
+  weekOutlines: WeekOutline[],
+): {strategy: string | null; priority: string | null} => {
+  const firstNote = weekOutlines[0]?.notes;
+  if (!firstNote) return {strategy: null, priority: null};
+  const match = firstNote.match(/^\[Strategy\]\s*(.+?)(?:\s+—\s+|$)/i);
+  const body = match?.[1]?.trim() ?? null;
+  if (!body) return {strategy: null, priority: null};
+  const parts = body.split('|').map((p) => p.trim()).filter(Boolean);
+  const strategy = parts[0] ?? null;
+  const priorityPart = parts.find((part) => /^Priority:/i.test(part)) ?? null;
+  const priority = priorityPart
+    ? priorityPart.replace(/^Priority:\s*/i, '').trim()
+    : null;
+  return {strategy, priority};
 };
 
 const WeekRow = ({
@@ -180,18 +207,44 @@ const CreateBlockForm = ({
   onGenerate,
   isGenerating,
   defaultGoalEvent,
+  defaultStrategySelectionMode,
+  defaultStrategyPreset,
+  defaultOptimizationPriority,
 }: {
-  onGenerate: (goalEvent: string, goalDate: string, totalWeeks?: number) => void;
+  onGenerate: (options: {
+    goalEvent: string;
+    goalDate: string;
+    totalWeeks?: number;
+    strategySelectionMode: StrategySelectionMode;
+    strategyPreset: TrainingStrategyPreset;
+    optimizationPriority: OptimizationPriority;
+  }) => void;
   isGenerating: boolean;
   defaultGoalEvent: string;
+  defaultStrategySelectionMode: StrategySelectionMode;
+  defaultStrategyPreset: TrainingStrategyPreset;
+  defaultOptimizationPriority: OptimizationPriority;
 }) => {
   const [goalEvent, setGoalEvent] = useState(defaultGoalEvent);
   const [goalDate, setGoalDate] = useState('');
   const [totalWeeks, setTotalWeeks] = useState('');
+  const [strategySelectionMode, setStrategySelectionMode] =
+    useState<StrategySelectionMode>(defaultStrategySelectionMode);
+  const [strategyPreset, setStrategyPreset] =
+    useState<TrainingStrategyPreset>(defaultStrategyPreset);
+  const [optimizationPriority, setOptimizationPriority] =
+    useState<OptimizationPriority>(defaultOptimizationPriority);
 
   const handleSubmit = () => {
     if (!goalEvent.trim() || !goalDate) return;
-    onGenerate(goalEvent.trim(), goalDate, totalWeeks ? Number(totalWeeks) : undefined);
+    onGenerate({
+      goalEvent: goalEvent.trim(),
+      goalDate,
+      totalWeeks: totalWeeks ? Number(totalWeeks) : undefined,
+      strategySelectionMode,
+      strategyPreset,
+      optimizationPriority,
+    });
   };
 
   return (
@@ -258,6 +311,58 @@ const CreateBlockForm = ({
             placeholder="Auto"
             className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
           />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1">
+              Strategy
+            </label>
+            <select
+              value={strategySelectionMode === 'auto' ? 'auto' : strategyPreset}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'auto') {
+                  setStrategySelectionMode('auto');
+                  return;
+                }
+                setStrategySelectionMode('preset');
+                setStrategyPreset(value as TrainingStrategyPreset);
+              }}
+              className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="auto">{AUTO_STRATEGY_LABEL}</option>
+              {Object.entries(STRATEGY_PRESET_LABELS).map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground font-medium mt-2">
+              {strategySelectionMode === 'auto'
+                ? describeAutoStrategySelection()
+                : describeStrategyPreset(strategyPreset)}
+            </p>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1">
+              Optimization Priority
+            </label>
+            <select
+              value={optimizationPriority}
+              onChange={(e) =>
+                setOptimizationPriority(e.target.value as OptimizationPriority)
+              }
+              className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              {Object.entries(OPTIMIZATION_PRIORITY_LABELS).map(
+                ([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ),
+              )}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -349,6 +454,14 @@ const TrainingBlockView = () => {
   const [eventDistanceKm, setEventDistanceKm] = useState('');
   const [eventPriority, setEventPriority] = useState<'A' | 'B' | 'C'>('B');
   const [newGoalDate, setNewGoalDate] = useState('');
+  const [strategySelectionMode, setStrategySelectionMode] =
+    useState<StrategySelectionMode>(settings.strategySelectionMode ?? 'auto');
+  const [strategyPreset, setStrategyPreset] =
+    useState<TrainingStrategyPreset>(settings.strategyPreset ?? 'polarized_80_20');
+  const [optimizationPriority, setOptimizationPriority] =
+    useState<OptimizationPriority>(
+      settings.optimizationPriority ?? 'race_performance',
+    );
 
   const currentWeek = useMemo(
     () =>
@@ -366,9 +479,23 @@ const TrainingBlockView = () => {
   const progressPct = activeBlock
     ? Math.round((currentWeek / activeBlock.totalWeeks) * 100)
     : 0;
+  const appliedStrategyMeta = useMemo(
+    () =>
+      activeBlock
+        ? extractAppliedStrategyMeta(activeBlock.weekOutlines)
+        : {strategy: null, priority: null},
+    [activeBlock],
+  );
 
-  const handleGenerate = (goalEvent: string, goalDate: string, totalWeeks?: number) => {
-    generateBlock(goalEvent, goalDate, totalWeeks);
+  const handleGenerate = (options: {
+    goalEvent: string;
+    goalDate: string;
+    totalWeeks?: number;
+    strategySelectionMode: StrategySelectionMode;
+    strategyPreset: TrainingStrategyPreset;
+    optimizationPriority: OptimizationPriority;
+  }) => {
+    generateBlock(options);
   };
 
   const handleToggleHistory = () => {
@@ -399,6 +526,11 @@ const TrainingBlockView = () => {
           onGenerate={handleGenerate}
           isGenerating={isGenerating}
           defaultGoalEvent={settings?.goal ?? ''}
+          defaultStrategySelectionMode={settings.strategySelectionMode ?? 'auto'}
+          defaultStrategyPreset={settings.strategyPreset ?? 'polarized_80_20'}
+          defaultOptimizationPriority={
+            settings.optimizationPriority ?? 'race_performance'
+          }
         />
       )}
 
@@ -428,6 +560,15 @@ const TrainingBlockView = () => {
                     setEventDistanceKm('');
                     setEventPriority('B');
                     setNewGoalDate(activeBlock.goalDate);
+                    setStrategySelectionMode(
+                      settings.strategySelectionMode ?? 'auto',
+                    );
+                    setStrategyPreset(
+                      settings.strategyPreset ?? 'polarized_80_20',
+                    );
+                    setOptimizationPriority(
+                      settings.optimizationPriority ?? 'race_performance',
+                    );
                     setEditOpen(true);
                   }
                 }}
@@ -477,6 +618,69 @@ const TrainingBlockView = () => {
                       onChange={(e) => setEffectiveFromWeek(e.target.value)}
                       className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                    >
+                      Strategy
+                    </label>
+                    <select
+                      value={
+                        strategySelectionMode === 'auto' ? 'auto' : strategyPreset
+                      }
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === 'auto') {
+                          setStrategySelectionMode('auto');
+                          return;
+                        }
+                        setStrategySelectionMode('preset');
+                        setStrategyPreset(value as TrainingStrategyPreset);
+                      }}
+                      className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      <option value="auto">{AUTO_STRATEGY_LABEL}</option>
+                      {Object.entries(STRATEGY_PRESET_LABELS).map(
+                        ([id, label]) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                    <p className="text-xs text-muted-foreground font-medium mt-2">
+                      {strategySelectionMode === 'auto'
+                        ? describeAutoStrategySelection()
+                        : describeStrategyPreset(strategyPreset)}
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                    >
+                      Optimization Priority
+                    </label>
+                    <select
+                      value={optimizationPriority}
+                      onChange={(e) =>
+                        setOptimizationPriority(
+                          e.target.value as OptimizationPriority,
+                        )
+                      }
+                      className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      {Object.entries(OPTIMIZATION_PRIORITY_LABELS).map(
+                        ([id, label]) => (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        ),
+                      )}
+                    </select>
                   </div>
                 </div>
 
@@ -580,6 +784,9 @@ const TrainingBlockView = () => {
                         sourceBlockId: activeBlock.id,
                         effectiveFromWeek: effectiveFromWeek ? Number(effectiveFromWeek) : undefined,
                         goalDate: adaptationType === 'shift_target_date' ? newGoalDate : undefined,
+                        strategySelectionMode,
+                        strategyPreset,
+                        optimizationPriority,
                         event: adaptationType === 'insert_event'
                           ? {
                               name: eventName.trim(),
@@ -634,6 +841,16 @@ const TrainingBlockView = () => {
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-muted shadow-neo-sm">
                 Week {currentWeek} of {activeBlock.totalWeeks}
               </span>
+              {appliedStrategyMeta.strategy && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-primary/10 text-primary shadow-neo-sm">
+                  Strategy Applied: {appliedStrategyMeta.strategy}
+                </span>
+              )}
+              {appliedStrategyMeta.priority && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-secondary/10 text-secondary shadow-neo-sm">
+                  Priority: {appliedStrategyMeta.priority}
+                </span>
+              )}
             </div>
 
             {/* Progress bar */}

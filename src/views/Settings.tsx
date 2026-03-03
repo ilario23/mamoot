@@ -31,6 +31,15 @@ import {
 } from 'lucide-react';
 import TrainingGauge from '@/components/ui/TrainingGauge';
 import {NeoLoader} from '@/components/ui/neo-loader';
+import {
+  STRATEGY_PRESET_LABELS,
+  OPTIMIZATION_PRIORITY_LABELS,
+  AUTO_STRATEGY_LABEL,
+  describeAutoStrategySelection,
+  describeStrategyPreset,
+  type TrainingStrategyPreset,
+  type OptimizationPriority,
+} from '@/lib/trainingStrategy';
 
 const COMMON_ALLERGIES = [
   'Gluten',
@@ -278,6 +287,12 @@ const Settings = () => {
     'z5',
     'z6',
   ];
+  const strategyPresets = Object.entries(STRATEGY_PRESET_LABELS) as Array<
+    [TrainingStrategyPreset, string]
+  >;
+  const optimizationPriorities = Object.entries(
+    OPTIMIZATION_PRIORITY_LABELS,
+  ) as Array<[OptimizationPriority, string]>;
 
   const athleteDisplayName = athlete
     ? `${athlete.firstname} ${athlete.lastname}`
@@ -613,6 +628,76 @@ const Settings = () => {
             setFormState((prev) => ({...prev, trainingBalance: v}))
           }
         />
+
+        <div className='border-t-2 border-border/30 pt-4 space-y-4'>
+          <div>
+            <label className='font-black text-xs uppercase tracking-wider block mb-2'>
+              Default Strategy
+            </label>
+            <select
+              value={
+                (formState.strategySelectionMode ?? 'auto') === 'auto'
+                  ? 'auto'
+                  : (formState.strategyPreset ?? 'polarized_80_20')
+              }
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'auto') {
+                  setFormState((prev) => ({
+                    ...prev,
+                    strategySelectionMode: 'auto',
+                  }));
+                  return;
+                }
+                setFormState((prev) => ({
+                  ...prev,
+                  strategySelectionMode: 'preset',
+                  strategyPreset: value as TrainingStrategyPreset,
+                }));
+              }}
+              className='w-full px-3 py-2 border-3 border-border font-bold text-xs uppercase tracking-wider bg-background focus:outline-none focus:ring-2 focus:ring-primary'
+              aria-label='Select default training strategy'
+            >
+              <option value='auto'>{AUTO_STRATEGY_LABEL}</option>
+              {strategyPresets.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <p className='text-xs font-medium text-muted-foreground mt-2'>
+              {(formState.strategySelectionMode ?? 'auto') === 'auto'
+                ? describeAutoStrategySelection()
+                : describeStrategyPreset(
+                    (formState.strategyPreset ??
+                      'polarized_80_20') as TrainingStrategyPreset,
+                  )}
+            </p>
+          </div>
+
+          <div>
+            <label className='font-black text-xs uppercase tracking-wider block mb-2'>
+              Default Optimization Priority
+            </label>
+            <select
+              value={formState.optimizationPriority ?? 'race_performance'}
+              onChange={(e) =>
+                setFormState((prev) => ({
+                  ...prev,
+                  optimizationPriority: e.target.value as OptimizationPriority,
+                }))
+              }
+              className='w-full px-3 py-2 border-3 border-border font-bold text-xs uppercase tracking-wider bg-background focus:outline-none focus:ring-2 focus:ring-primary'
+              aria-label='Select default optimization priority'
+            >
+              {optimizationPriorities.map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* ── Nutrition Profile ── */}

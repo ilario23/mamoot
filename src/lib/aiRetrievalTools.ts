@@ -19,7 +19,7 @@ import {
   trainingBlocks,
   weeklyPlans,
 } from '@/db/schema';
-import {eq, desc, and, inArray} from 'drizzle-orm';
+import {eq, desc, and, inArray, isNull} from 'drizzle-orm';
 import type {ActivitySummary, UserSettings} from './mockData';
 import {formatPace, formatDuration, ZONE_NAMES} from './mockData';
 import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
@@ -1183,7 +1183,9 @@ export const createRetrievalTools = (athleteId: number) => ({
         return {records: 'No activity details available to extract PRs.'};
       }
 
-      // Collect all best efforts with pr_rank === 1
+      // Collect fastest effort per distance name from cached best_efforts.
+      // Do not rely on Strava pr_rank because cached historical activities
+      // may have stale ranks after newer PRs are recorded.
       const prMap = new Map<
         string,
         {time: number; date: string; name: string}
@@ -1193,16 +1195,21 @@ export const createRetrievalTools = (athleteId: number) => ({
         const detail = row.data as StravaDetailedActivity;
         const efforts = (detail.best_efforts ?? []) as StravaBestEffort[];
         for (const e of efforts) {
-          if (e.pr_rank === 1) {
-            const existing = prMap.get(e.name);
-            // Keep the fastest PR if multiple activities have pr_rank 1
-            if (!existing || e.elapsed_time < existing.time) {
-              prMap.set(e.name, {
-                time: e.elapsed_time,
-                date: e.start_date_local?.split('T')[0] ?? '',
-                name: e.name,
-              });
-            }
+          const existing = prMap.get(e.name);
+          const effortDate = e.start_date_local?.split('T')[0] ?? '';
+          // Keep the fastest effort; tie-break with older date for stability.
+          if (
+            !existing ||
+            e.elapsed_time < existing.time ||
+            (e.elapsed_time === existing.time &&
+              effortDate !== '' &&
+              (existing.date === '' || effortDate < existing.date))
+          ) {
+            prMap.set(e.name, {
+              time: e.elapsed_time,
+              date: effortDate,
+              name: e.name,
+            });
           }
         }
       }
@@ -1396,6 +1403,7 @@ export const createRetrievalTools = (athleteId: number) => ({
           and(
             eq(trainingBlocks.athleteId, athleteId),
             eq(trainingBlocks.isActive, true),
+            isNull(trainingBlocks.deletedAt),
           ),
         )
         .orderBy(desc(trainingBlocks.createdAt))

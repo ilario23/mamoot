@@ -43,6 +43,30 @@ const ACWRChart = dynamic(() => import('@/components/dashboard/ACWRChart'), {
   loading: () => <SectionLoading label="Loading workload ratio" />,
 });
 
+const LoadReadinessChart = dynamic(
+  () => import('@/components/dashboard/LoadReadinessChart'),
+  {
+    ssr: false,
+    loading: () => <SectionLoading label="Loading readiness trends" />,
+  },
+);
+
+const TrainingStressChart = dynamic(
+  () => import('@/components/dashboard/TrainingStressChart'),
+  {
+    ssr: false,
+    loading: () => <SectionLoading label="Loading stress trends" />,
+  },
+);
+
+const PerformanceTrendChart = dynamic(
+  () => import('@/components/dashboard/PerformanceTrendChart'),
+  {
+    ssr: false,
+    loading: () => <SectionLoading label="Loading performance trends" />,
+  },
+);
+
 const Dashboard = () => {
   const [showDeferredSections, setShowDeferredSections] = useState(false);
 
@@ -105,6 +129,48 @@ const Dashboard = () => {
           <ACWRChart embedded />
         ) : (
           <SectionLoading label="Loading workload ratio" />
+        )}
+      </CollapsibleSection>
+
+      {/* Row 7: Load & Readiness */}
+      <CollapsibleSection
+        title="Load & Readiness"
+        subtitle="CTL / ATL / TSB coaching view"
+        defaultOpenMobile={false}
+        defaultOpenDesktop={true}
+      >
+        {showDeferredSections ? (
+          <LoadReadinessChart embedded />
+        ) : (
+          <SectionLoading label="Loading readiness trends" />
+        )}
+      </CollapsibleSection>
+
+      {/* Row 8: Stress Structure */}
+      <CollapsibleSection
+        title="Stress Structure"
+        subtitle="Weekly strain, monotony, and ramp rate"
+        defaultOpenMobile={false}
+        defaultOpenDesktop={true}
+      >
+        {showDeferredSections ? (
+          <TrainingStressChart embedded />
+        ) : (
+          <SectionLoading label="Loading stress trends" />
+        )}
+      </CollapsibleSection>
+
+      {/* Row 9: Performance Trend */}
+      <CollapsibleSection
+        title="Performance Trend"
+        subtitle="Threshold pace and efficiency factor"
+        defaultOpenMobile={false}
+        defaultOpenDesktop={true}
+      >
+        {showDeferredSections ? (
+          <PerformanceTrendChart embedded />
+        ) : (
+          <SectionLoading label="Loading performance trends" />
         )}
       </CollapsibleSection>
     </div>

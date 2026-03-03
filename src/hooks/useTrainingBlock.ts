@@ -1,5 +1,10 @@
 import {useState, useEffect, useCallback, useRef} from 'react';
 import type {CachedTrainingBlock} from '@/lib/cacheTypes';
+import type {
+  OptimizationPriority,
+  StrategySelectionMode,
+  TrainingStrategyPreset,
+} from '@/lib/trainingStrategy';
 import {
   neonGetTrainingBlocks,
   neonDeleteTrainingBlock,
@@ -23,6 +28,18 @@ export interface AdaptTrainingBlockOptions {
     priority?: 'A' | 'B' | 'C';
   };
   goalDate?: string;
+  strategySelectionMode?: StrategySelectionMode;
+  strategyPreset?: TrainingStrategyPreset;
+  optimizationPriority?: OptimizationPriority;
+}
+
+export interface GenerateTrainingBlockOptions {
+  goalEvent: string;
+  goalDate: string;
+  totalWeeks?: number;
+  strategySelectionMode?: StrategySelectionMode;
+  strategyPreset?: TrainingStrategyPreset;
+  optimizationPriority?: OptimizationPriority;
 }
 
 export interface UseTrainingBlockResult {
@@ -32,7 +49,7 @@ export interface UseTrainingBlockResult {
   deleteBlock: (blockId: string) => Promise<void>;
   isLoading: boolean;
   isGenerating: boolean;
-  generateBlock: (goalEvent: string, goalDate: string, totalWeeks?: number) => Promise<TrainingBlock | null>;
+  generateBlock: (options: GenerateTrainingBlockOptions) => Promise<TrainingBlock | null>;
   adaptBlock: (options: AdaptTrainingBlockOptions) => Promise<TrainingBlock | null>;
   refresh: () => Promise<void>;
 }
@@ -48,10 +65,12 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
   const loadBlocks = useCallback(async () => {
     if (!athleteId) return;
     const remote = await neonGetTrainingBlocks(athleteId);
-    if (remote && remote.length > 0) {
-      const sorted = [...remote].sort((a, b) => b.createdAt - a.createdAt);
-      setBlocks(sorted);
+    if (!remote || remote.length === 0) {
+      setBlocks([]);
+      return;
     }
+    const sorted = [...remote].sort((a, b) => b.createdAt - a.createdAt);
+    setBlocks(sorted);
   }, [athleteId]);
 
   useEffect(() => {
@@ -68,7 +87,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
   }, [athleteId, loadBlocks]);
 
   const generateBlock = useCallback(
-    async (goalEvent: string, goalDate: string, totalWeeks?: number): Promise<TrainingBlock | null> => {
+    async (options: GenerateTrainingBlockOptions): Promise<TrainingBlock | null> => {
       if (!athleteId) return null;
       setIsGenerating(true);
 
@@ -76,7 +95,15 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
         const res = await fetch('/api/ai/training-block', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({athleteId, goalEvent, goalDate, totalWeeks: totalWeeks || undefined}),
+          body: JSON.stringify({
+            athleteId,
+            goalEvent: options.goalEvent,
+            goalDate: options.goalDate,
+            totalWeeks: options.totalWeeks || undefined,
+            strategySelectionMode: options.strategySelectionMode,
+            strategyPreset: options.strategyPreset,
+            optimizationPriority: options.optimizationPriority,
+          }),
         });
 
         if (!res.ok) {
@@ -180,7 +207,10 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
 
   const deleteBlock = useCallback(
     async (blockId: string) => {
+      if (!athleteId) return;
       const wasActive = blocks.find((b) => b.id === blockId)?.isActive ?? false;
+      const remainingBlocks = blocks.filter((b) => b.id !== blockId);
+      const nextActive = wasActive ? remainingBlocks[0] : null;
 
       setBlocks((prev) => {
         const filtered = prev.filter((b) => b.id !== blockId);
@@ -190,16 +220,16 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
         return filtered;
       });
 
-      await neonDeleteTrainingBlock(blockId);
-
-      if (wasActive && athleteId) {
-        const nextActive = blocks.filter((b) => b.id !== blockId)[0];
+      try {
+        await neonDeleteTrainingBlock(blockId, athleteId);
         if (nextActive) {
-          neonActivateTrainingBlock(nextActive.id, athleteId);
+          await neonActivateTrainingBlock(nextActive.id, athleteId);
         }
+      } finally {
+        await loadBlocks();
       }
     },
-    [athleteId, blocks],
+    [athleteId, blocks, loadBlocks],
   );
 
   const refresh = useCallback(async () => {

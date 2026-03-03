@@ -7,13 +7,27 @@ import {
   userSettings,
   trainingBlocks,
 } from '@/db/schema';
-import {eq, desc, and, ne} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
-import {calcFitnessData, calcACWRData} from '@/utils/trainingLoad';
+import {
+  calcFitnessData,
+  calcACWRData,
+  calcAdvancedMetricsData,
+  getLatestMetricsSnapshot,
+} from '@/utils/trainingLoad';
 import {formatPace, formatDuration, type UserSettings} from '@/lib/mockData';
 import {trainingBlockOutputSchema} from '@/lib/trainingBlockSchema';
 import {NextResponse} from 'next/server';
+import {
+  describeStrategyPreset,
+  OPTIMIZATION_PRIORITY_LABELS,
+  recommendStrategy,
+  STRATEGY_PRESET_LABELS,
+  type OptimizationPriority,
+  type StrategySelectionMode,
+  type TrainingStrategyPreset,
+} from '@/lib/trainingStrategy';
 
 export const maxDuration = 120;
 
@@ -55,6 +69,38 @@ const weeksUntil = (startIso: string, endIso: string): number => {
   return Math.max(4, Math.round((end.getTime() - start.getTime()) / (7 * 86400000)));
 };
 
+const STRATEGY_NOTE_PREFIX = '[Strategy] ';
+
+const stripStrategyStamp = (notes: string): string =>
+  notes.replace(/^\[Strategy\].*?(?:\s+—\s+)?/i, '').trim();
+
+const buildStrategyStamp = (
+  mode: StrategySelectionMode,
+  strategyLabel: string,
+  optimizationPriorityLabel: string,
+): string =>
+  `${mode === 'auto' ? `Auto -> ${strategyLabel}` : `Preset -> ${strategyLabel}`} | Priority: ${optimizationPriorityLabel}`;
+
+const withStrategyStamp = <T extends {notes?: string}>(
+  weekOutlines: T[],
+  mode: StrategySelectionMode,
+  strategyLabel: string,
+  optimizationPriorityLabel: string,
+  rationale: string | null,
+): T[] => {
+  if (weekOutlines.length === 0) return weekOutlines;
+  const summary = buildStrategyStamp(mode, strategyLabel, optimizationPriorityLabel);
+  const decorated = `${STRATEGY_NOTE_PREFIX}${summary}${rationale ? ` | ${rationale}` : ''}`;
+  return weekOutlines.map((outline, index) => {
+    if (index !== 0) return outline;
+    const cleaned = stripStrategyStamp(outline.notes ?? '');
+    return {
+      ...outline,
+      notes: cleaned ? `${decorated} — ${cleaned}` : decorated,
+    };
+  });
+};
+
 export async function POST(req: Request) {
   const body = await req.json();
   const {
@@ -68,6 +114,9 @@ export async function POST(req: Request) {
     sourceBlockId,
     effectiveFromWeek,
     event,
+    strategySelectionMode,
+    strategyPreset,
+    optimizationPriority,
   }: {
     athleteId: number;
     mode?: 'create' | 'adapt';
@@ -84,6 +133,9 @@ export async function POST(req: Request) {
       distanceKm?: number;
       priority?: 'A' | 'B' | 'C';
     };
+    strategySelectionMode?: StrategySelectionMode;
+    strategyPreset?: TrainingStrategyPreset;
+    optimizationPriority?: OptimizationPriority;
   } = body;
 
   if (!athleteId) {
@@ -120,7 +172,13 @@ export async function POST(req: Request) {
         ? await db
             .select()
             .from(trainingBlocks)
-            .where(eq(trainingBlocks.id, sourceBlockId))
+            .where(
+              and(
+                eq(trainingBlocks.id, sourceBlockId),
+                eq(trainingBlocks.athleteId, athleteId),
+                isNull(trainingBlocks.deletedAt),
+              ),
+            )
             .limit(1)
         : await db
             .select()
@@ -129,6 +187,7 @@ export async function POST(req: Request) {
               and(
                 eq(trainingBlocks.athleteId, athleteId),
                 eq(trainingBlocks.isActive, true),
+                isNull(trainingBlocks.deletedAt),
               ),
             )
             .orderBy(desc(trainingBlocks.createdAt))
@@ -151,6 +210,17 @@ export async function POST(req: Request) {
       const allActivities = activityRows.map((row) =>
         transformActivity(row.data as StravaSummaryActivity),
       );
+      const resolvedPriority: OptimizationPriority =
+        optimizationPriority ??
+        (settings?.optimizationPriority as OptimizationPriority | undefined) ??
+        'race_performance';
+      const resolvedStrategyMode: StrategySelectionMode =
+        strategySelectionMode ??
+        (settings?.strategySelectionMode as StrategySelectionMode | undefined) ??
+        'auto';
+      const defaultPreset =
+        (settings?.strategyPreset as TrainingStrategyPreset | undefined) ??
+        'polarized_80_20';
 
       const startDate = sourceBlock.startDate;
       const now = new Date();
@@ -171,6 +241,43 @@ export async function POST(req: Request) {
       });
       const recentVolume = recentActivities.reduce((sum, a) => sum + a.distance, 0);
       const avgWeeklyVolume = recentVolume > 0 ? recentVolume / 4 : 0;
+      let latestSnapshot = getLatestMetricsSnapshot([]);
+      if (settings) {
+        try {
+          const zonesRaw = settings?.zones as Record<string, [number, number]> | undefined;
+          const typedZones = zonesRaw as UserSettings['zones'] | undefined;
+          const fitnessResult = calcFitnessData(
+            allActivities,
+            settings.restingHr,
+            settings.maxHr,
+            180,
+            typedZones,
+          );
+          latestSnapshot = getLatestMetricsSnapshot(
+            calcAdvancedMetricsData(fitnessResult.data, allActivities),
+          );
+        } catch {
+          // Non-blocking
+        }
+      }
+      const strategyRecommendation = recommendStrategy({
+        acwr: latestSnapshot.acwr,
+        tsb: latestSnapshot.tsb,
+        monotony: latestSnapshot.monotony,
+        goal: (settings?.goal as string | null | undefined) ?? null,
+        priority: resolvedPriority,
+      });
+      const resolvedPreset: TrainingStrategyPreset =
+        resolvedStrategyMode === 'preset'
+          ? strategyPreset ?? defaultPreset
+          : strategyRecommendation.strategy;
+      const strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
+      const strategyDescription = `${describeStrategyPreset(
+        resolvedPreset,
+      )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${strategyRecommendation.rationale}` : ''}`.trim();
+      const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
+      const strategyRationale =
+        resolvedStrategyMode === 'auto' ? strategyRecommendation.rationale : null;
 
       const adaptationPrompt = `You are adapting an existing running training block while preserving history.
 
@@ -180,6 +287,9 @@ export async function POST(req: Request) {
 ${event ? `- Inserted event: ${event.name} on ${event.date} (${event.distanceKm ?? 'unknown'} km), priority ${eventPriority}` : ''}
 ${adaptationType === 'insert_event' ? '- For B-race, apply a mini taper and short post-race recovery while keeping the main goal unchanged.' : ''}
 ${adaptationType === 'shift_target_date' ? `- New goal date requested: ${goalDate ?? sourceBlock.goalDate}` : ''}
+- Strategy to follow: ${strategyLabel}
+- Strategy intent: ${strategyDescription}
+- Optimization priority: ${priorityLabel}
 
 ## Existing Block (source of truth for past weeks)
 - Goal Event: ${sourceBlock.goalEvent}
@@ -188,6 +298,8 @@ ${adaptationType === 'shift_target_date' ? `- New goal date requested: ${goalDat
 - Start Date: ${sourceBlock.startDate}
 - Current Week: ${currentWeek}
 - Avg weekly volume (last 4 weeks): ${avgWeeklyVolume.toFixed(1)} km
+- Current CTL/ATL/TSB: ${latestSnapshot.ctl ?? 'n/a'} / ${latestSnapshot.atl ?? 'n/a'} / ${latestSnapshot.tsb ?? 'n/a'}
+- Current ACWR: ${latestSnapshot.acwr ?? 'n/a'}
 
 ## Athlete Context
 ${settings?.goal ? `- Athlete goal: ${settings.goal}` : ''}
@@ -211,6 +323,13 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         schema: trainingBlockOutputSchema,
         prompt: adaptationPrompt,
       });
+      const stampedWeekOutlines = withStrategyStamp(
+        adapted.object.weekOutlines,
+        resolvedStrategyMode,
+        strategyLabel,
+        priorityLabel,
+        strategyRationale,
+      );
 
       const blockId = crypto.randomUUID();
       const nowMs = Date.now();
@@ -225,7 +344,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         totalWeeks: sourceBlock.totalWeeks,
         startDate,
         phases: adapted.object.phases,
-        weekOutlines: adapted.object.weekOutlines,
+        weekOutlines: stampedWeekOutlines,
         isActive: true,
         createdAt: nowMs,
         updatedAt: nowMs,
@@ -238,6 +357,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
           and(
             eq(trainingBlocks.athleteId, athleteId),
             ne(trainingBlocks.id, blockId),
+            isNull(trainingBlocks.deletedAt),
           ),
         );
 
@@ -249,7 +369,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         totalWeeks: sourceBlock.totalWeeks,
         startDate,
         phases: adapted.object.phases,
-        weekOutlines: adapted.object.weekOutlines,
+        weekOutlines: stampedWeekOutlines,
         isActive: true,
         createdAt: nowMs,
         updatedAt: nowMs,
@@ -269,12 +389,25 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
     const settings = settingsRows[0];
     const zonesRaw = settings?.zones as Record<string, [number, number]> | undefined;
     const typedZones = zonesRaw as UserSettings['zones'] | undefined;
-    const injuries = settings?.injuries as string[] | undefined;
-    const injuriesText = injuries?.length ? injuries.join(', ') : 'None reported';
+    const injuries = settings?.injuries as Array<{name?: string; notes?: string}> | undefined;
+    const injuriesText = injuries?.length
+      ? injuries.map((item) => item?.name || '').filter(Boolean).join(', ')
+      : 'None reported';
 
     const allActivities = activityRows.map((r) =>
       transformActivity(r.data as StravaSummaryActivity),
     );
+    const resolvedPriority: OptimizationPriority =
+      optimizationPriority ??
+      (settings?.optimizationPriority as OptimizationPriority | undefined) ??
+      'race_performance';
+    const resolvedStrategyMode: StrategySelectionMode =
+      strategySelectionMode ??
+      (settings?.strategySelectionMode as StrategySelectionMode | undefined) ??
+      'auto';
+    const defaultPreset =
+      (settings?.strategyPreset as TrainingStrategyPreset | undefined) ??
+      'polarized_80_20';
 
     const now = new Date();
     const fourWeeksAgo = new Date(now.getTime() - 28 * 86400000);
@@ -306,6 +439,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
       .join('\n');
 
     let acwrText = '';
+    let latestSnapshot = getLatestMetricsSnapshot([]);
     if (settings) {
       try {
         const fitnessResult = calcFitnessData(
@@ -316,12 +450,33 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
           typedZones,
         );
         const acwrData = calcACWRData(fitnessResult.data);
+        latestSnapshot = getLatestMetricsSnapshot(
+          calcAdvancedMetricsData(fitnessResult.data, allActivities),
+        );
         const latestAcwr = acwrData[acwrData.length - 1];
         if (latestAcwr) {
           acwrText = `\n- ACWR: ${latestAcwr.acwr.toFixed(2)}`;
         }
       } catch { /* non-blocking */ }
     }
+    const strategyRecommendation = recommendStrategy({
+      acwr: latestSnapshot.acwr,
+      tsb: latestSnapshot.tsb,
+      monotony: latestSnapshot.monotony,
+      goal: (settings?.goal as string | null | undefined) ?? null,
+      priority: resolvedPriority,
+    });
+    const resolvedPreset: TrainingStrategyPreset =
+      resolvedStrategyMode === 'preset'
+        ? strategyPreset ?? defaultPreset
+        : strategyRecommendation.strategy;
+    const strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
+    const strategyDescription = `${describeStrategyPreset(
+      resolvedPreset,
+    )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${strategyRecommendation.rationale}` : ''}`.trim();
+    const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
+    const strategyRationale =
+      resolvedStrategyMode === 'auto' ? strategyRecommendation.rationale : null;
 
     let prText = 'No personal records available';
     const runActivities = recentActivities
@@ -344,10 +499,14 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
 ## Athlete
 ${settings?.weight ? `- Weight: ${settings.weight} kg` : ''}
 ${settings?.trainingBalance != null ? `- Training Balance: ${settings.trainingBalance}/80 (20=run-focused, 80=gym-focused)` : ''}
+- Strategy to follow: ${strategyLabel}
+- Strategy intent: ${strategyDescription}
+- Optimization priority: ${priorityLabel}
 - Current avg weekly volume: ${avgWeeklyKm.toFixed(1)} km
 
 ## Recent Training (last 4 weeks)
 ${recentTrainingLines || 'No recent training data'}${acwrText}
+- Current CTL/ATL/TSB: ${latestSnapshot.ctl ?? 'n/a'} / ${latestSnapshot.atl ?? 'n/a'} / ${latestSnapshot.tsb ?? 'n/a'}
 
 ## Recent Paces
 ${prText}
@@ -379,6 +538,13 @@ ${injuriesText}
       schema: trainingBlockOutputSchema,
       prompt,
     });
+    const stampedWeekOutlines = withStrategyStamp(
+      result.object.weekOutlines,
+      resolvedStrategyMode,
+      strategyLabel,
+      priorityLabel,
+      strategyRationale,
+    );
 
     const blockId = crypto.randomUUID();
     const nowMs = Date.now();
@@ -391,7 +557,7 @@ ${injuriesText}
       totalWeeks,
       startDate,
       phases: result.object.phases,
-      weekOutlines: result.object.weekOutlines,
+      weekOutlines: stampedWeekOutlines,
       isActive: true,
       createdAt: nowMs,
       updatedAt: nowMs,
@@ -404,6 +570,7 @@ ${injuriesText}
         and(
           eq(trainingBlocks.athleteId, athleteId),
           ne(trainingBlocks.id, blockId),
+          isNull(trainingBlocks.deletedAt),
         ),
       );
 
@@ -418,7 +585,7 @@ ${injuriesText}
       totalWeeks,
       startDate,
       phases: result.object.phases,
-      weekOutlines: result.object.weekOutlines,
+      weekOutlines: stampedWeekOutlines,
       isActive: true,
       createdAt: nowMs,
       updatedAt: nowMs,

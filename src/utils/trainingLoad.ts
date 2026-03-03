@@ -31,6 +31,33 @@ export interface ACWRDataPoint {
   li: number;
 }
 
+export interface AdvancedMetricsDataPoint {
+  date: string;
+  ctl: number;
+  atl: number;
+  tsb: number;
+  acwr: number;
+  rampRate: number;
+  monotony: number;
+  strain: number;
+  thresholdPace: number | null;
+  efficiencyFactor: number | null;
+  decoupling: number | null;
+}
+
+export interface MetricsSnapshot {
+  ctl: number | null;
+  atl: number | null;
+  tsb: number | null;
+  acwr: number | null;
+  rampRate: number | null;
+  monotony: number | null;
+  strain: number | null;
+  thresholdPace: number | null;
+  efficiencyFactor: number | null;
+  decoupling: number | null;
+}
+
 /** EWMA state stored for incremental resumption */
 export interface ContinuationState {
   bf: number;
@@ -331,6 +358,181 @@ export const calcACWRData = (
     bf: d.bf,
     li: d.li,
   }));
+};
+
+const calcMean = (values: number[]): number =>
+  values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length;
+
+const calcStdDev = (values: number[]): number => {
+  if (values.length < 2) return 0;
+  const mean = calcMean(values);
+  const variance =
+    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+};
+
+const getRollingWindow = (
+  values: number[],
+  endIndex: number,
+  windowSize: number,
+): number[] => {
+  const start = Math.max(0, endIndex - windowSize + 1);
+  return values.slice(start, endIndex + 1);
+};
+
+const getRollingThresholdPace = (
+  activities: ActivitySummary[],
+  dateStr: string,
+): number | null => {
+  const end = new Date(dateStr + 'T23:59:59');
+  const start = new Date(end);
+  start.setDate(start.getDate() - 42);
+
+  const candidates = activities.filter((a) => {
+    if (a.type !== 'Run' || a.avgPace <= 0 || a.duration <= 0) return false;
+    const d = new Date(a.date + 'T12:00:00');
+    if (d < start || d > end) return false;
+    return a.avgHr >= 0.84 * a.maxHr && a.duration >= 20 * 60;
+  });
+
+  if (candidates.length === 0) return null;
+  const weightedPace =
+    candidates.reduce((sum, run) => sum + run.avgPace * run.duration, 0) /
+    candidates.reduce((sum, run) => sum + run.duration, 0);
+  return Number(weightedPace.toFixed(2));
+};
+
+const getRollingEfficiencyFactor = (
+  activities: ActivitySummary[],
+  dateStr: string,
+): number | null => {
+  const end = new Date(dateStr + 'T23:59:59');
+  const start = new Date(end);
+  start.setDate(start.getDate() - 28);
+
+  const easyRuns = activities.filter((a) => {
+    if (a.type !== 'Run' || a.avgPace <= 0 || a.avgHr <= 0) return false;
+    const d = new Date(a.date + 'T12:00:00');
+    if (d < start || d > end) return false;
+    return a.duration >= 30 * 60 && a.avgHr <= 0.82 * a.maxHr;
+  });
+
+  if (easyRuns.length === 0) return null;
+  const weighted = easyRuns.reduce((sum, run) => {
+    const metersPerSec = run.distance > 0 ? (run.distance * 1000) / run.duration : 0;
+    const ef = run.avgHr > 0 ? metersPerSec / run.avgHr : 0;
+    return sum + ef * run.duration;
+  }, 0);
+  const totalDuration = easyRuns.reduce((sum, run) => sum + run.duration, 0);
+  if (totalDuration <= 0) return null;
+  return Number((weighted / totalDuration).toFixed(4));
+};
+
+const getRollingDecouplingProxy = (
+  activities: ActivitySummary[],
+  dateStr: string,
+): number | null => {
+  const end = new Date(dateStr + 'T23:59:59');
+  const start = new Date(end);
+  start.setDate(start.getDate() - 56);
+
+  const longRuns = activities
+    .filter((a) => {
+      if (a.type !== 'Run' || a.avgPace <= 0 || a.avgHr <= 0) return false;
+      const d = new Date(a.date + 'T12:00:00');
+      return d >= start && d <= end && a.duration >= 75 * 60;
+    })
+    .slice(0, 6);
+
+  if (longRuns.length < 2) return null;
+  const efValues = longRuns.map((run) => {
+    const metersPerSec = (run.distance * 1000) / run.duration;
+    return metersPerSec / run.avgHr;
+  });
+  const latest = efValues[0];
+  const baseline = calcMean(efValues.slice(1));
+  if (baseline <= 0) return null;
+  return Number((((latest - baseline) / baseline) * 100).toFixed(1));
+};
+
+export const calcAdvancedMetricsData = (
+  fitnessData: FitnessDataPoint[],
+  activities: ActivitySummary[],
+): AdvancedMetricsDataPoint[] => {
+  if (fitnessData.length === 0) return [];
+
+  const tlSeries = fitnessData.map((d) => d.tl);
+  const results: AdvancedMetricsDataPoint[] = [];
+
+  for (let i = 0; i < fitnessData.length; i++) {
+    const point = fitnessData[i];
+    const ctl = point.bf;
+    const atl = point.li;
+    const tsb = Number((ctl - atl).toFixed(1));
+    const acwr = ctl > 0 ? Number((atl / ctl).toFixed(2)) : 0;
+
+    const weekLoads = getRollingWindow(tlSeries, i, 7);
+    const priorWeeks = getRollingWindow(tlSeries, i, 28);
+    const acute = weekLoads.reduce((sum, v) => sum + v, 0);
+    const chronicWeekly = priorWeeks.reduce((sum, v) => sum + v, 0) / 4;
+    const rampRate =
+      chronicWeekly > 0
+        ? Number((((acute - chronicWeekly) / chronicWeekly) * 100).toFixed(1))
+        : 0;
+    const weekMean = calcMean(weekLoads);
+    const weekStd = calcStdDev(weekLoads);
+    const monotony = weekStd > 0 ? Number((weekMean / weekStd).toFixed(2)) : 0;
+    const strain = Number((acute * monotony).toFixed(1));
+
+    results.push({
+      date: point.date,
+      ctl,
+      atl,
+      tsb,
+      acwr,
+      rampRate,
+      monotony,
+      strain,
+      thresholdPace: getRollingThresholdPace(activities, point.date),
+      efficiencyFactor: getRollingEfficiencyFactor(activities, point.date),
+      decoupling: getRollingDecouplingProxy(activities, point.date),
+    });
+  }
+
+  return results;
+};
+
+export const getLatestMetricsSnapshot = (
+  metricsData: AdvancedMetricsDataPoint[],
+): MetricsSnapshot => {
+  const latest = metricsData[metricsData.length - 1];
+  if (!latest) {
+    return {
+      ctl: null,
+      atl: null,
+      tsb: null,
+      acwr: null,
+      rampRate: null,
+      monotony: null,
+      strain: null,
+      thresholdPace: null,
+      efficiencyFactor: null,
+      decoupling: null,
+    };
+  }
+
+  return {
+    ctl: latest.ctl,
+    atl: latest.atl,
+    tsb: latest.tsb,
+    acwr: latest.acwr,
+    rampRate: latest.rampRate,
+    monotony: latest.monotony,
+    strain: latest.strain,
+    thresholdPace: latest.thresholdPace,
+    efficiencyFactor: latest.efficiencyFactor,
+    decoupling: latest.decoupling,
+  };
 };
 
 /**

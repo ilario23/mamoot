@@ -97,6 +97,12 @@ export const userSettings = pgTable('user_settings', {
   trainingBalance: integer('training_balance').notNull().default(50),
   /** Free-text preferences/constraints for weekly plan generation (set via Coach chat or Weekly Plan page). */
   weeklyPreferences: text('weekly_preferences'),
+  /** Strategy mode used when generating plans: auto-select or manual preset. */
+  strategySelectionMode: text('strategy_selection_mode').default('auto'),
+  /** Manual strategy preset selection for plan generation. */
+  strategyPreset: text('strategy_preset').default('polarized_80_20'),
+  /** Optimization priority used to steer generated plans. */
+  optimizationPriority: text('optimization_priority').default('race_performance'),
   updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
 });
 
@@ -188,6 +194,8 @@ export const trainingBlocks = pgTable('training_blocks', {
   /** WeekOutline[] — per-week volume/intensity/workout targets */
   weekOutlines: jsonb('week_outlines').notNull(),
   isActive: boolean('is_active').notNull().default(true),
+  /** Soft-delete timestamp. Null means the block is visible/active in history. */
+  deletedAt: bigint('deleted_at', {mode: 'number'}),
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
   updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
 });
