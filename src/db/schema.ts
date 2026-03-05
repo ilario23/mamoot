@@ -143,6 +143,9 @@ export const chatMessageFeedback = pgTable('chat_message_feedback', {
   sessionId: text('session_id').notNull(),
   messageId: text('message_id').notNull(),
   persona: text('persona').notNull(),
+  route: text('route'),
+  model: text('model'),
+  traceId: text('trace_id'),
   rating: text('rating').notNull(), // "helpful" | "not_helpful"
   reason: text('reason'), // short taxonomy code
   freeText: text('free_text'),

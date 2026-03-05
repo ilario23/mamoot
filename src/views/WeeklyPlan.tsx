@@ -16,6 +16,7 @@ import {
   MessageSquareText,
   Target,
   X,
+  AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -441,6 +442,7 @@ const WeeklyPlan = () => {
     preferences,
     setPreferences,
     savePreferences,
+    lastError,
   } = useWeeklyPlan(athleteId);
   const {activeBlock} = useTrainingBlock(athleteId);
   const {settings} = useSettings();
@@ -558,6 +560,27 @@ const WeeklyPlan = () => {
       <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
         Weekly Plan
       </h1>
+
+      {lastError && (
+        <div className='border-3 border-border bg-destructive/10 text-destructive shadow-neo-sm p-3 space-y-2'>
+          <div className='flex items-start gap-2'>
+            <AlertCircle className='h-4 w-4 shrink-0 mt-0.5' />
+            <div className='space-y-1'>
+              <p className='text-sm font-black'>{lastError.error}</p>
+              {lastError.recoveryActions.length > 0 && (
+                <p className='text-xs font-medium'>
+                  Try: {lastError.recoveryActions.join(' · ')}
+                </p>
+              )}
+              {lastError.traceId && (
+                <p className='text-[10px] font-bold uppercase tracking-wider'>
+                  Trace: {lastError.traceId}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Training block context banner */}
       {blockBannerData && activePlan && (

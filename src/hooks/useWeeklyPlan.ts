@@ -11,6 +11,7 @@ import {
   neonActivateWeeklyPlan,
 } from '@/lib/chatSync';
 import {fetchUserSettingsRow} from '@/lib/userSettingsSync';
+import {type AiClientError, parseAiErrorFromUnknown} from '@/lib/aiErrors';
 
 const STORAGE_KEY = 'mamoot-weekly-plan-active';
 const getActiveStorageKey = (athleteId: number): string =>
@@ -50,6 +51,7 @@ export interface UseWeeklyPlanResult {
   setPreferences: (value: string) => void;
   savePreferences: () => Promise<void>;
   preferencesLoaded: boolean;
+  lastError: AiClientError | null;
 }
 
 const writeActiveRef = (athleteId: number, plan: WeeklyPlan): void => {
@@ -72,6 +74,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   const [isGenerating, setIsGenerating] = useState(false);
   const [preferences, setPreferences] = useState('');
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [lastError, setLastError] = useState<AiClientError | null>(null);
   const hydratedAthleteRef = useRef<number | null>(null);
 
   const activePlan = plans.find((p) => p.isActive) ?? null;
@@ -154,6 +157,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
     async (options?: GeneratePlanOptions): Promise<WeeklyPlan | null> => {
       if (!athleteId) return null;
       setIsGenerating(true);
+      setLastError(null);
 
       const prefsToSend = options?.preferences ?? (preferences || undefined);
       const payload = {
@@ -176,7 +180,28 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
         });
 
         if (!res.ok) {
-          console.error('[useWeeklyPlan] Generation failed:', res.status);
+          const traceId = res.headers.get('x-trace-id');
+          let responseBody: unknown = null;
+          try {
+            responseBody = await res.json();
+          } catch {
+            responseBody = null;
+          }
+          const parsed = parseAiErrorFromUnknown(
+            responseBody,
+            'Failed to generate weekly plan',
+          );
+          const nextError: AiClientError = {
+            ...parsed,
+            status: res.status,
+            traceId,
+          };
+          setLastError(nextError);
+          console.error(
+            '[useWeeklyPlan] Generation failed:',
+            res.status,
+            nextError,
+          );
           return null;
         }
 
@@ -202,9 +227,15 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
         });
 
         writeActiveRef(athleteId, newPlan);
+        setLastError(null);
         return newPlan;
       } catch (err) {
         console.error('[useWeeklyPlan] Generation error:', err);
+        setLastError({
+          ...parseAiErrorFromUnknown(null, 'Failed to generate weekly plan'),
+          status: 0,
+          traceId: null,
+        });
         return null;
       } finally {
         setIsGenerating(false);
@@ -265,5 +296,19 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
     await loadPlans();
   }, [loadPlans]);
 
-  return {plans, activePlan, activatePlan, deletePlan, isLoading, isGenerating, generatePlan, refresh, preferences, setPreferences, savePreferences, preferencesLoaded};
+  return {
+    plans,
+    activePlan,
+    activatePlan,
+    deletePlan,
+    isLoading,
+    isGenerating,
+    generatePlan,
+    refresh,
+    preferences,
+    setPreferences,
+    savePreferences,
+    preferencesLoaded,
+    lastError,
+  };
 };

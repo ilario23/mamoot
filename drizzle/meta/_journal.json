@@ -99,6 +99,13 @@
       "when": 1772753400000,
       "tag": "0013_multi_user_athlete_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1772880000000,
+      "tag": "0014_feedback_metadata_dimensions",
+      "breakpoints": true
     }
   ]
 }

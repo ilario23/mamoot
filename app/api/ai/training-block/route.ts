@@ -35,6 +35,7 @@ import {trainingBlockRequestSchema} from '@/lib/aiRequestSchemas';
 import {generateObjectWithRetry} from '@/lib/aiGeneration';
 import {validateTrainingBlockWeekOutlines} from '@/lib/planSemanticValidators';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
+import {createAiErrorPayload} from '@/lib/aiErrors';
 
 export const maxDuration = 120;
 
@@ -115,17 +116,16 @@ export async function POST(req: Request) {
     body = await req.json();
   } catch {
     return NextResponse.json(
-      {error: 'Invalid JSON body'},
+      createAiErrorPayload('invalid_json_body', 'Invalid JSON body'),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
   const parsedBody = trainingBlockRequestSchema.safeParse(body);
   if (!parsedBody.success) {
     return NextResponse.json(
-      {
-        error: 'Invalid request body',
+      createAiErrorPayload('invalid_request_body', 'Invalid request body', {
         issues: parsedBody.error.issues.map((issue) => issue.message),
-      },
+      }),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
@@ -170,7 +170,7 @@ export async function POST(req: Request) {
 
   if (!athleteId) {
     return NextResponse.json(
-      {error: 'athleteId required'},
+      createAiErrorPayload('athlete_id_required', 'athleteId required'),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
@@ -187,14 +187,20 @@ export async function POST(req: Request) {
 
   if (resolvedMode === 'create' && (!goalEvent || !goalDate)) {
     return NextResponse.json(
-      {error: 'athleteId, goalEvent, and goalDate required'},
+      createAiErrorPayload(
+        'goal_fields_required',
+        'athleteId, goalEvent, and goalDate required',
+      ),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
 
   if (resolvedMode === 'adapt' && !adaptationType) {
     return NextResponse.json(
-      {error: 'adaptationType required in adapt mode'},
+      createAiErrorPayload(
+        'adaptation_type_required',
+        'adaptationType required in adapt mode',
+      ),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
@@ -241,7 +247,10 @@ export async function POST(req: Request) {
       const sourceBlock = sourceRows[0];
       if (!sourceBlock) {
         return NextResponse.json(
-          {error: 'No source training block found for adaptation'},
+          createAiErrorPayload(
+            'source_block_not_found',
+            'No source training block found for adaptation',
+          ),
           {status: 400, headers: {'x-trace-id': trace.traceId}},
         );
       }
@@ -695,7 +704,10 @@ ${injuriesText}
     });
     console.error('[TrainingBlock] Error:', error);
     return NextResponse.json(
-      {error: 'Failed to generate training block'},
+      createAiErrorPayload(
+        'generation_failed',
+        'Failed to generate training block',
+      ),
       {status: 500, headers: {'x-trace-id': trace.traceId}},
     );
   }

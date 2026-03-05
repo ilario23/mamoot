@@ -16,6 +16,7 @@ import {
   Footprints,
   Pencil,
   X,
+  AlertCircle,
 } from 'lucide-react';
 import {NeoLoader} from '@/components/ui/neo-loader';
 import {useTrainingBlock} from '@/hooks/useTrainingBlock';
@@ -444,6 +445,7 @@ const TrainingBlockView = () => {
     adaptBlock,
     activateBlock,
     deleteBlock,
+    lastError,
   } = useTrainingBlock(athleteId);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -520,6 +522,27 @@ const TrainingBlockView = () => {
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
         Training Block
       </h1>
+
+      {lastError && (
+        <div className="border-3 border-border bg-destructive/10 text-destructive shadow-neo-sm p-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-black">{lastError.error}</p>
+              {lastError.recoveryActions.length > 0 && (
+                <p className="text-xs font-medium">
+                  Try: {lastError.recoveryActions.join(' · ')}
+                </p>
+              )}
+              {lastError.traceId && (
+                <p className="text-[10px] font-bold uppercase tracking-wider">
+                  Trace: {lastError.traceId}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {!activeBlock && (
         <CreateBlockForm

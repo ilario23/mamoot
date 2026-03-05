@@ -76,6 +76,7 @@ import StreamingIndicator from '@/components/chat/StreamingIndicator';
 import SuggestionChips from '@/components/chat/SuggestionChips';
 import ToolCallChip from '@/components/chat/ToolCallChip';
 import type {SuggestFollowUpsInput} from '@/lib/aiTools';
+import {parseAiErrorFromUnknown} from '@/lib/aiErrors';
 
 // ----- Personas -----
 
@@ -722,6 +723,18 @@ const AITeamChat = () => {
 
   const isStreaming = activeChat.status === 'streaming';
   const hasError = activeChat.error;
+  const parsedChatError = useMemo(() => {
+    if (!activeChat.error) return null;
+    const rawMessage = activeChat.error.message;
+    if (!rawMessage) {
+      return parseAiErrorFromUnknown(null);
+    }
+    try {
+      return parseAiErrorFromUnknown(JSON.parse(rawMessage), rawMessage);
+    } catch {
+      return parseAiErrorFromUnknown({error: rawMessage}, rawMessage);
+    }
+  }, [activeChat.error]);
 
   const handleMessageFeedback = useCallback(
     async (messageId: string, rating: ChatFeedbackRating) => {
@@ -761,6 +774,9 @@ const AITeamChat = () => {
         sessionId: activeSession.id,
         messageId,
         persona: activePersona,
+        route: 'ai.chat',
+        model: selectedModel ?? null,
+        traceId: null,
         rating,
         reason,
         freeText,
@@ -771,7 +787,7 @@ const AITeamChat = () => {
       await neonSyncChatMessageFeedback(record);
       setFeedbackByMessageId((prev) => ({...prev, [messageId]: record}));
     },
-    [activeSession?.id, activePersona, athleteId],
+    [activeSession?.id, activePersona, athleteId, selectedModel],
   );
 
   // Extract follow-up suggestions from the last assistant message's tool parts
@@ -1320,12 +1336,20 @@ const AITeamChat = () => {
 
         {/* Error display */}
         {hasError && (
-          <div className='px-3 py-2 bg-destructive/10 border-t-3 border-border flex items-center gap-2 text-xs text-destructive font-medium'>
-            <AlertCircle className='h-3.5 w-3.5 shrink-0' />
-            <span className='truncate'>
-              {activeChat.error?.message ??
-                'Something went wrong. Please try again.'}
-            </span>
+          <div className='px-3 py-2 bg-destructive/10 border-t-3 border-border text-xs text-destructive font-medium space-y-1'>
+            <div className='flex items-center gap-2'>
+              <AlertCircle className='h-3.5 w-3.5 shrink-0' />
+              <span className='truncate'>
+                {parsedChatError?.error ??
+                  activeChat.error?.message ??
+                  'Something went wrong. Please try again.'}
+              </span>
+            </div>
+            {parsedChatError && parsedChatError.recoveryActions.length > 0 && (
+              <p className='text-[11px] font-medium pl-5'>
+                Try: {parsedChatError.recoveryActions.join(' · ')}
+              </p>
+            )}
           </div>
         )}
 

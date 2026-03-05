@@ -13,7 +13,7 @@
   - Standardized trace events and baseline payload fields across chat/weekly-plan/training-block flows.
   - Ensured `x-trace-id` coverage across success/error response paths in touched AI routes.
 
-## P1 — Next
+## P1 — Next (completed)
 
 - **Feedback dashboards** (`medium effort`, `medium/high impact`)
   - Slice by persona, route, reason code, and model to spot regressions.

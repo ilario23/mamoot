@@ -35,6 +35,7 @@ import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 import {chatRequestSchema} from '@/lib/aiRequestSchemas';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
+import {createAiErrorPayload} from '@/lib/aiErrors';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -88,19 +89,25 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({error: 'Invalid JSON body'}), {
+    return new Response(
+      JSON.stringify(
+        createAiErrorPayload('invalid_json_body', 'Invalid JSON body'),
+      ),
+      {
       status: 400,
       headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
-    });
+      },
+    );
   }
 
   const parsedBody = chatRequestSchema.safeParse(body);
   if (!parsedBody.success) {
     return new Response(
-      JSON.stringify({
-        error: 'Invalid request body',
-        issues: parsedBody.error.issues.map((issue) => issue.message),
-      }),
+      JSON.stringify(
+        createAiErrorPayload('invalid_request_body', 'Invalid request body', {
+          issues: parsedBody.error.issues.map((issue) => issue.message),
+        }),
+      ),
       {
         status: 400,
         headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
@@ -171,10 +178,12 @@ export async function POST(req: Request) {
   // Validate persona
   if (!persona || !isValidPersona(persona)) {
     return new Response(
-      JSON.stringify({
-        error:
+      JSON.stringify(
+        createAiErrorPayload(
+          'invalid_persona',
           'Invalid persona. Must be one of: coach, nutritionist, physio, orchestrator',
-      }),
+        ),
+      ),
       {
         status: 400,
         headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
@@ -184,10 +193,12 @@ export async function POST(req: Request) {
 
   if (persona === 'orchestrator' && !ORCHESTRATOR_ENABLED) {
     return new Response(
-      JSON.stringify({
-        error:
+      JSON.stringify(
+        createAiErrorPayload(
+          'orchestrator_disabled',
           'Orchestrator chat is currently disabled. Ask an admin to enable AI_ORCHESTRATOR_ENABLED.',
-      }),
+        ),
+      ),
       {
         status: 503,
         headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
@@ -198,9 +209,12 @@ export async function POST(req: Request) {
   // Validate messages
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
     return new Response(
-      JSON.stringify({
-        error: 'Messages array is required and must not be empty',
-      }),
+      JSON.stringify(
+        createAiErrorPayload(
+          'messages_required',
+          'Messages array is required and must not be empty',
+        ),
+      ),
       {
         status: 400,
         headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
@@ -210,12 +224,16 @@ export async function POST(req: Request) {
 
   if (persona === 'orchestrator' && (!athleteId || !sessionId)) {
     return new Response(
-      JSON.stringify({
-        error:
+      JSON.stringify(
+        createAiErrorPayload(
+          'orchestrator_context_required',
           'Orchestrator requires athleteId and sessionId to coordinate goals, blockers, and handoffs.',
-        clarification:
-          'Open an orchestrator conversation from AI Team and try again.',
-      }),
+          {
+            clarification:
+              'Open an orchestrator conversation from AI Team and try again.',
+          },
+        ),
+      ),
       {
         status: 400,
         headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
@@ -720,10 +738,18 @@ export async function POST(req: Request) {
       athleteId: athleteId ?? null,
       message: error instanceof Error ? error.message : 'unknown error',
     });
-    return new Response(JSON.stringify({error: 'Failed to process chat request'}), {
+    return new Response(
+      JSON.stringify(
+        createAiErrorPayload(
+          'generation_failed',
+          'Failed to process chat request',
+        ),
+      ),
+      {
       status: 500,
       headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
-    });
+      },
+    );
   }
 
   return result.toUIMessageStreamResponse({

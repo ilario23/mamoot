@@ -32,3 +32,4 @@ This contract defines pass/fail expectations for each chat persona in the runnin
 - Prompt assembly: `getSystemPrompt(...)` in `src/lib/aiPrompts.ts`
 - Persona validation + tool runtime: `app/api/ai/chat/route.ts`
 - Lightweight automated checks: `scripts/check-prompt-contracts.mjs`
+- Scenario regression checks: `scripts/check-prompt-scenarios.mjs` + `scripts/prompt-behavior-scenarios.json`

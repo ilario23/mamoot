@@ -41,6 +41,7 @@ import {
   validateCombinedWeekSemantics,
 } from '@/lib/planSemanticValidators';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
+import {createAiErrorPayload} from '@/lib/aiErrors';
 
 export const maxDuration = 120;
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
@@ -113,17 +114,16 @@ export async function POST(req: Request) {
     body = await req.json();
   } catch {
     return NextResponse.json(
-      {error: 'Invalid JSON body'},
+      createAiErrorPayload('invalid_json_body', 'Invalid JSON body'),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
   const parsedBody = weeklyPlanRequestSchema.safeParse(body);
   if (!parsedBody.success) {
     return NextResponse.json(
-      {
-        error: 'Invalid request body',
+      createAiErrorPayload('invalid_request_body', 'Invalid request body', {
         issues: parsedBody.error.issues.map((issue) => issue.message),
-      },
+      }),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
@@ -154,7 +154,7 @@ export async function POST(req: Request) {
 
   if (!athleteId) {
     return NextResponse.json(
-      {error: 'athleteId required'},
+      createAiErrorPayload('athlete_id_required', 'athleteId required'),
       {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
@@ -444,7 +444,10 @@ export async function POST(req: Request) {
 
       if (!sourcePlanForReplan) {
         return NextResponse.json(
-          {error: 'No source weekly plan found for remaining-days replan'},
+          createAiErrorPayload(
+            'source_plan_not_found',
+            'No source weekly plan found for remaining-days replan',
+          ),
           {status: 400, headers: {'x-trace-id': trace.traceId}},
         );
       }
@@ -790,7 +793,7 @@ export async function POST(req: Request) {
     });
     console.error('[WeeklyPlan] Error:', error);
     return NextResponse.json(
-      {error: 'Failed to generate weekly plan'},
+      createAiErrorPayload('generation_failed', 'Failed to generate weekly plan'),
       {status: 500, headers: {'x-trace-id': trace.traceId}},
     );
   }

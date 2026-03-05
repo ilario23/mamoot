@@ -10,6 +10,7 @@ import {
   neonDeleteTrainingBlock,
   neonActivateTrainingBlock,
 } from '@/lib/chatSync';
+import {type AiClientError, parseAiErrorFromUnknown} from '@/lib/aiErrors';
 
 export type TrainingBlock = CachedTrainingBlock;
 export type TrainingBlockAdaptationType =
@@ -52,12 +53,14 @@ export interface UseTrainingBlockResult {
   generateBlock: (options: GenerateTrainingBlockOptions) => Promise<TrainingBlock | null>;
   adaptBlock: (options: AdaptTrainingBlockOptions) => Promise<TrainingBlock | null>;
   refresh: () => Promise<void>;
+  lastError: AiClientError | null;
 }
 
 export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResult => {
   const [blocks, setBlocks] = useState<TrainingBlock[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [lastError, setLastError] = useState<AiClientError | null>(null);
   const hydratedRef = useRef(false);
 
   const activeBlock = blocks.find((b) => b.isActive) ?? null;
@@ -90,6 +93,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
     async (options: GenerateTrainingBlockOptions): Promise<TrainingBlock | null> => {
       if (!athleteId) return null;
       setIsGenerating(true);
+      setLastError(null);
 
       try {
         const res = await fetch('/api/ai/training-block', {
@@ -107,7 +111,28 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
         });
 
         if (!res.ok) {
-          console.error('[useTrainingBlock] Generation failed:', res.status);
+          const traceId = res.headers.get('x-trace-id');
+          let responseBody: unknown = null;
+          try {
+            responseBody = await res.json();
+          } catch {
+            responseBody = null;
+          }
+          const parsed = parseAiErrorFromUnknown(
+            responseBody,
+            'Failed to generate training block',
+          );
+          const nextError: AiClientError = {
+            ...parsed,
+            status: res.status,
+            traceId,
+          };
+          setLastError(nextError);
+          console.error(
+            '[useTrainingBlock] Generation failed:',
+            res.status,
+            nextError,
+          );
           return null;
         }
 
@@ -131,9 +156,15 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
           return [newBlock, ...deactivated];
         });
 
+        setLastError(null);
         return newBlock;
       } catch (err) {
         console.error('[useTrainingBlock] Generation error:', err);
+        setLastError({
+          ...parseAiErrorFromUnknown(null, 'Failed to generate training block'),
+          status: 0,
+          traceId: null,
+        });
         return null;
       } finally {
         setIsGenerating(false);
@@ -146,6 +177,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
     async (options: AdaptTrainingBlockOptions): Promise<TrainingBlock | null> => {
       if (!athleteId) return null;
       setIsGenerating(true);
+      setLastError(null);
 
       try {
         const res = await fetch('/api/ai/training-block', {
@@ -159,7 +191,28 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
         });
 
         if (!res.ok) {
-          console.error('[useTrainingBlock] Adaptation failed:', res.status);
+          const traceId = res.headers.get('x-trace-id');
+          let responseBody: unknown = null;
+          try {
+            responseBody = await res.json();
+          } catch {
+            responseBody = null;
+          }
+          const parsed = parseAiErrorFromUnknown(
+            responseBody,
+            'Failed to adapt training block',
+          );
+          const nextError: AiClientError = {
+            ...parsed,
+            status: res.status,
+            traceId,
+          };
+          setLastError(nextError);
+          console.error(
+            '[useTrainingBlock] Adaptation failed:',
+            res.status,
+            nextError,
+          );
           return null;
         }
 
@@ -183,9 +236,15 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
           return [newBlock, ...deactivated];
         });
 
+        setLastError(null);
         return newBlock;
       } catch (err) {
         console.error('[useTrainingBlock] Adaptation error:', err);
+        setLastError({
+          ...parseAiErrorFromUnknown(null, 'Failed to adapt training block'),
+          status: 0,
+          traceId: null,
+        });
         return null;
       } finally {
         setIsGenerating(false);
@@ -236,5 +295,16 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
     await loadBlocks();
   }, [loadBlocks]);
 
-  return {blocks, activeBlock, activateBlock, deleteBlock, isLoading, isGenerating, generateBlock, adaptBlock, refresh};
+  return {
+    blocks,
+    activeBlock,
+    activateBlock,
+    deleteBlock,
+    isLoading,
+    isGenerating,
+    generateBlock,
+    adaptBlock,
+    refresh,
+    lastError,
+  };
 };

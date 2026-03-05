@@ -185,6 +185,12 @@ export interface CachedChatMessageFeedback {
   messageId: string;
   /** Persona used when this response was produced */
   persona: string;
+  /** Route that produced the response, e.g. "ai.chat" */
+  route: string | null;
+  /** Model used to produce the response */
+  model: string | null;
+  /** Optional trace correlation ID from AI response headers */
+  traceId: string | null;
   /** "helpful" or "not_helpful" */
   rating: ChatFeedbackRating;
   /** Short taxonomy code */

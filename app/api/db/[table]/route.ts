@@ -77,6 +77,16 @@ const validateChatMessageFeedbackRecord = (
     typeof r.rating === 'string' ? (r.rating as ChatFeedbackRating) : null;
   const reason =
     r.reason == null ? null : typeof r.reason === 'string' ? r.reason : null;
+  const route =
+    r.route == null ? null : typeof r.route === 'string' ? r.route : null;
+  const model =
+    r.model == null ? null : typeof r.model === 'string' ? r.model : null;
+  const traceId =
+    r.traceId == null
+      ? null
+      : typeof r.traceId === 'string'
+        ? r.traceId
+        : null;
 
   if (!id || !sessionId || !messageId) {
     return {
@@ -106,6 +116,18 @@ const validateChatMessageFeedbackRecord = (
       message:
         'reason must be one of: helpful, unsafe, too_generic, not_actionable, wrong_context, other',
     };
+  }
+
+  if (r.route !== undefined && route === null) {
+    return {valid: false, message: 'route must be a string when provided'};
+  }
+
+  if (r.model !== undefined && model === null) {
+    return {valid: false, message: 'model must be a string when provided'};
+  }
+
+  if (r.traceId !== undefined && traceId === null) {
+    return {valid: false, message: 'traceId must be a string when provided'};
   }
 
   if (rating === 'helpful') {
@@ -969,6 +991,9 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .onConflictDoUpdate({
             target: chatMessageFeedback.id,
             set: {
+              route: sql`excluded.route`,
+              model: sql`excluded.model`,
+              traceId: sql`excluded.trace_id`,
               rating: sql`excluded.rating`,
               reason: sql`excluded.reason`,
               freeText: sql`excluded.free_text`,
