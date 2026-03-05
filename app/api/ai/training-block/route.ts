@@ -177,6 +177,13 @@ export async function POST(req: Request) {
 
   const resolvedMode = mode ?? 'create';
   const model = getModel(clientModel);
+  const resolvedModel =
+    clientModel && ALLOWED_MODELS[clientModel]
+      ? clientModel
+      : (process.env.AI_MODEL ??
+        (process.env.AI_PROVIDER === 'anthropic'
+          ? 'claude-sonnet-4-5'
+          : 'gpt-4o-mini'));
 
   if (resolvedMode === 'create' && (!goalEvent || !goalDate)) {
     return NextResponse.json(
@@ -195,7 +202,9 @@ export async function POST(req: Request) {
   logAiTrace(trace, 'request_received', {
     athleteId,
     mode: resolvedMode,
-    model: clientModel ?? null,
+    model: resolvedModel,
+    persona: 'pipeline',
+    sessionId: null,
   });
 
   console.log(`\n[TrainingBlock] ========== Generating Block ==========`);
@@ -407,9 +416,15 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         );
 
       logAiTrace(trace, 'request_finished', {
+        athleteId,
+        model: resolvedModel,
+        persona: 'pipeline',
+        sessionId: null,
         blockId,
         mode: resolvedMode,
         totalWeeks: sourceBlock.totalWeeks,
+        inputTokens: null,
+        outputTokens: null,
       });
       return NextResponse.json({
         id: blockId,
@@ -636,9 +651,15 @@ ${injuriesText}
     console.log(`[TrainingBlock] Block saved: ${blockId}`);
     console.log(`[TrainingBlock] ========================================\n`);
     logAiTrace(trace, 'request_finished', {
+      athleteId,
+      model: resolvedModel,
+      persona: 'pipeline',
+      sessionId: null,
       blockId,
       mode: resolvedMode,
       totalWeeks,
+      inputTokens: null,
+      outputTokens: null,
     });
 
     return NextResponse.json({
@@ -656,7 +677,13 @@ ${injuriesText}
     }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {
     logAiTrace(trace, 'request_failed', {
+      athleteId,
+      model: resolvedModel,
+      persona: 'pipeline',
+      sessionId: null,
       message: error instanceof Error ? error.message : 'unknown error',
+      inputTokens: null,
+      outputTokens: null,
     });
     console.error('[TrainingBlock] Error:', error);
     return NextResponse.json(

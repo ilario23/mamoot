@@ -92,6 +92,13 @@
       "when": 1772749800000,
       "tag": "0012_orchestrator_state",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1772753400000,
+      "tag": "0013_multi_user_athlete_scope",
+      "breakpoints": true
     }
   ]
 }

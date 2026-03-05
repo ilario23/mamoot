@@ -1,15 +1,17 @@
 # AI Improvement Backlog (Impact x Effort)
 
-## P0 — Do now
+## P0 — Do now (completed)
 
-- **Persona contract checks** (`low effort`, `high impact`)
-  - Keep `scripts/check-prompt-contracts.mjs` in CI/pre-release checks.
-- **Validation retry + semantic post-checks** (`medium effort`, `high impact`)
-  - Weekly plan and training block generation now retry once on schema/semantic failure.
-- **Message-level feedback capture** (`medium effort`, `high impact`)
-  - Track thumbs up/down + short reason taxonomy for assistant messages.
-- **Trace correlation baseline** (`medium effort`, `high impact`)
-  - Standardized trace events, prompt hash, tool counts, usage, latency.
+- **Persona contract checks** (`low effort`, `high impact`) - ✅ done
+  - `scripts/check-prompt-contracts.mjs` remains in CI/pre-release checks (`npm run test:ai-gates` via `.github/workflows/ai-quality-gates.yml`).
+- **Validation retry + semantic post-checks** (`medium effort`, `high impact`) - ✅ done
+  - Weekly plan and training block generation retry once on schema/semantic failure (`generateObjectWithRetry` + route integrations).
+- **Message-level feedback capture** (`medium effort`, `high impact`) - ✅ done
+  - Added strict server-side feedback validation (rating/reason taxonomy + consistency) and kept message-level thumbs up/down capture.
+  - Added feedback lifecycle cleanup when deleting chat sessions (prevents orphaned feedback rows).
+- **Trace correlation baseline** (`medium effort`, `high impact`) - ✅ done
+  - Standardized trace events and baseline payload fields across chat/weekly-plan/training-block flows.
+  - Ensured `x-trace-id` coverage across success/error response paths in touched AI routes.
 
 ## P1 — Next
 

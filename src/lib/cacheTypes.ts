@@ -21,6 +21,8 @@ import type {
 export interface CachedActivity {
   /** Strava activity ID (primary key) */
   id: number;
+  /** Strava athlete ID that owns this row */
+  athleteId: number;
   /** Full raw Strava summary payload */
   data: StravaSummaryActivity;
   /** ISO date string derived from start_date_local for indexing */
@@ -32,6 +34,8 @@ export interface CachedActivity {
 export interface CachedActivityDetail {
   /** Strava activity ID (primary key) */
   id: number;
+  /** Strava athlete ID that owns this row */
+  athleteId: number;
   /** Full raw Strava detailed activity payload */
   data: StravaDetailedActivity;
   /** Unix ms timestamp */
@@ -41,6 +45,8 @@ export interface CachedActivityDetail {
 export interface CachedActivityStreams {
   /** Strava activity ID (primary key) */
   activityId: number;
+  /** Strava athlete ID that owns this row */
+  athleteId: number;
   /** Full raw streams (array or keyed object from older cached entries) */
   data: StravaStream[] | StravaStreamSet;
   /** Unix ms timestamp */
@@ -57,8 +63,10 @@ export interface CachedAthleteStats {
 }
 
 export interface CachedAthleteZones {
-  /** Static key — we only store one zones record per athlete */
+  /** Athlete-scoped key: athlete-zones:{athleteId} */
   key: string;
+  /** Strava athlete ID that owns this row */
+  athleteId: number;
   /** Full raw zones payload */
   data: StravaAthleteZones;
   /** Unix ms timestamp */
@@ -66,8 +74,10 @@ export interface CachedAthleteZones {
 }
 
 export interface CachedAthleteGear {
-  /** Static key — one gear record per athlete */
+  /** Athlete-scoped key: athlete-gear:{athleteId} */
   key: string;
+  /** Strava athlete ID that owns this row */
+  athleteId: number;
   /** Bikes and shoes arrays from the athlete profile */
   bikes: StravaSummaryGear[];
   shoes: StravaSummaryGear[];
@@ -80,6 +90,8 @@ export interface CachedAthleteGear {
 export interface CachedZoneBreakdown {
   /** Strava activity ID (primary key) */
   activityId: number;
+  /** Strava athlete ID that owns this row */
+  athleteId: number;
   /** Hash of zone settings used for computation — invalidates on settings change */
   settingsHash: string;
   /** Per-zone time (seconds) and distance (km) */
@@ -190,6 +202,8 @@ export interface CachedChatMessageFeedback {
 export interface CachedActivityLabel {
   /** Strava activity ID (primary key) */
   id: number;
+  /** Strava athlete ID that owns this row */
+  athleteId: number;
   /** Structured workout label produced by the rule-based classifier */
   label: import('./workoutLabel').WorkoutLabel;
   /** Unix ms timestamp of when this label was computed */

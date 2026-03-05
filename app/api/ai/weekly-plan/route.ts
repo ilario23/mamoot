@@ -152,12 +152,6 @@ export async function POST(req: Request) {
     optimizationPriority,
   } = parsedData;
 
-  logAiTrace(trace, 'request_received', {
-    athleteId,
-    mode: generationMode ?? 'full',
-    model: clientModel ?? null,
-  });
-
   if (!athleteId) {
     return NextResponse.json(
       {error: 'athleteId required'},
@@ -168,6 +162,21 @@ export async function POST(req: Request) {
   const mode = generationMode ?? 'full';
   const todayIso = today ?? new Date().toISOString().slice(0, 10);
   const model = getModel(clientModel);
+  const resolvedModel =
+    clientModel && ALLOWED_MODELS[clientModel]
+      ? clientModel
+      : (process.env.AI_MODEL ??
+        (process.env.AI_PROVIDER === 'anthropic'
+          ? 'claude-sonnet-4-5'
+          : 'gpt-4o-mini'));
+
+  logAiTrace(trace, 'request_received', {
+    athleteId,
+    mode: generationMode ?? 'full',
+    model: resolvedModel,
+    persona: 'pipeline',
+    sessionId: null,
+  });
 
   try {
     // Step 1: Load context
@@ -431,7 +440,7 @@ export async function POST(req: Request) {
       if (!sourcePlanForReplan) {
         return NextResponse.json(
           {error: 'No source weekly plan found for remaining-days replan'},
-          {status: 400},
+          {status: 400, headers: {'x-trace-id': trace.traceId}},
         );
       }
 
@@ -738,10 +747,16 @@ export async function POST(req: Request) {
     console.log(`[WeeklyPlan] Plan saved: ${planId}`);
     console.log(`[WeeklyPlan] ========================================\n`);
     logAiTrace(trace, 'request_finished', {
+      athleteId,
+      model: resolvedModel,
+      persona: 'pipeline',
+      sessionId: null,
       planId,
       weekStart,
       sessionCount: unifiedSessions.length,
       mode,
+      inputTokens: null,
+      outputTokens: null,
     });
 
     return NextResponse.json({
@@ -760,7 +775,13 @@ export async function POST(req: Request) {
     }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {
     logAiTrace(trace, 'request_failed', {
+      athleteId,
+      model: resolvedModel,
+      persona: 'pipeline',
+      sessionId: null,
       message: error instanceof Error ? error.message : 'unknown error',
+      inputTokens: null,
+      outputTokens: null,
     });
     console.error('[WeeklyPlan] Error:', error);
     return NextResponse.json(

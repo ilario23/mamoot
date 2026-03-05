@@ -94,12 +94,13 @@ const isFresh = (fetchedAt: number, maxAge: number): boolean => {
  *                   history is available for other views.
  */
 export const cachedGetAllActivities = async (
+  athleteId: number,
   afterDate?: string,
 ): Promise<ActivitySummary[]> => {
   // ── Tier 1: Neon (persistent, multi-device) ──
   const neonData = afterDate
-    ? await neonGetRecentActivities(afterDate)
-    : await neonGetActivities();
+    ? await neonGetRecentActivities(athleteId, afterDate)
+    : await neonGetActivities(athleteId);
 
   if (neonData && neonData.length > 0) {
     const newestNeon = neonData.reduce((a, b) =>
@@ -120,6 +121,7 @@ export const cachedGetAllActivities = async (
 
   const records = raw.map((activity) => ({
     id: activity.id,
+    athleteId,
     data: activity,
     date: activity.start_date_local.split('T')[0],
     fetchedAt: now,
@@ -145,10 +147,11 @@ export const cachedGetAllActivities = async (
  * initial render while the full dataset loads via cachedGetAllActivities.
  */
 export const cachedGetActivitiesPage = async (
+  athleteId: number,
   limit: number,
   offset = 0,
 ): Promise<ActivitySummary[]> => {
-  const neonData = await neonGetActivitiesPaginated(limit, offset);
+  const neonData = await neonGetActivitiesPaginated(athleteId, limit, offset);
   if (!neonData || neonData.length === 0) return [];
   return neonData.map((record) => transformActivity(record.data));
 };
@@ -161,10 +164,11 @@ export const cachedGetActivitiesPage = async (
  * Historical activities never change, so once cached they stay forever.
  */
 export const cachedGetActivityDetail = async (
+  athleteId: number,
   activityId: number,
 ): Promise<StravaDetailedActivity> => {
   // ── Tier 1: Neon ──
-  const neonData = await neonGetActivityDetail(activityId);
+  const neonData = await neonGetActivityDetail(athleteId, activityId);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.activityDetail)) {
     return neonData.data;
@@ -172,7 +176,7 @@ export const cachedGetActivityDetail = async (
 
   // ── Tier 2: Strava API ──
   const detail = await fetchActivityDetail(activityId);
-  const record = {id: activityId, data: detail, fetchedAt: Date.now()};
+  const record = {id: activityId, athleteId, data: detail, fetchedAt: Date.now()};
 
   await neonSyncActivityDetail(record);
 
@@ -187,10 +191,11 @@ export const cachedGetActivityDetail = async (
  * Streams never change for historical activities.
  */
 export const cachedGetActivityStreams = async (
+  athleteId: number,
   activityId: number,
 ): Promise<StreamPoint[]> => {
   // ── Tier 1: Neon ──
-  const neonData = await neonGetActivityStreams(activityId);
+  const neonData = await neonGetActivityStreams(athleteId, activityId);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.activityStreams)) {
     return transformStreams(neonData.data);
@@ -198,7 +203,7 @@ export const cachedGetActivityStreams = async (
 
   // ── Tier 2: Strava API ──
   const raw = await fetchActivityStreams(activityId);
-  const record = {activityId, data: raw, fetchedAt: Date.now()};
+  const record = {activityId, athleteId, data: raw, fetchedAt: Date.now()};
 
   await neonSyncActivityStreams(record);
 
@@ -236,11 +241,13 @@ export const cachedGetAthleteStats = async (
  * Returns heart rate (and optionally power) zones.
  * Two-tier: Neon → Strava API. Refetch after 24 hours.
  */
-export const cachedGetAthleteZones = async (): Promise<StravaAthleteZones> => {
-  const ZONES_KEY = 'athlete-zones';
+export const cachedGetAthleteZones = async (
+  athleteId: number,
+): Promise<StravaAthleteZones> => {
+  const ZONES_KEY = `athlete-zones:${athleteId}`;
 
   // ── Tier 1: Neon ──
-  const neonData = await neonGetAthleteZones(ZONES_KEY);
+  const neonData = await neonGetAthleteZones(athleteId);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.athleteZones)) {
     return neonData.data;
@@ -248,7 +255,7 @@ export const cachedGetAthleteZones = async (): Promise<StravaAthleteZones> => {
 
   // ── Tier 2: Strava API ──
   const zones = await fetchAthleteZones();
-  const record = {key: ZONES_KEY, data: zones, fetchedAt: Date.now()};
+  const record = {key: ZONES_KEY, athleteId, data: zones, fetchedAt: Date.now()};
 
   await neonSyncAthleteZones(record);
 
@@ -261,15 +268,15 @@ export const cachedGetAthleteZones = async (): Promise<StravaAthleteZones> => {
  * Returns athlete's bikes and shoes, fetched from GET /athlete.
  * Two-tier: Neon → Strava API. Refetch after 1 hour.
  */
-export const cachedGetAthleteGear = async (): Promise<{
+export const cachedGetAthleteGear = async (athleteId: number): Promise<{
   bikes: StravaSummaryGear[];
   shoes: StravaSummaryGear[];
   retiredGearIds: string[];
 }> => {
-  const GEAR_KEY = 'athlete-gear';
+  const GEAR_KEY = `athlete-gear:${athleteId}`;
 
   // ── Tier 1: Neon ──
-  const neonData = await neonGetAthleteGear(GEAR_KEY);
+  const neonData = await neonGetAthleteGear(athleteId);
 
   if (neonData && isFresh(neonData.fetchedAt, STALE.athleteGear)) {
     // Ensure retiredGearIds is populated (backward compat with old records)
@@ -289,6 +296,7 @@ export const cachedGetAthleteGear = async (): Promise<{
   const shoes = profile.shoes ?? [];
   const record = {
     key: GEAR_KEY,
+    athleteId,
     bikes,
     shoes,
     retiredGearIds: existingRetiredIds,
@@ -315,13 +323,14 @@ export const cachedGetAthleteGear = async (): Promise<{
  * Checks settingsHash to invalidate on zone config changes.
  */
 export const cachedGetZoneBreakdown = async (
+  athleteId: number,
   activityId: number,
   zones: UserSettings['zones'],
 ): Promise<ZoneBreakdown> => {
   const currentHash = hashZoneSettings(zones);
 
   // ── Tier 1: Neon ──
-  const neonData = await neonGetZoneBreakdown(activityId);
+  const neonData = await neonGetZoneBreakdown(athleteId, activityId);
 
   if (neonData && neonData.settingsHash === currentHash) {
     return {zones: neonData.zones, settingsHash: neonData.settingsHash};
@@ -332,6 +341,7 @@ export const cachedGetZoneBreakdown = async (
   const breakdown = computeZoneBreakdown(stream, zones);
   const record = {
     activityId,
+    athleteId,
     settingsHash: breakdown.settingsHash,
     zones: breakdown.zones,
     computedAt: Date.now(),
@@ -362,6 +372,7 @@ const inflight = new Map<string, Promise<Map<number, ZoneBreakdown>>>();
  *   3. Only compute (fetch streams + calculate) for missing/stale entries
  */
 export const batchGetZoneBreakdowns = async (
+  athleteId: number,
   activityIds: number[],
   zones: UserSettings['zones'],
   onProgress?: (done: number, total: number) => void,
@@ -379,6 +390,7 @@ export const batchGetZoneBreakdowns = async (
   }
 
   const promise = batchGetZoneBreakdownsInternal(
+    athleteId,
     activityIds,
     zones,
     onProgress,
@@ -393,6 +405,7 @@ export const batchGetZoneBreakdowns = async (
 };
 
 const batchGetZoneBreakdownsInternal = async (
+  athleteId: number,
   activityIds: number[],
   zones: UserSettings['zones'],
   onProgress?: (done: number, total: number) => void,
@@ -402,7 +415,7 @@ const batchGetZoneBreakdownsInternal = async (
   const currentHash = hashZoneSettings(zones);
 
   // ── Step 1: Bulk-fetch all zone breakdowns from Neon in one request ──
-  const cachedBreakdowns = await neonGetZoneBreakdownsBulk(activityIds);
+  const cachedBreakdowns = await neonGetZoneBreakdownsBulk(athleteId, activityIds);
   const cachedMap = new Map(
     cachedBreakdowns.map((b) => [b.activityId, b]),
   );
@@ -426,7 +439,7 @@ const batchGetZoneBreakdownsInternal = async (
   if (missingIds.length === 0) return results;
 
   // ── Step 3: Bulk-fetch cached streams from Neon for all missing IDs ──
-  const cachedStreams = await neonGetActivityStreamsBulk(missingIds);
+  const cachedStreams = await neonGetActivityStreamsBulk(athleteId, missingIds);
   const streamMap = new Map(
     cachedStreams.map((s) => [s.activityId, s]),
   );
@@ -447,12 +460,13 @@ const batchGetZoneBreakdownsInternal = async (
         if (cachedStream) {
           stream = transformStreams(cachedStream.data);
         } else {
-          stream = await cachedGetActivityStreams(id);
+          stream = await cachedGetActivityStreams(athleteId, id);
         }
 
         const breakdown = computeZoneBreakdown(stream, zones);
         const record = {
           activityId: id,
+          athleteId,
           settingsHash: breakdown.settingsHash,
           zones: breakdown.zones,
           computedAt: Date.now(),
@@ -623,12 +637,15 @@ export const cachedCalcFitnessData = async (
  * Force-refresh all activities from the API, ignoring cache freshness.
  * Writes to Neon. Useful for a manual "sync" button.
  */
-export const forceRefreshActivities = async (): Promise<ActivitySummary[]> => {
+export const forceRefreshActivities = async (
+  athleteId: number,
+): Promise<ActivitySummary[]> => {
   const raw = await fetchAllActivities();
   const now = Date.now();
 
   const records = raw.map((activity) => ({
     id: activity.id,
+    athleteId,
     data: activity,
     date: activity.start_date_local.split('T')[0],
     fetchedAt: now,

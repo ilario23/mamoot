@@ -33,6 +33,101 @@ import {eq, and, sql, desc, inArray, gte, isNull} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
 
 type RouteContext = {params: Promise<{table: string}>};
+type ChatFeedbackRating = 'helpful' | 'not_helpful';
+type ChatFeedbackReason =
+  | 'helpful'
+  | 'unsafe'
+  | 'too_generic'
+  | 'not_actionable'
+  | 'wrong_context'
+  | 'other';
+
+const CHAT_FEEDBACK_RATINGS = new Set<ChatFeedbackRating>([
+  'helpful',
+  'not_helpful',
+]);
+const CHAT_FEEDBACK_REASONS = new Set<ChatFeedbackReason>([
+  'helpful',
+  'unsafe',
+  'too_generic',
+  'not_actionable',
+  'wrong_context',
+  'other',
+]);
+const NEGATIVE_CHAT_FEEDBACK_REASONS = new Set<ChatFeedbackReason>([
+  'unsafe',
+  'too_generic',
+  'not_actionable',
+  'wrong_context',
+  'other',
+]);
+
+const validateChatMessageFeedbackRecord = (
+  record: unknown,
+): {valid: true} | {valid: false; message: string} => {
+  if (!record || typeof record !== 'object') {
+    return {valid: false, message: 'Each feedback record must be an object'};
+  }
+
+  const r = record as Record<string, unknown>;
+  const id = typeof r.id === 'string' ? r.id : null;
+  const sessionId = typeof r.sessionId === 'string' ? r.sessionId : null;
+  const messageId = typeof r.messageId === 'string' ? r.messageId : null;
+  const rating =
+    typeof r.rating === 'string' ? (r.rating as ChatFeedbackRating) : null;
+  const reason =
+    r.reason == null ? null : typeof r.reason === 'string' ? r.reason : null;
+
+  if (!id || !sessionId || !messageId) {
+    return {
+      valid: false,
+      message: 'chat-message-feedback requires id, sessionId, and messageId',
+    };
+  }
+
+  const expectedId = `${sessionId}:${messageId}`;
+  if (id !== expectedId) {
+    return {
+      valid: false,
+      message: `Feedback id must match session/message composite id (${expectedId})`,
+    };
+  }
+
+  if (!rating || !CHAT_FEEDBACK_RATINGS.has(rating)) {
+    return {
+      valid: false,
+      message: 'rating must be one of: helpful, not_helpful',
+    };
+  }
+
+  if (reason !== null && !CHAT_FEEDBACK_REASONS.has(reason as ChatFeedbackReason)) {
+    return {
+      valid: false,
+      message:
+        'reason must be one of: helpful, unsafe, too_generic, not_actionable, wrong_context, other',
+    };
+  }
+
+  if (rating === 'helpful') {
+    if (reason !== null && reason !== 'helpful') {
+      return {
+        valid: false,
+        message: 'helpful rating cannot use a negative reason',
+      };
+    }
+    return {valid: true};
+  }
+
+  if (!reason || !NEGATIVE_CHAT_FEEDBACK_REASONS.has(reason as ChatFeedbackReason)) {
+    return {
+      valid: false,
+      message:
+        'not_helpful rating requires one of: unsafe, too_generic, not_actionable, wrong_context, other',
+    };
+  }
+
+  return {valid: true};
+};
 
 // ---- GET — Read records from Neon ----
 // Usage: GET /api/db/activities          → all activities
@@ -770,6 +865,15 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
         break;
 
       case 'chat-message-feedback':
+        for (const record of records) {
+          const validation = validateChatMessageFeedbackRecord(record);
+          if (!validation.valid) {
+            return NextResponse.json(
+              {error: validation.message},
+              {status: 400},
+            );
+          }
+        }
         await db
           .insert(chatMessageFeedback)
           .values(records)
@@ -1117,6 +1221,10 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         const sessionId = req.nextUrl.searchParams.get('id');
         if (!sessionId)
           return NextResponse.json({error: 'id required'}, {status: 400});
+        // Delete feedback records linked to this session
+        await db
+          .delete(chatMessageFeedback)
+          .where(eq(chatMessageFeedback.sessionId, sessionId));
         // Delete messages belonging to this session
         await db
           .delete(chatMessages)

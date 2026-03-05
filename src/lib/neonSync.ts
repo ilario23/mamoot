@@ -60,18 +60,23 @@ const getFromNeon = async <T>(
 
 // ---- Activities (bulk) ----
 
-export const neonGetActivities = async (): Promise<CachedActivity[] | null> =>
-  getFromNeon<CachedActivity[]>('activities');
+export const neonGetActivities = async (
+  athleteId: number,
+): Promise<CachedActivity[] | null> =>
+  getFromNeon<CachedActivity[]>(`activities?athleteId=${athleteId}`);
 
 /**
  * Fetch activities from Neon with an optional date filter.
  * @param afterDate  YYYY-MM-DD string — only activities on or after this date
  */
 export const neonGetRecentActivities = async (
+  athleteId: number,
   afterDate: string,
 ): Promise<CachedActivity[] | null> => {
   try {
-    const res = await fetch(`${API}/activities?after=${afterDate}`);
+    const res = await fetch(
+      `${API}/activities?athleteId=${athleteId}&after=${afterDate}`,
+    );
     if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data) && data.length === 0) return null;
@@ -86,11 +91,14 @@ export const neonGetRecentActivities = async (
  * Bypasses staleness checks — returns whatever is cached.
  */
 export const neonGetActivitiesPaginated = async (
+  athleteId: number,
   limit: number,
   offset = 0,
 ): Promise<CachedActivity[] | null> => {
   try {
-    const res = await fetch(`${API}/activities?limit=${limit}&offset=${offset}`);
+    const res = await fetch(
+      `${API}/activities?athleteId=${athleteId}&limit=${limit}&offset=${offset}`,
+    );
     if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data) && data.length === 0) return null;
@@ -109,9 +117,12 @@ export const neonSyncActivities = async (
 // ---- Activity Details (single) ----
 
 export const neonGetActivityDetail = async (
+  athleteId: number,
   id: number,
 ): Promise<CachedActivityDetail | null> =>
-  getFromNeon<CachedActivityDetail>('activity-details', id);
+  getFromNeon<CachedActivityDetail>(
+    `activity-details?athleteId=${athleteId}&pk=${id}`,
+  );
 
 export const neonSyncActivityDetail = async (
   record: CachedActivityDetail,
@@ -129,6 +140,7 @@ const BULK_CHUNK_SIZE = 200;
  * Returns whatever Neon has — callers handle missing IDs.
  */
 export const neonGetActivityDetailsBulk = async (
+  athleteId: number,
   ids: number[],
 ): Promise<CachedActivityDetail[]> => {
   if (ids.length === 0) return [];
@@ -139,7 +151,9 @@ export const neonGetActivityDetailsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(`${API}/activity-details?pks=${pks}`);
+      const res = await fetch(
+        `${API}/activity-details?athleteId=${athleteId}&pks=${pks}`,
+      );
       if (!res.ok) continue;
       const data: CachedActivityDetail[] = await res.json();
       if (Array.isArray(data)) results.push(...data);
@@ -166,6 +180,7 @@ export const neonSyncActivityDetailsBulk = async (
 
 /** Fetch multiple activity labels from Neon in one (or few) round-trips. */
 export const neonGetActivityLabelsBulk = async (
+  athleteId: number,
   ids: number[],
 ): Promise<CachedActivityLabel[]> => {
   if (ids.length === 0) return [];
@@ -176,7 +191,9 @@ export const neonGetActivityLabelsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(`${API}/activity-labels?pks=${pks}`);
+      const res = await fetch(
+        `${API}/activity-labels?athleteId=${athleteId}&pks=${pks}`,
+      );
       if (!res.ok) continue;
       const data: CachedActivityLabel[] = await res.json();
       if (Array.isArray(data)) results.push(...data);
@@ -206,9 +223,12 @@ export const neonSyncActivityLabel = async (
 // ---- Activity Streams (single) ----
 
 export const neonGetActivityStreams = async (
+  athleteId: number,
   activityId: number,
 ): Promise<CachedActivityStreams | null> =>
-  getFromNeon<CachedActivityStreams>('activity-streams', activityId);
+  getFromNeon<CachedActivityStreams>(
+    `activity-streams?athleteId=${athleteId}&pk=${activityId}`,
+  );
 
 export const neonSyncActivityStreams = async (
   record: CachedActivityStreams,
@@ -223,6 +243,7 @@ export const neonSyncActivityStreams = async (
  * Returns whatever Neon has — callers handle missing IDs.
  */
 export const neonGetActivityStreamsBulk = async (
+  athleteId: number,
   ids: number[],
 ): Promise<CachedActivityStreams[]> => {
   if (ids.length === 0) return [];
@@ -233,7 +254,9 @@ export const neonGetActivityStreamsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(`${API}/activity-streams?pks=${pks}`);
+      const res = await fetch(
+        `${API}/activity-streams?athleteId=${athleteId}&pks=${pks}`,
+      );
       if (!res.ok) continue;
       const data: CachedActivityStreams[] = await res.json();
       if (Array.isArray(data)) results.push(...data);
@@ -261,9 +284,9 @@ export const neonSyncAthleteStats = async (
 // ---- Athlete Zones (single by key) ----
 
 export const neonGetAthleteZones = async (
-  key: string,
+  athleteId: number,
 ): Promise<CachedAthleteZones | null> =>
-  getFromNeon<CachedAthleteZones>('athlete-zones', key);
+  getFromNeon<CachedAthleteZones>(`athlete-zones?athleteId=${athleteId}`);
 
 export const neonSyncAthleteZones = async (
   record: CachedAthleteZones,
@@ -274,9 +297,9 @@ export const neonSyncAthleteZones = async (
 // ---- Athlete Gear (single by key) ----
 
 export const neonGetAthleteGear = async (
-  key: string,
+  athleteId: number,
 ): Promise<CachedAthleteGear | null> =>
-  getFromNeon<CachedAthleteGear>('athlete-gear', key);
+  getFromNeon<CachedAthleteGear>(`athlete-gear?athleteId=${athleteId}`);
 
 export const neonSyncAthleteGear = async (
   record: CachedAthleteGear,
@@ -287,9 +310,12 @@ export const neonSyncAthleteGear = async (
 // ---- Zone Breakdowns (single) ----
 
 export const neonGetZoneBreakdown = async (
+  athleteId: number,
   activityId: number,
 ): Promise<CachedZoneBreakdown | null> =>
-  getFromNeon<CachedZoneBreakdown>('zone-breakdowns', activityId);
+  getFromNeon<CachedZoneBreakdown>(
+    `zone-breakdowns?athleteId=${athleteId}&pk=${activityId}`,
+  );
 
 export const neonSyncZoneBreakdown = async (
   record: CachedZoneBreakdown,
@@ -299,12 +325,12 @@ export const neonSyncZoneBreakdown = async (
 
 // ---- Zone Breakdowns (bulk) ----
 
-/** Fetch all zone breakdowns from Neon. */
-export const neonGetAllZoneBreakdowns = async (): Promise<
-  CachedZoneBreakdown[]
-> => {
+/** Fetch all zone breakdowns from Neon for one athlete. */
+export const neonGetAllZoneBreakdowns = async (
+  athleteId: number,
+): Promise<CachedZoneBreakdown[]> => {
   try {
-    const res = await fetch(`${API}/zone-breakdowns`);
+    const res = await fetch(`${API}/zone-breakdowns?athleteId=${athleteId}`);
     if (!res.ok) return [];
     const data: CachedZoneBreakdown[] = await res.json();
     return Array.isArray(data) ? data : [];
@@ -318,6 +344,7 @@ export const neonGetAllZoneBreakdowns = async (): Promise<
  * Returns whatever Neon has — callers handle missing IDs.
  */
 export const neonGetZoneBreakdownsBulk = async (
+  athleteId: number,
   ids: number[],
 ): Promise<CachedZoneBreakdown[]> => {
   if (ids.length === 0) return [];
@@ -328,7 +355,9 @@ export const neonGetZoneBreakdownsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(`${API}/zone-breakdowns?pks=${pks}`);
+      const res = await fetch(
+        `${API}/zone-breakdowns?athleteId=${athleteId}&pks=${pks}`,
+      );
       if (!res.ok) continue;
       const data: CachedZoneBreakdown[] = await res.json();
       if (Array.isArray(data)) results.push(...data);
@@ -357,9 +386,12 @@ export const neonSyncDashboardCache = async (
 
 /** Fetch a single activity label from Neon. */
 export const neonGetActivityLabel = async (
+  athleteId: number,
   id: number,
 ): Promise<CachedActivityLabel | null> =>
-  getFromNeon<CachedActivityLabel>('activity-labels', id);
+  getFromNeon<CachedActivityLabel>(
+    `activity-labels?athleteId=${athleteId}&pk=${id}`,
+  );
 
 // ---- User Settings — partial update (weight + city from Strava profile) ----
 
