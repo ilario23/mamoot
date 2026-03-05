@@ -136,15 +136,24 @@ const validateChatMessageFeedbackRecord = (
 export const GET = async (req: NextRequest, {params}: RouteContext) => {
   const {table} = await params;
   const pk = req.nextUrl.searchParams.get('pk');
+  const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
+  const athleteId = athleteIdParam ? Number(athleteIdParam) : null;
 
   try {
     switch (table) {
       case 'activities': {
+        if (!athleteId)
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
         if (pk) {
           const rows = await db
             .select()
             .from(activities)
-            .where(eq(activities.id, Number(pk)));
+            .where(
+              and(
+                eq(activities.id, Number(pk)),
+                eq(activities.athleteId, athleteId),
+              ),
+            );
           return NextResponse.json(rows[0] ?? null);
         }
         // Optional date filter: GET /api/db/activities?after=2025-01-01
@@ -153,7 +162,12 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           const rows = await db
             .select()
             .from(activities)
-            .where(gte(activities.date, after));
+            .where(
+              and(
+                eq(activities.athleteId, athleteId),
+                gte(activities.date, after),
+              ),
+            );
           return NextResponse.json(rows);
         }
         // Paginated fetch: GET /api/db/activities?limit=20&offset=0
@@ -163,16 +177,22 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           const rows = await db
             .select()
             .from(activities)
+            .where(eq(activities.athleteId, athleteId))
             .orderBy(desc(activities.date))
             .limit(Number(limitParam))
             .offset(Number(offsetParam ?? 0));
           return NextResponse.json(rows);
         }
-        const rows = await db.select().from(activities);
+        const rows = await db
+          .select()
+          .from(activities)
+          .where(eq(activities.athleteId, athleteId));
         return NextResponse.json(rows);
       }
 
       case 'activity-details': {
+        if (!athleteId)
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
         // Bulk fetch: GET /api/db/activity-details?pks=1,2,3
         const pks = req.nextUrl.searchParams.get('pks');
         if (pks) {
@@ -181,7 +201,12 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           const rows = await db
             .select()
             .from(activityDetails)
-            .where(inArray(activityDetails.id, ids));
+            .where(
+              and(
+                eq(activityDetails.athleteId, athleteId),
+                inArray(activityDetails.id, ids),
+              ),
+            );
           return NextResponse.json(rows);
         }
         // Single fetch: GET /api/db/activity-details?pk=123
@@ -193,11 +218,18 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         const rows = await db
           .select()
           .from(activityDetails)
-          .where(eq(activityDetails.id, Number(pk)));
+          .where(
+            and(
+              eq(activityDetails.athleteId, athleteId),
+              eq(activityDetails.id, Number(pk)),
+            ),
+          );
         return NextResponse.json(rows[0] ?? null);
       }
 
       case 'activity-labels': {
+        if (!athleteId)
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
         // Bulk fetch: GET /api/db/activity-labels?pks=1,2,3
         const labelPks = req.nextUrl.searchParams.get('pks');
         if (labelPks) {
@@ -206,7 +238,12 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           const rows = await db
             .select()
             .from(activityLabels)
-            .where(inArray(activityLabels.id, ids));
+            .where(
+              and(
+                eq(activityLabels.athleteId, athleteId),
+                inArray(activityLabels.id, ids),
+              ),
+            );
           return NextResponse.json(rows);
         }
         // Single fetch: GET /api/db/activity-labels?pk=123
@@ -218,11 +255,18 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         const labelRows = await db
           .select()
           .from(activityLabels)
-          .where(eq(activityLabels.id, Number(pk)));
+          .where(
+            and(
+              eq(activityLabels.athleteId, athleteId),
+              eq(activityLabels.id, Number(pk)),
+            ),
+          );
         return NextResponse.json(labelRows[0] ?? null);
       }
 
       case 'activity-streams': {
+        if (!athleteId)
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
         // Bulk fetch: GET /api/db/activity-streams?pks=1,2,3
         const streamPks = req.nextUrl.searchParams.get('pks');
         if (streamPks) {
@@ -231,7 +275,12 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           const rows = await db
             .select()
             .from(activityStreams)
-            .where(inArray(activityStreams.activityId, ids));
+            .where(
+              and(
+                eq(activityStreams.athleteId, athleteId),
+                inArray(activityStreams.activityId, ids),
+              ),
+            );
           return NextResponse.json(rows);
         }
         // Single fetch: GET /api/db/activity-streams?pk=123
@@ -240,7 +289,12 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         const rows = await db
           .select()
           .from(activityStreams)
-          .where(eq(activityStreams.activityId, Number(pk)));
+          .where(
+            and(
+              eq(activityStreams.athleteId, athleteId),
+              eq(activityStreams.activityId, Number(pk)),
+            ),
+          );
         return NextResponse.json(rows[0] ?? null);
       }
 
@@ -255,26 +309,28 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'athlete-zones': {
-        if (!pk)
-          return NextResponse.json({error: 'pk required'}, {status: 400});
+        if (!athleteId)
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
         const rows = await db
           .select()
           .from(athleteZones)
-          .where(eq(athleteZones.key, pk));
+          .where(eq(athleteZones.athleteId, athleteId));
         return NextResponse.json(rows[0] ?? null);
       }
 
       case 'athlete-gear': {
-        if (!pk)
-          return NextResponse.json({error: 'pk required'}, {status: 400});
+        if (!athleteId)
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
         const rows = await db
           .select()
           .from(athleteGear)
-          .where(eq(athleteGear.key, pk));
+          .where(eq(athleteGear.athleteId, athleteId));
         return NextResponse.json(rows[0] ?? null);
       }
 
       case 'zone-breakdowns': {
+        if (!athleteId)
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
         // Bulk fetch: GET /api/db/zone-breakdowns?pks=1,2,3
         const zbPks = req.nextUrl.searchParams.get('pks');
         if (zbPks) {
@@ -283,16 +339,31 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           const rows = await db
             .select()
             .from(zoneBreakdowns)
-            .where(inArray(zoneBreakdowns.activityId, ids));
+            .where(
+              and(
+                eq(zoneBreakdowns.athleteId, athleteId),
+                inArray(zoneBreakdowns.activityId, ids),
+              ),
+            );
+          return NextResponse.json(rows);
+        }
+        if (!pk) {
+          const rows = await db
+            .select()
+            .from(zoneBreakdowns)
+            .where(eq(zoneBreakdowns.athleteId, athleteId));
           return NextResponse.json(rows);
         }
         // Single fetch: GET /api/db/zone-breakdowns?pk=123
-        if (!pk)
-          return NextResponse.json({error: 'pk or pks required'}, {status: 400});
         const rows = await db
           .select()
           .from(zoneBreakdowns)
-          .where(eq(zoneBreakdowns.activityId, Number(pk)));
+          .where(
+            and(
+              eq(zoneBreakdowns.athleteId, athleteId),
+              eq(zoneBreakdowns.activityId, Number(pk)),
+            ),
+          );
         return NextResponse.json(rows[0] ?? null);
       }
 
@@ -645,6 +716,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .onConflictDoUpdate({
             target: activities.id,
             set: {
+              athleteId: sql`excluded.athlete_id`,
               data: sql`excluded.data`,
               date: sql`excluded.date`,
               fetchedAt: sql`excluded.fetched_at`,
@@ -659,6 +731,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .onConflictDoUpdate({
             target: activityDetails.id,
             set: {
+              athleteId: sql`excluded.athlete_id`,
               data: sql`excluded.data`,
               fetchedAt: sql`excluded.fetched_at`,
             },
@@ -666,17 +739,29 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
         break;
 
       case 'activity-labels':
+        // Accept both {data: WorkoutLabel} and legacy {label: WorkoutLabel}.
+        {
+          const normalizedRecords = records.map((record) => {
+            const r = record as Record<string, unknown>;
+            if (r.data !== undefined) return record;
+            return {
+              ...r,
+              data: r.label,
+            };
+          });
         await db
           .insert(activityLabels)
-          .values(records)
+          .values(normalizedRecords)
           .onConflictDoUpdate({
             target: activityLabels.id,
             set: {
+              athleteId: sql`excluded.athlete_id`,
               data: sql`excluded.data`,
               computedAt: sql`excluded.computed_at`,
             },
           });
         break;
+        }
 
       case 'activity-streams':
         await db
@@ -685,6 +770,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .onConflictDoUpdate({
             target: activityStreams.activityId,
             set: {
+              athleteId: sql`excluded.athlete_id`,
               data: sql`excluded.data`,
               fetchedAt: sql`excluded.fetched_at`,
             },
@@ -711,6 +797,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .onConflictDoUpdate({
             target: athleteZones.key,
             set: {
+              athleteId: sql`excluded.athlete_id`,
               data: sql`excluded.data`,
               fetchedAt: sql`excluded.fetched_at`,
             },
@@ -724,6 +811,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .onConflictDoUpdate({
             target: athleteGear.key,
             set: {
+              athleteId: sql`excluded.athlete_id`,
               bikes: sql`excluded.bikes`,
               shoes: sql`excluded.shoes`,
               retiredGearIds: sql`excluded.retired_gear_ids`,
@@ -739,6 +827,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           .onConflictDoUpdate({
             target: zoneBreakdowns.activityId,
             set: {
+              athleteId: sql`excluded.athlete_id`,
               settingsHash: sql`excluded.settings_hash`,
               zones: sql`excluded.zones`,
               computedAt: sql`excluded.computed_at`,
@@ -867,7 +956,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
       case 'chat-message-feedback':
         for (const record of records) {
           const validation = validateChatMessageFeedbackRecord(record);
-          if (!validation.valid) {
+          if (validation.valid === false) {
             return NextResponse.json(
               {error: validation.message},
               {status: 400},

@@ -40,6 +40,7 @@ import {
   type MentionReference,
 } from '@/lib/mentionTypes';
 import {loadActivitySubItems, loadGearSubItems} from '@/hooks/useMentionData';
+import {useStravaAuth} from '@/contexts/StravaAuthContext';
 
 interface MentionPopupProps {
   /** Whether the popup is open. */
@@ -67,6 +68,7 @@ interface SubItem {
 
 const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
   ({open, filterText, triggeredByButton, onSelect, onClose}, ref) => {
+    const {athlete} = useStravaAuth();
     const [activeCategory, setActiveCategory] =
       useState<MentionCategory | null>(null);
     const [subItems, setSubItems] = useState<SubItem[]>([]);
@@ -139,16 +141,21 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
       setLoadingSubItems(true);
       const loadItems = async () => {
         let items: SubItem[] = [];
+        if (!athlete?.id) {
+          setSubItems([]);
+          setLoadingSubItems(false);
+          return;
+        }
         if (activeCategory.id === 'activity') {
-          items = await loadActivitySubItems();
+          items = await loadActivitySubItems(athlete.id);
         } else if (activeCategory.id === 'gear') {
-          items = await loadGearSubItems();
+          items = await loadGearSubItems(athlete.id);
         }
         setSubItems(items);
         setLoadingSubItems(false);
       };
       loadItems();
-    }, [activeCategory]);
+    }, [activeCategory, athlete?.id]);
 
     const handleCategorySelect = useCallback(
       (category: MentionCategory) => {

@@ -14,6 +14,12 @@
 3. **Exchange code for tokens** → `POST https://www.strava.com/oauth/token`
 4. **Refresh when expired** → `POST https://www.strava.com/oauth/token` with `grant_type=refresh_token`
 
+### Multi-User Handling (App-Specific)
+
+- Tokens are stored per athlete in browser storage using keys shaped like `mamoot-strava-tokens:{athleteId}`.
+- The currently selected login is tracked via `mamoot-active-athlete-id`.
+- Server cache rows are athlete-scoped (`athlete_id`) and athlete-specific cache keys are used for profile data (`athlete-zones:{athleteId}`, `athlete-gear:{athleteId}`).
+
 ### Authorization URL
 
 ```

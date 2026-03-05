@@ -115,14 +115,14 @@ Data is stored as JSONB blobs with metadata columns.
 
 | Table              | Primary Key            | Data Column(s)                           | Metadata                                                                                        |
 | ------------------ | ---------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `activities`       | `id` (bigint)          | `data` (jsonb)                           | `date`, `fetched_at`                                                                            |
-| `activity_details` | `id` (bigint)          | `data` (jsonb)                           | `fetched_at`                                                                                    |
-| `activity_streams` | `activity_id` (bigint) | `data` (jsonb)                           | `fetched_at`                                                                                    |
-| `activity_labels`  | `id` (bigint)          | `data` (jsonb)                           | `computed_at`                                                                                   |
+| `activities`       | `id` (bigint)          | `data` (jsonb)                           | `athlete_id`, `date`, `fetched_at`                                                             |
+| `activity_details` | `id` (bigint)          | `data` (jsonb)                           | `athlete_id`, `fetched_at`                                                                     |
+| `activity_streams` | `activity_id` (bigint) | `data` (jsonb)                           | `athlete_id`, `fetched_at`                                                                     |
+| `activity_labels`  | `id` (bigint)          | `data` (jsonb)                           | `athlete_id`, `computed_at`                                                                    |
 | `athlete_stats`    | `athlete_id` (bigint)  | `data` (jsonb)                           | `fetched_at`                                                                                    |
-| `athlete_zones`    | `key` (text)           | `data` (jsonb)                           | `fetched_at`                                                                                    |
-| `athlete_gear`     | `key` (text)           | `bikes`, `shoes` (jsonb)                 | `fetched_at`                                                                                    |
-| `zone_breakdowns`  | `activity_id` (bigint) | `zones` (jsonb)                          | `settings_hash`, `computed_at`                                                                  |
+| `athlete_zones`    | `key` (text)           | `data` (jsonb)                           | `athlete_id`, `fetched_at`                                                                     |
+| `athlete_gear`     | `key` (text)           | `bikes`, `shoes` (jsonb)                 | `athlete_id`, `fetched_at`                                                                     |
+| `zone_breakdowns`  | `activity_id` (bigint) | `zones` (jsonb)                          | `athlete_id`, `settings_hash`, `computed_at`                                                   |
 | `user_settings`    | `athlete_id` (bigint)  | `zones`, `allergies`, `injuries` (jsonb) | `max_hr`, `resting_hr`, `goal`, `food_preferences`, `ai_model`, `updated_at`                    |
 | `chat_sessions`    | `id` (text)            | —                                        | `athlete_id`, `persona`, `title`, `summary`, `message_count`, `created_at`, `updated_at`        |
 | `chat_messages`    | `id` (text)            | —                                        | `session_id`, `role`, `content`, `created_at`                                                   |
@@ -139,13 +139,13 @@ A single dynamic route handles all tables:
 Returns all records or a single record filtered by primary key.
 
 ```
-GET /api/db/activities             → all activities (array)
-GET /api/db/activity-details?pk=123 → single record or null
-GET /api/db/activity-streams?pk=456 → single record or null
+GET /api/db/activities?athleteId=123                   → all activities for athlete (array)
+GET /api/db/activity-details?athleteId=123&pk=123      → single record or null
+GET /api/db/activity-streams?athleteId=123&pk=456      → single record or null
 GET /api/db/athlete-stats?pk=789    → single record or null
-GET /api/db/athlete-zones?pk=athlete-zones → single record or null
-GET /api/db/athlete-gear?pk=athlete-gear   → single record or null
-GET /api/db/zone-breakdowns?pk=123  → single record or null
+GET /api/db/athlete-zones?athleteId=123                → single record or null
+GET /api/db/athlete-gear?athleteId=123                 → single record or null
+GET /api/db/zone-breakdowns?athleteId=123&pk=123       → single record or null
 ```
 
 ### `POST /api/db/[table]`
@@ -154,7 +154,7 @@ Upserts one or many records. Accepts a single object or an array.
 
 ```json
 POST /api/db/activities
-Body: [{"id": 123, "data": {...}, "date": "2026-01-15", "fetchedAt": 1707500000000}]
+Body: [{"id": 123, "athleteId": 123, "data": {...}, "date": "2026-01-15", "fetchedAt": 1707500000000}]
 Response: {"success": true, "count": 1}
 ```
 
@@ -168,13 +168,13 @@ Uses PostgreSQL `ON CONFLICT DO UPDATE` so existing records are overwritten with
 
 | Function                          | Direction      | Blocking?       |
 | --------------------------------- | -------------- | --------------- |
-| `neonGetActivities()`             | Read (all)     | Yes (awaitable) |
-| `neonGetActivityDetail(id)`       | Read (by PK)   | Yes (awaitable) |
-| `neonGetActivityStreams(id)`      | Read (by PK)   | Yes (awaitable) |
+| `neonGetActivities(athleteId)`             | Read (all)     | Yes (awaitable) |
+| `neonGetActivityDetail(athleteId, id)`     | Read (by PK)   | Yes (awaitable) |
+| `neonGetActivityStreams(athleteId, id)`    | Read (by PK)   | Yes (awaitable) |
 | `neonGetAthleteStats(id)`         | Read (by PK)   | Yes (awaitable) |
-| `neonGetAthleteZones(key)`        | Read (by PK)   | Yes (awaitable) |
-| `neonGetAthleteGear(key)`         | Read (by PK)   | Yes (awaitable) |
-| `neonGetZoneBreakdown(id)`        | Read (by PK)   | Yes (awaitable) |
+| `neonGetAthleteZones(athleteId)`  | Read (by athlete) | Yes (awaitable) |
+| `neonGetAthleteGear(athleteId)`   | Read (by athlete) | Yes (awaitable) |
+| `neonGetZoneBreakdown(athleteId, id)` | Read (by PK) | Yes (awaitable) |
 | `neonSyncActivities(records)`     | Write (bulk)   | Yes (awaitable) |
 | `neonSyncActivityDetail(record)`  | Write (single) | Yes (awaitable) |
 | `neonSyncActivityStreams(record)` | Write (single) | Yes (awaitable) |
@@ -228,7 +228,7 @@ User settings (HR zones, training goal, injuries, allergies, food preferences, A
 ### Sync path
 
 ```
-localStorage (mamoot-settings)
+localStorage (mamoot-settings:{athleteId})
   ─── awaitable POST /api/db/user-settings ───►  Neon (user_settings table)
 ```
 
@@ -254,3 +254,15 @@ See [AI Context documentation](./AI_CONTEXT.md) for details on the dual context 
 - [ ] **Selective fetching** — For activities, fetch only records newer than what Neon already has instead of transferring the full list
 - [ ] **Connection pooling** — Switch from Neon HTTP driver to WebSocket driver if query volume increases
 - [ ] **Offline support** — Add a service worker or lightweight IndexedDB layer if offline access is needed
+
+---
+
+## Multi-Account Regression Checklist
+
+Run this sequence when validating shared-browser multi-user behavior:
+
+1. Login with athlete A, sync, and confirm activities/zones/gear/settings load correctly.
+2. Logout, login with athlete B, sync, and confirm no athlete A data appears.
+3. Switch back to athlete A and verify A's prior data is still intact.
+4. Verify weekly plan and mention popup sub-items are scoped to active athlete only.
+5. Verify `/api/db/*` calls for activity-family tables include `athleteId` query param.

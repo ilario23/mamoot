@@ -46,12 +46,12 @@ const getDashboardAfterDate = (): string => {
 
 /** Fetch all activities, served from Neon cache when fresh */
 export const useActivities = () => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
 
   return useQuery<ActivitySummary[]>({
-    queryKey: ['strava', 'activities'],
-    queryFn: () => cachedGetAllActivities(),
-    enabled: isAuthenticated,
+    queryKey: ['strava', 'activities', athlete?.id],
+    queryFn: () => cachedGetAllActivities(athlete!.id),
+    enabled: isAuthenticated && !!athlete?.id,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
@@ -60,13 +60,13 @@ export const useActivities = () => {
 
 /** Dashboard-optimized activity query (rolling window only). */
 export const useDashboardActivities = () => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
   const afterDate = getDashboardAfterDate();
 
   return useQuery<ActivitySummary[]>({
-    queryKey: ['strava', 'activities', 'dashboard', afterDate],
-    queryFn: () => cachedGetAllActivities(afterDate),
-    enabled: isAuthenticated,
+    queryKey: ['strava', 'activities', 'dashboard', athlete?.id, afterDate],
+    queryFn: () => cachedGetAllActivities(athlete!.id, afterDate),
+    enabled: isAuthenticated && !!athlete?.id,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
@@ -80,13 +80,13 @@ export const useDashboardActivities = () => {
  * to using it.
  */
 export const useActivitiesPaginated = (pageSize = 20) => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
   const allActivities = useActivities();
 
   const firstPage = useQuery<ActivitySummary[]>({
-    queryKey: ['strava', 'activities-page', pageSize],
-    queryFn: () => cachedGetActivitiesPage(pageSize),
-    enabled: isAuthenticated && !allActivities.data,
+    queryKey: ['strava', 'activities-page', athlete?.id, pageSize],
+    queryFn: () => cachedGetActivitiesPage(athlete!.id, pageSize),
+    enabled: isAuthenticated && !!athlete?.id && !allActivities.data,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
@@ -101,12 +101,12 @@ export const useActivitiesPaginated = (pageSize = 20) => {
 
 /** Fetch single activity detail — cached forever in Neon */
 export const useActivityDetail = (activityId: string | undefined) => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
 
   return useQuery<StravaDetailedActivity>({
-    queryKey: ['strava', 'activity', activityId],
-    queryFn: () => cachedGetActivityDetail(Number(activityId)),
-    enabled: isAuthenticated && !!activityId,
+    queryKey: ['strava', 'activity', athlete?.id, activityId],
+    queryFn: () => cachedGetActivityDetail(athlete!.id, Number(activityId)),
+    enabled: isAuthenticated && !!athlete?.id && !!activityId,
     staleTime: Infinity,
     gcTime: ONE_DAY,
   });
@@ -114,12 +114,12 @@ export const useActivityDetail = (activityId: string | undefined) => {
 
 /** Fetch activity streams — cached forever in Neon */
 export const useActivityStreams = (activityId: string | undefined) => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
 
   return useQuery<StreamPoint[]>({
-    queryKey: ['strava', 'streams', activityId],
-    queryFn: () => cachedGetActivityStreams(Number(activityId)),
-    enabled: isAuthenticated && !!activityId,
+    queryKey: ['strava', 'streams', athlete?.id, activityId],
+    queryFn: () => cachedGetActivityStreams(athlete!.id, Number(activityId)),
+    enabled: isAuthenticated && !!athlete?.id && !!activityId,
     staleTime: Infinity,
     gcTime: ONE_DAY,
   });
@@ -140,12 +140,12 @@ export const useAthleteStats = () => {
 
 /** Fetch athlete HR zones — refreshed daily via Neon cache */
 export const useAthleteZones = () => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
 
   return useQuery<StravaAthleteZones>({
-    queryKey: ['strava', 'zones'],
-    queryFn: cachedGetAthleteZones,
-    enabled: isAuthenticated,
+    queryKey: ['strava', 'zones', athlete?.id],
+    queryFn: () => cachedGetAthleteZones(athlete!.id),
+    enabled: isAuthenticated && !!athlete?.id,
     staleTime: ONE_DAY,
     gcTime: ONE_DAY,
   });
@@ -180,16 +180,16 @@ export const useSegmentDetail = (segmentId: number | null) => {
 
 /** Fetch athlete's gear (bikes + shoes + retired IDs) — refreshed hourly via Neon cache */
 export const useAthleteGear = () => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
 
   return useQuery<{
     bikes: StravaSummaryGear[];
     shoes: StravaSummaryGear[];
     retiredGearIds: string[];
   }>({
-    queryKey: ['strava', 'gear'],
-    queryFn: cachedGetAthleteGear,
-    enabled: isAuthenticated,
+    queryKey: ['strava', 'gear', athlete?.id],
+    queryFn: () => cachedGetAthleteGear(athlete!.id),
+    enabled: isAuthenticated && !!athlete?.id,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
     refetchOnWindowFocus: false,
@@ -321,7 +321,7 @@ interface UsePerActivityZoneBreakdownsResult {
 export const usePerActivityZoneBreakdowns = (
   weeks: number,
 ): UsePerActivityZoneBreakdownsResult => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
   const {settings} = useSettings();
   const {data: activities, isLoading: activitiesLoading} = useDashboardActivities();
 
@@ -330,13 +330,14 @@ export const usePerActivityZoneBreakdowns = (
     [settings.zones],
   );
 
-  const progressKey = `${weeks}-${zonesHash}`;
+  const progressKey = `${athlete?.id ?? 0}-${weeks}-${zonesHash}`;
   const progress = useZoneProgressSubscription(progressKey);
 
   const query = useQuery<Map<string, ZoneBreakdown>>({
     queryKey: [
       'dashboard',
       'zone-breakdowns',
+      athlete?.id,
       weeks,
       zonesHash,
       activities?.[0]?.id,
@@ -355,6 +356,7 @@ export const usePerActivityZoneBreakdowns = (
       const activityIds = filtered.map((a) => Number(a.id));
 
       const breakdownMap = await batchGetZoneBreakdowns(
+        athlete!.id,
         activityIds,
         settings.zones,
         (done, total) => setZoneProgress(progressKey, done, total),
@@ -368,6 +370,7 @@ export const usePerActivityZoneBreakdowns = (
     },
     enabled:
       isAuthenticated &&
+      !!athlete?.id &&
       !activitiesLoading &&
       !!activities &&
       activities.length > 0,
@@ -387,10 +390,12 @@ export const usePerActivityZoneBreakdowns = (
 /** Hook to force-refresh activities from the API, bypassing cache freshness */
 export const useForceRefreshActivities = () => {
   const queryClient = useQueryClient();
+  const {athlete} = useStravaAuth();
 
   const handleForceRefresh = async () => {
-    const freshData = await forceRefreshActivities();
-    queryClient.setQueryData(['strava', 'activities'], freshData);
+    if (!athlete?.id) return;
+    const freshData = await forceRefreshActivities(athlete.id);
+    queryClient.setQueryData(['strava', 'activities', athlete.id], freshData);
   };
 
   return handleForceRefresh;

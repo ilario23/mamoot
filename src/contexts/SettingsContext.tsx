@@ -9,6 +9,8 @@ import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/activityModel'
 import {clearUserSettingsRowCache, fetchUserSettingsRow} from '@/lib/userSettingsSync';
 
 const LS_KEY = 'mamoot-settings';
+const getSettingsStorageKey = (athleteId: number): string =>
+  `${LS_KEY}:${athleteId}`;
 
 interface SettingsContextType {
   settings: UserSettings;
@@ -25,9 +27,11 @@ const SettingsContext = createContext<SettingsContextType | undefined>(
 );
 
 /** Read localStorage cache (optimistic initial value). Never throws. */
-const readCache = (): UserSettings | null => {
+const readCache = (athleteId: number): UserSettings | null => {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw =
+      localStorage.getItem(getSettingsStorageKey(athleteId))
+      ?? localStorage.getItem(LS_KEY);
     if (!raw) return null;
     return migrateSettings(JSON.parse(raw));
   } catch {
@@ -36,9 +40,9 @@ const readCache = (): UserSettings | null => {
 };
 
 /** Write to localStorage cache. Never throws. */
-const writeCache = (settings: UserSettings): void => {
+const writeCache = (athleteId: number, settings: UserSettings): void => {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(settings));
+    localStorage.setItem(getSettingsStorageKey(athleteId), JSON.stringify(settings));
   } catch {
     // Storage full or unavailable — non-critical
   }
@@ -152,13 +156,10 @@ const fetchFromNeon = async (
 };
 
 export function SettingsProvider({children}: {children: ReactNode}) {
-  // Start with cached localStorage value (optimistic) or defaults
-  const [settings, setSettings] = useState<UserSettings>(
-    () => readCache() ?? defaultSettings,
-  );
+  const [settings, setSettings] = useState<UserSettings>(defaultSettings);
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [athleteId, setAthleteId] = useState<number | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [loadedAthleteId, setLoadedAthleteId] = useState<number | null>(null);
 
   /**
    * Load settings from Neon (source of truth).
@@ -167,15 +168,8 @@ export function SettingsProvider({children}: {children: ReactNode}) {
    * - If Neon is unreachable → keep whatever we have (cached or defaults).
    */
   const loadSettings = useCallback(async (id: number) => {
-    // Prevent re-loading if already done for this athlete
-    setAthleteId((prev) => {
-      if (prev === id) return prev;
-      return id;
-    });
-    setLoaded((prev) => {
-      if (prev) return prev; // already loaded, skip
-      return false;
-    });
+    if (loadedAthleteId === id) return;
+    setAthleteId(id);
 
     setIsLoadingSettings(true);
     try {
@@ -184,12 +178,12 @@ export function SettingsProvider({children}: {children: ReactNode}) {
       if (neonSettings) {
         // Neon has settings → use them as source of truth
         setSettings(neonSettings);
-        writeCache(neonSettings);
+        writeCache(id, neonSettings);
       } else {
         // New user: no row in Neon → seed Neon with current settings
-        const current = readCache() ?? defaultSettings;
+        const current = readCache(id) ?? defaultSettings;
         setSettings(current);
-        writeCache(current);
+        writeCache(id, current);
         await saveToNeon(id, current).catch((err) => {
           console.error('[Settings] Failed to seed Neon for new user:', err);
         });
@@ -199,9 +193,9 @@ export function SettingsProvider({children}: {children: ReactNode}) {
       console.error('[Settings] Failed to load from Neon, using cache:', err);
     } finally {
       setIsLoadingSettings(false);
-      setLoaded(true);
+      setLoadedAthleteId(id);
     }
-  }, []);
+  }, [loadedAthleteId]);
 
   /**
    * Save settings: write to Neon first (awaited), then update state + cache.
@@ -213,7 +207,9 @@ export function SettingsProvider({children}: {children: ReactNode}) {
         await saveToNeon(athleteId, newSettings);
       }
       setSettings(newSettings);
-      writeCache(newSettings);
+      if (athleteId) {
+        writeCache(athleteId, newSettings);
+      }
     },
     [athleteId],
   );

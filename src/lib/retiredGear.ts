@@ -9,8 +9,6 @@
 
 import {neonGetAthleteGear, neonSyncAthleteGear} from './neonSync';
 
-const GEAR_KEY = 'athlete-gear';
-
 // ----- Toggle retired status (async, writes to Neon) -----
 
 /**
@@ -18,8 +16,11 @@ const GEAR_KEY = 'athlete-gear';
  * Reads the current Neon record, updates retiredGearIds, writes back.
  * Returns the new retired state.
  */
-export const toggleRetiredGear = async (gearId: string): Promise<boolean> => {
-  const record = await neonGetAthleteGear(GEAR_KEY);
+export const toggleRetiredGear = async (
+  athleteId: number,
+  gearId: string,
+): Promise<boolean> => {
+  const record = await neonGetAthleteGear(athleteId);
   if (!record) return false;
 
   const ids = new Set(record.retiredGearIds ?? []);

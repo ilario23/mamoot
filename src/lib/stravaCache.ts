@@ -337,7 +337,7 @@ export const cachedGetZoneBreakdown = async (
   }
 
   // ── Tier 2: Compute from streams (streams use their own two-tier) ──
-  const stream = await cachedGetActivityStreams(activityId);
+  const stream = await cachedGetActivityStreams(athleteId, activityId);
   const breakdown = computeZoneBreakdown(stream, zones);
   const record = {
     activityId,

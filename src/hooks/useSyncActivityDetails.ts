@@ -6,6 +6,7 @@ import {fetchActivityDetail} from '@/lib/strava';
 import {neonGetActivityDetailsBulk, neonSyncActivityDetailsBulk} from '@/lib/neonSync';
 import type {StravaDetailedActivity, StravaBestEffort, StravaSegmentEffort} from '@/lib/strava';
 import type {ActivitySummary} from '@/lib/activityModel';
+import {useStravaAuth} from '@/contexts/StravaAuthContext';
 
 // ----- Constants -----
 
@@ -173,6 +174,7 @@ export const useSyncActivityDetails = (
   options: SyncOptions = {},
 ) => {
   const {initialBatchSize = 50} = options;
+  const {athlete} = useStravaAuth();
 
   const [state, setState] = useState<SyncState>({
     total: 0,
@@ -196,7 +198,7 @@ export const useSyncActivityDetails = (
   // Main sync function — uses refs, so no dependency on `activities`
   const runSync = useCallback(async () => {
     const currentActivities = activitiesRef.current;
-    if (!currentActivities || currentActivities.length === 0 || !enabled)
+    if (!currentActivities || currentActivities.length === 0 || !enabled || !athlete?.id)
       return;
 
     // Prevent duplicate concurrent runs
@@ -222,7 +224,10 @@ export const useSyncActivityDetails = (
       const remainingIds = activityIds.slice(initialBatchSize);
 
       // Phase 1: fetch initial batch (recent activities) — fast, small payload
-      const initialDetails = await neonGetActivityDetailsBulk(initialIds);
+      const initialDetails = await neonGetActivityDetailsBulk(
+        athlete.id,
+        initialIds,
+      );
       for (const detail of initialDetails) {
         cachedIds.add(detail.id);
         allEfforts.push(...extractBestEfforts(detail.data));
@@ -238,7 +243,10 @@ export const useSyncActivityDetails = (
 
       // Phase 2: fetch remaining activities from Neon
       if (remainingIds.length > 0 && !abortRef.current) {
-        const remainingDetails = await neonGetActivityDetailsBulk(remainingIds);
+        const remainingDetails = await neonGetActivityDetailsBulk(
+          athlete.id,
+          remainingIds,
+        );
         for (const detail of remainingDetails) {
           cachedIds.add(detail.id);
           allEfforts.push(...extractBestEfforts(detail.data));
@@ -308,7 +316,12 @@ export const useSyncActivityDetails = (
         batchIds.map(async (id) => {
           const detail = await fetchActivityDetail(id);
           const now = Date.now();
-          const record: CachedActivityDetail = {id, data: detail, fetchedAt: now};
+          const record: CachedActivityDetail = {
+            id,
+            athleteId: athlete.id,
+            data: detail,
+            fetchedAt: now,
+          };
           // Collect for Neon write-back
           newlyFetchedRecords.push(record);
           return detail;
@@ -400,7 +413,7 @@ export const useSyncActivityDetails = (
     }));
 
     isSyncRunningRef.current = false;
-  }, [enabled]); // Only depends on `enabled` — activities come from ref
+  }, [enabled, athlete?.id]); // Activities come from ref
 
   // Trigger sync once activities are loaded
   // Uses a stable ID string to only re-trigger when the actual list changes

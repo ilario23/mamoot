@@ -91,10 +91,13 @@ const resolveTraining = (activities: ActivitySummary[]): string => {
   ].join('\n');
 };
 
-const resolveZones = async (activities: ActivitySummary[]): Promise<string> => {
+const resolveZones = async (
+  athleteId: number,
+  activities: ActivitySummary[],
+): Promise<string> => {
   const recent = filterByWeeks(activities, 4);
   const ids = new Set(recent.map((a) => Number(a.id)));
-  const breakdowns = await neonGetAllZoneBreakdowns();
+  const breakdowns = await neonGetAllZoneBreakdowns(athleteId);
   const matching = breakdowns.filter((b) => ids.has(b.activityId));
 
   if (matching.length === 0) return 'No zone breakdown data available.';
@@ -168,28 +171,30 @@ const resolveFitness = (
  * Checks Neon cache first; computes from activity detail data if missing.
  */
 const getOrComputeLabel = async (
+  athleteId: number,
   activityId: number,
   zones: UserSettings['zones'],
 ): Promise<string | null> => {
   // Check Neon cache
-  const cached = await neonGetActivityLabel(activityId);
+  const cached = await neonGetActivityLabel(athleteId, activityId);
   if (cached) return formatLabelForAI(cached.label);
 
   // Compute from activity detail
-  const detail = await neonGetActivityDetail(activityId);
+  const detail = await neonGetActivityDetail(athleteId, activityId);
   if (!detail) return null;
 
   const label = classifyWorkout(detail.data, zones);
   if (!label) return null;
 
   // Cache in Neon
-  const record = {id: activityId, label, computedAt: Date.now()};
+  const record = {id: activityId, athleteId, label, computedAt: Date.now()};
   neonSyncActivityLabel(record);
 
   return formatLabelForAI(label);
 };
 
 const resolveActivity = async (
+  athleteId: number,
   activities: ActivitySummary[],
   zones: UserSettings['zones'],
   itemId?: string,
@@ -197,7 +202,7 @@ const resolveActivity = async (
   if (itemId) {
     const a = activities.find((act) => String(act.id) === itemId);
     if (!a) return 'Activity not found.';
-    const labelStr = await getOrComputeLabel(Number(a.id), zones);
+    const labelStr = await getOrComputeLabel(athleteId, Number(a.id), zones);
     if (labelStr) {
       return `Activity: ${a.date} | ${labelStr} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)}`;
     }
@@ -207,7 +212,7 @@ const resolveActivity = async (
   if (recent.length === 0) return 'No activities found.';
   const lines = ['Recent Activities'];
   for (const a of recent) {
-    const labelStr = await getOrComputeLabel(Number(a.id), zones);
+    const labelStr = await getOrComputeLabel(athleteId, Number(a.id), zones);
     if (labelStr) {
       lines.push(
         `- ${a.date} | ${labelStr} | ${a.distance.toFixed(1)} km | ${formatDuration(a.duration)}`,
@@ -221,8 +226,11 @@ const resolveActivity = async (
   return lines.join('\n');
 };
 
-const resolveGear = async (itemId?: string): Promise<string> => {
-  const gear = await neonGetAthleteGear('athlete-gear');
+const resolveGear = async (
+  athleteId: number,
+  itemId?: string,
+): Promise<string> => {
+  const gear = await neonGetAthleteGear(athleteId);
   if (!gear) return 'No gear data available.';
 
   const shoes = gear.shoes as StravaSummaryGear[];
@@ -328,14 +336,14 @@ export const useMentionResolver = () => {
       if (mentions.length === 0) return [];
 
       // Preload activities once (many resolvers need them)
-      const cachedActivities = await neonGetActivities();
+      const athleteId = athlete?.id ?? 0;
+      const cachedActivities =
+        athleteId > 0 ? await neonGetActivities(athleteId) : null;
       const activities: ActivitySummary[] = cachedActivities
         ? [...cachedActivities]
             .sort((a, b) => (b.date > a.date ? 1 : a.date > b.date ? -1 : 0))
             .map((record) => transformActivity(record.data))
         : [];
-      const athleteId = athlete?.id ?? 0;
-
       const results: ResolvedMention[] = [];
 
       for (const mention of mentions) {
@@ -355,20 +363,21 @@ export const useMentionResolver = () => {
             data = resolveTraining(activities);
             break;
           case 'zones':
-            data = await resolveZones(activities);
+            data = await resolveZones(athleteId, activities);
             break;
           case 'fitness':
             data = resolveFitness(activities, settings);
             break;
           case 'activity':
             data = await resolveActivity(
+              athleteId,
               activities,
               settings.zones,
               mention.itemId,
             );
             break;
           case 'gear':
-            data = await resolveGear(mention.itemId);
+            data = await resolveGear(athleteId, mention.itemId);
             break;
           case 'plan':
             data = await resolvePlan(athleteId);
@@ -398,10 +407,12 @@ export const useMentionResolver = () => {
 // ----- Sub-item loaders (for MentionPopup) -----
 
 /** Load recent activities for the @activity sub-item list. */
-export const loadActivitySubItems = async (): Promise<
+export const loadActivitySubItems = async (
+  athleteId: number,
+): Promise<
   Array<{id: string; label: string}>
 > => {
-  const cached = await neonGetActivities();
+  const cached = await neonGetActivities(athleteId);
   if (!cached) return [];
 
   const sorted = [...cached]
@@ -418,10 +429,12 @@ export const loadActivitySubItems = async (): Promise<
 };
 
 /** Load shoes for the @gear sub-item list. */
-export const loadGearSubItems = async (): Promise<
+export const loadGearSubItems = async (
+  athleteId: number,
+): Promise<
   Array<{id: string; label: string}>
 > => {
-  const gear = await neonGetAthleteGear('athlete-gear');
+  const gear = await neonGetAthleteGear(athleteId);
   if (!gear) return [];
 
   const shoes = gear.shoes as StravaSummaryGear[];

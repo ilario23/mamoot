@@ -63,10 +63,11 @@ const fetchSettings = async (
 };
 
 /** Get all activities from Neon, sorted by date descending. */
-const fetchActivities = async (): Promise<ActivitySummary[]> => {
+const fetchActivities = async (athleteId: number): Promise<ActivitySummary[]> => {
   const rows = await db
     .select()
     .from(activitiesTable)
+    .where(eq(activitiesTable.athleteId, athleteId))
     .orderBy(desc(activitiesTable.date));
   return rows.map(parseActivityRow);
 };
@@ -75,10 +76,13 @@ const fetchActivities = async (): Promise<ActivitySummary[]> => {
 type ActivityWithRaw = ActivitySummary & {elapsedTime: number};
 
 /** Get all activities with extra raw Strava fields (elapsed_time). */
-const fetchActivitiesWithRaw = async (): Promise<ActivityWithRaw[]> => {
+const fetchActivitiesWithRaw = async (
+  athleteId: number,
+): Promise<ActivityWithRaw[]> => {
   const rows = await db
     .select()
     .from(activitiesTable)
+    .where(eq(activitiesTable.athleteId, athleteId))
     .orderBy(desc(activitiesTable.date));
   return rows.map((row) => {
     const raw = row.data as StravaSummaryActivity;
@@ -119,6 +123,7 @@ const filterByWeeks = (
  * fetches the detailed activity, runs the classifier, and stores the result.
  */
 const fetchOrComputeLabels = async (
+  athleteId: number,
   activityIds: number[],
   zones: UserSettings['zones'],
 ): Promise<Map<number, WorkoutLabel>> => {
@@ -130,7 +135,12 @@ const fetchOrComputeLabels = async (
     const existing = await db
       .select()
       .from(activityLabelsTable)
-      .where(inArray(activityLabelsTable.id, activityIds));
+      .where(
+        and(
+          eq(activityLabelsTable.athleteId, athleteId),
+          inArray(activityLabelsTable.id, activityIds),
+        ),
+      );
 
     for (const row of existing) {
       result.set(row.id, row.data as WorkoutLabel);
@@ -148,10 +158,16 @@ const fetchOrComputeLabels = async (
     const details = await db
       .select()
       .from(activityDetailsTable)
-      .where(inArray(activityDetailsTable.id, missingIds));
+      .where(
+        and(
+          eq(activityDetailsTable.athleteId, athleteId),
+          inArray(activityDetailsTable.id, missingIds),
+        ),
+      );
 
     const newLabels: Array<{
       id: number;
+      athleteId: number;
       data: WorkoutLabel;
       computedAt: number;
     }> = [];
@@ -161,7 +177,12 @@ const fetchOrComputeLabels = async (
       const label = classifyWorkout(detail, zones);
       if (label) {
         result.set(row.id, label);
-        newLabels.push({id: row.id, data: label, computedAt: Date.now()});
+        newLabels.push({
+          id: row.id,
+          athleteId,
+          data: label,
+          computedAt: Date.now(),
+        });
       }
     }
 
@@ -249,7 +270,7 @@ export const createRetrievalTools = (athleteId: number) => ({
         .describe('Number of weeks to summarize. Default 4.'),
     }),
     execute: async ({weeks = 4}: {weeks?: number}) => {
-      const allActivities = await fetchActivities();
+      const allActivities = await fetchActivities(athleteId);
       const recent = filterByWeeks(allActivities, weeks);
       const prior = filterByWeeks(allActivities, weeks, weeks);
 
@@ -286,7 +307,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       const zones = settings?.zones as UserSettings['zones'] | undefined;
       const activityIds = recent.map((a) => Number(a.id));
       const labels = zones
-        ? await fetchOrComputeLabels(activityIds, zones)
+        ? await fetchOrComputeLabels(athleteId, activityIds, zones)
         : new Map<number, WorkoutLabel>();
 
       const typeCounts = new Map<string, number>();
@@ -319,6 +340,7 @@ export const createRetrievalTools = (athleteId: number) => ({
           const breakdowns = await db
             .select()
             .from(zoneBreakdownsTable)
+            .where(eq(zoneBreakdownsTable.athleteId, athleteId))
             .catch(
               () => [] as Array<typeof zoneBreakdownsTable.$inferSelect>,
             );
@@ -392,7 +414,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       weeks: z.number().optional().describe('Number of weeks. Default 4.'),
     }),
     execute: async ({weeks = 4}: {weeks?: number}) => {
-      const allActivities = await fetchActivities();
+      const allActivities = await fetchActivities(athleteId);
       const recent = filterByWeeks(allActivities, weeks);
 
       // Fetch workout labels for all recent activities
@@ -400,7 +422,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       const zones = settings?.zones as UserSettings['zones'] | undefined;
       const allIds = recent.map((a) => Number(a.id));
       const labels = zones
-        ? await fetchOrComputeLabels(allIds, zones)
+        ? await fetchOrComputeLabels(athleteId, allIds, zones)
         : new Map<number, WorkoutLabel>();
 
       const weekMap = new Map<string, ActivitySummary[]>();
@@ -463,7 +485,7 @@ export const createRetrievalTools = (athleteId: number) => ({
     }),
     execute: async ({weeks = 4}: {weeks?: number}) => {
       // Get recent activity IDs
-      const allActivities = await fetchActivities();
+      const allActivities = await fetchActivities(athleteId);
       const recent = filterByWeeks(allActivities, weeks);
       const activityIds = recent.map((a) => Number(a.id));
 
@@ -475,6 +497,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       const breakdowns = await db
         .select()
         .from(zoneBreakdownsTable)
+        .where(eq(zoneBreakdownsTable.athleteId, athleteId))
         .catch(() => [] as Array<typeof zoneBreakdownsTable.$inferSelect>);
 
       // Filter to matching activity IDs
@@ -560,7 +583,7 @@ export const createRetrievalTools = (athleteId: number) => ({
         };
       }
 
-      const allActivities = await fetchActivities();
+      const allActivities = await fetchActivities(athleteId);
       const zones = settings.zones as UserSettings['zones'];
 
       const fitnessResult = calcFitnessData(
@@ -625,7 +648,7 @@ export const createRetrievalTools = (athleteId: number) => ({
         .describe('Number of activities to return. Default 10.'),
     }),
     execute: async ({count = 10}: {count?: number}) => {
-      const allActivities = await fetchActivitiesWithRaw();
+      const allActivities = await fetchActivitiesWithRaw(athleteId);
       const recent = allActivities.slice(0, count);
 
       if (recent.length === 0) {
@@ -639,7 +662,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       // Fetch/compute labels for all recent activities
       const activityIds = recent.map((a) => Number(a.id));
       const labels = zones
-        ? await fetchOrComputeLabels(activityIds, zones)
+        ? await fetchOrComputeLabels(athleteId, activityIds, zones)
         : new Map<number, WorkoutLabel>();
 
       const lines = [`Recent Activities (Last ${recent.length})`];
@@ -685,8 +708,12 @@ export const createRetrievalTools = (athleteId: number) => ({
     inputSchema: z.object({}),
     execute: async () => {
       // Athlete gear uses a key-based lookup — try the athleteId as key
-      const rows = await db.select().from(athleteGear);
-      const gear = rows[0]; // Usually one row per athlete
+      const rows = await db
+        .select()
+        .from(athleteGear)
+        .where(eq(athleteGear.athleteId, athleteId))
+        .limit(1);
+      const gear = rows[0];
 
       if (!gear) {
         return {gear: 'No gear data available.'};
@@ -862,7 +889,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       });
 
       // 4. Fetch actual activities in this date range
-      const allActivities = await fetchActivities();
+      const allActivities = await fetchActivities(athleteId);
       const weekActivities = allActivities.filter(
         (a) => a.date >= weekStartDate && a.date <= weekEndDate,
       );
@@ -872,7 +899,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       const zones = settings?.zones as UserSettings['zones'] | undefined;
       const activityIds = weekActivities.map((a) => Number(a.id));
       const labels = zones
-        ? await fetchOrComputeLabels(activityIds, zones)
+        ? await fetchOrComputeLabels(athleteId, activityIds, zones)
         : new Map<number, WorkoutLabel>();
 
       // 6. Match by date and build comparison table
@@ -1025,7 +1052,12 @@ export const createRetrievalTools = (athleteId: number) => ({
       const detailRows = await db
         .select()
         .from(activityDetailsTable)
-        .where(eq(activityDetailsTable.id, activityId))
+        .where(
+          and(
+            eq(activityDetailsTable.id, activityId),
+            eq(activityDetailsTable.athleteId, athleteId),
+          ),
+        )
         .limit(1);
 
       if (detailRows.length === 0) {
@@ -1177,6 +1209,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       const allDetails = await db
         .select()
         .from(activityDetailsTable)
+        .where(eq(activityDetailsTable.athleteId, athleteId))
         .catch(() => [] as Array<typeof activityDetailsTable.$inferSelect>);
 
       if (!allDetails || allDetails.length === 0) {

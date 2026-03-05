@@ -248,7 +248,11 @@ export async function POST(req: Request) {
 
       const [settingsRows, activityRows] = await Promise.all([
         db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
-        db.select().from(activitiesTable).orderBy(desc(activitiesTable.date)),
+        db
+          .select()
+          .from(activitiesTable)
+          .where(eq(activitiesTable.athleteId, athleteId))
+          .orderBy(desc(activitiesTable.date)),
       ]);
 
       const settings = settingsRows[0];
@@ -448,7 +452,11 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
 
     const [settingsRows, activityRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
-      db.select().from(activitiesTable).orderBy(desc(activitiesTable.date)),
+      db
+        .select()
+        .from(activitiesTable)
+        .where(eq(activitiesTable.athleteId, athleteId))
+        .orderBy(desc(activitiesTable.date)),
     ]);
 
     const settings = settingsRows[0];

@@ -182,7 +182,11 @@ export async function POST(req: Request) {
     // Step 1: Load context
     const [settingsRows, activityRows, planRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
-      db.select().from(activitiesTable).orderBy(desc(activitiesTable.date)),
+      db
+        .select()
+        .from(activitiesTable)
+        .where(eq(activitiesTable.athleteId, athleteId))
+        .orderBy(desc(activitiesTable.date)),
       db
         .select()
         .from(weeklyPlans)
@@ -351,6 +355,7 @@ export async function POST(req: Request) {
       if (prevPlan && prevPlan.weekStart !== weekStart) {
         console.log(`[WeeklyPlan] New week detected (prev: ${prevPlan.weekStart}, new: ${weekStart}). Building review...`);
         lastWeekReview = await buildWeekReview(
+          athleteId,
           {sessions: prevPlan.sessions, weekStart: prevPlan.weekStart},
           allActivities,
           typedZones,

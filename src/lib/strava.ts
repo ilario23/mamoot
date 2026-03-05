@@ -40,23 +40,54 @@ export interface StravaAthlete {
 }
 
 const STORAGE_KEY = "mamoot-strava-tokens";
+const ACTIVE_ATHLETE_KEY = "mamoot-active-athlete-id";
+const getTokenStorageKey = (athleteId: number) => `${STORAGE_KEY}:${athleteId}`;
 
-export const getStoredTokens = (): StravaTokens | null => {
+const getActiveAthleteId = (): number | null => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(ACTIVE_ATHLETE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const setActiveAthleteId = (athleteId: number): void => {
+  localStorage.setItem(ACTIVE_ATHLETE_KEY, String(athleteId));
+};
+
+export const getStoredTokens = (athleteId?: number): StravaTokens | null => {
+  try {
+    const targetAthleteId = athleteId ?? getActiveAthleteId();
+    const raw = targetAthleteId
+      ? localStorage.getItem(getTokenStorageKey(targetAthleteId))
+      : localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StravaTokens;
+    if (parsed?.athlete?.id) {
+      setActiveAthleteId(parsed.athlete.id);
+    }
+    return parsed;
   } catch {
     return null;
   }
 };
 
 export const storeTokens = (tokens: StravaTokens): void => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tokens));
+  localStorage.setItem(getTokenStorageKey(tokens.athlete.id), JSON.stringify(tokens));
+  setActiveAthleteId(tokens.athlete.id);
 };
 
-export const clearTokens = (): void => {
-  localStorage.removeItem(STORAGE_KEY);
+export const clearTokens = (athleteId?: number): void => {
+  const targetAthleteId = athleteId ?? getActiveAthleteId();
+  if (targetAthleteId) {
+    localStorage.removeItem(getTokenStorageKey(targetAthleteId));
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+  localStorage.removeItem(ACTIVE_ATHLETE_KEY);
 };
 
 // ----- OAuth helpers -----

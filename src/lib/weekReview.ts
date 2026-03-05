@@ -8,7 +8,7 @@ import {
   activityDetails as activityDetailsTable,
   activityLabels as activityLabelsTable,
 } from '@/db/schema';
-import {inArray} from 'drizzle-orm';
+import {and, eq, inArray} from 'drizzle-orm';
 import type {ActivitySummary, UserSettings} from './activityModel';
 import {formatPace} from './activityModel';
 import {
@@ -27,6 +27,7 @@ type UnifiedSessionShape = {
 };
 
 async function fetchOrComputeLabels(
+  athleteId: number,
   activityIds: number[],
   zones: UserSettings['zones'],
 ): Promise<Map<number, WorkoutLabel>> {
@@ -37,7 +38,12 @@ async function fetchOrComputeLabels(
     const existing = await db
       .select()
       .from(activityLabelsTable)
-      .where(inArray(activityLabelsTable.id, activityIds));
+      .where(
+        and(
+          eq(activityLabelsTable.athleteId, athleteId),
+          inArray(activityLabelsTable.id, activityIds),
+        ),
+      );
 
     for (const row of existing) {
       result.set(row.id, row.data as WorkoutLabel);
@@ -53,16 +59,31 @@ async function fetchOrComputeLabels(
     const details = await db
       .select()
       .from(activityDetailsTable)
-      .where(inArray(activityDetailsTable.id, missingIds));
+      .where(
+        and(
+          eq(activityDetailsTable.athleteId, athleteId),
+          inArray(activityDetailsTable.id, missingIds),
+        ),
+      );
 
-    const newLabels: Array<{id: number; data: WorkoutLabel; computedAt: number}> = [];
+    const newLabels: Array<{
+      id: number;
+      athleteId: number;
+      data: WorkoutLabel;
+      computedAt: number;
+    }> = [];
 
     for (const row of details) {
       const detail = row.data as StravaDetailedActivity;
       const label = classifyWorkout(detail, zones);
       if (label) {
         result.set(row.id, label);
-        newLabels.push({id: row.id, data: label, computedAt: Date.now()});
+        newLabels.push({
+          id: row.id,
+          athleteId,
+          data: label,
+          computedAt: Date.now(),
+        });
       }
     }
 
@@ -88,6 +109,7 @@ async function fetchOrComputeLabels(
  * @returns A text summary suitable for prompt injection, or null if no meaningful comparison
  */
 export async function buildWeekReview(
+  athleteId: number,
   plan: {sessions: unknown; weekStart: string},
   allActivities: ActivitySummary[],
   zones: UserSettings['zones'] | undefined,
@@ -125,7 +147,7 @@ export async function buildWeekReview(
 
   const activityIds = weekActivities.map((a) => Number(a.id));
   const labels = zones
-    ? await fetchOrComputeLabels(activityIds, zones)
+    ? await fetchOrComputeLabels(athleteId, activityIds, zones)
     : new Map<number, WorkoutLabel>();
 
   const plannedDates = new Set(weekSessions.map((s) => s.date));

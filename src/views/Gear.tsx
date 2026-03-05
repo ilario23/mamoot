@@ -9,7 +9,7 @@ import {toggleRetiredGear} from '@/lib/retiredGear';
 import GearCard from '@/components/gear/GearCard';
 
 const Gear = () => {
-  const {isAuthenticated} = useStravaAuth();
+  const {isAuthenticated, athlete} = useStravaAuth();
   const {data: gearData, isLoading} = useAthleteGear();
   const queryClient = useQueryClient();
 
@@ -21,11 +21,12 @@ const Gear = () => {
 
   const handleToggleRetire = useCallback(
     async (gearId: string) => {
-      await toggleRetiredGear(gearId);
+      if (!athlete?.id) return;
+      await toggleRetiredGear(athlete.id, gearId);
       // Invalidate gear query so retiredIds reflect the change
-      queryClient.invalidateQueries({queryKey: ['strava', 'gear']});
+      queryClient.invalidateQueries({queryKey: ['strava', 'gear', athlete.id]});
     },
-    [queryClient],
+    [queryClient, athlete?.id],
   );
 
   // Sort: active gear first, retired gear last

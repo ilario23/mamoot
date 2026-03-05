@@ -18,7 +18,7 @@ import {
   bestEffortsCache,
   userSettings,
 } from '@/db/schema';
-import {eq, sql} from 'drizzle-orm';
+import {and, eq, sql} from 'drizzle-orm';
 import type {
   StravaDetailedActivity,
   StravaSplit,
@@ -95,7 +95,8 @@ const getOrComputeSixMonthBests = async (
   // Current total count of activity_details rows
   const [{count: currentCount}] = await db
     .select({count: sql<number>`count(*)::int`})
-    .from(activityDetailsTable);
+    .from(activityDetailsTable)
+    .where(eq(activityDetailsTable.athleteId, athleteId));
 
   // Check cache
   const cached = await db
@@ -109,7 +110,10 @@ const getOrComputeSixMonthBests = async (
   }
 
   // Compute: fetch all activity details and scan best_efforts
-  const allDetails = await db.select().from(activityDetailsTable);
+  const allDetails = await db
+    .select()
+    .from(activityDetailsTable)
+    .where(eq(activityDetailsTable.athleteId, athleteId));
 
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -358,12 +362,23 @@ export const POST = async (req: Request) => {
       headers: {'Content-Type': 'application/json'},
     });
   }
+  if (!athleteId) {
+    return new Response(JSON.stringify({error: 'athleteId is required'}), {
+      status: 400,
+      headers: {'Content-Type': 'application/json'},
+    });
+  }
 
   // Fetch activity detail from Neon
   const detailRows = await db
     .select()
     .from(activityDetailsTable)
-    .where(eq(activityDetailsTable.id, activityId))
+    .where(
+      and(
+        eq(activityDetailsTable.id, activityId),
+        eq(activityDetailsTable.athleteId, athleteId),
+      ),
+    )
     .limit(1);
 
   if (detailRows.length === 0) {
@@ -379,22 +394,18 @@ export const POST = async (req: Request) => {
 
   // Fetch user settings for HR zones (needed for rule-based comparison)
   let zones: UserSettings['zones'] | undefined;
-  if (athleteId) {
-    const settingsRows = await db
-      .select()
-      .from(userSettings)
-      .where(eq(userSettings.athleteId, athleteId));
-    const s = settingsRows[0];
-    if (s) {
-      zones = s.zones as UserSettings['zones'];
-    }
+  const settingsRows = await db
+    .select()
+    .from(userSettings)
+    .where(eq(userSettings.athleteId, athleteId));
+  const s = settingsRows[0];
+  if (s) {
+    zones = s.zones as UserSettings['zones'];
   }
 
   // Fetch (or compute & cache) 6-month best efforts for the athlete
   let sixMonthBests: SixMonthBests | null = null;
-  if (athleteId) {
-    sixMonthBests = await getOrComputeSixMonthBests(athleteId);
-  }
+  sixMonthBests = await getOrComputeSixMonthBests(athleteId);
 
   // Format the activity data
   const {text: activityText, ruleBasedLabel} = formatActivityDetail(
