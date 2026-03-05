@@ -125,7 +125,7 @@ export interface CachedChatSession {
   id: string;
   /** Strava athlete ID */
   athleteId: number;
-  /** Persona: "coach" | "nutritionist" | "physio" */
+  /** Persona: "coach" | "nutritionist" | "physio" | "orchestrator" */
   persona: string;
   /** Auto-generated from first user message */
   title: string;
@@ -150,6 +150,39 @@ export interface CachedChatMessage {
   content: string;
   /** Unix ms timestamp */
   createdAt: number;
+}
+
+export type ChatFeedbackRating = 'helpful' | 'not_helpful';
+
+export type ChatFeedbackReason =
+  | 'helpful'
+  | 'unsafe'
+  | 'too_generic'
+  | 'not_actionable'
+  | 'wrong_context'
+  | 'other';
+
+export interface CachedChatMessageFeedback {
+  /** UUID primary key */
+  id: string;
+  /** Strava athlete ID */
+  athleteId: number;
+  /** FK to CachedChatSession.id */
+  sessionId: string;
+  /** FK to CachedChatMessage.id */
+  messageId: string;
+  /** Persona used when this response was produced */
+  persona: string;
+  /** "helpful" or "not_helpful" */
+  rating: ChatFeedbackRating;
+  /** Short taxonomy code */
+  reason: ChatFeedbackReason | null;
+  /** Optional user free text comment */
+  freeText: string | null;
+  /** Unix ms timestamp */
+  createdAt: number;
+  /** Unix ms timestamp */
+  updatedAt: number;
 }
 
 // ----- Activity label persistence -----
@@ -274,6 +307,72 @@ export interface CachedTrainingBlock {
   phases: TrainingPhase[];
   weekOutlines: WeekOutline[];
   isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ----- Orchestrator tracking persistence -----
+
+export type OrchestratorGoalStatus = 'active' | 'on_hold' | 'done';
+
+export interface CachedOrchestratorGoal {
+  id: string;
+  athleteId: number;
+  sessionId: string;
+  title: string;
+  detail: string | null;
+  status: OrchestratorGoalStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type OrchestratorPlanItemStatus =
+  | 'todo'
+  | 'in_progress'
+  | 'blocked'
+  | 'done';
+
+export interface CachedOrchestratorPlanItem {
+  id: string;
+  athleteId: number;
+  sessionId: string;
+  title: string;
+  detail: string | null;
+  status: OrchestratorPlanItemStatus;
+  ownerPersona: string | null;
+  dueDate: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type OrchestratorBlockerStatus = 'open' | 'resolved';
+
+export interface CachedOrchestratorBlocker {
+  id: string;
+  athleteId: number;
+  sessionId: string;
+  title: string;
+  detail: string | null;
+  status: OrchestratorBlockerStatus;
+  linkedPlanItemId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type OrchestratorHandoffStatus =
+  | 'pending'
+  | 'accepted'
+  | 'done'
+  | 'cancelled';
+
+export interface CachedOrchestratorHandoff {
+  id: string;
+  athleteId: number;
+  sessionId: string;
+  targetPersona: 'coach' | 'nutritionist' | 'physio';
+  title: string;
+  detail: string | null;
+  status: OrchestratorHandoffStatus;
   createdAt: number;
   updatedAt: number;
 }

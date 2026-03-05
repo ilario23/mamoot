@@ -11,13 +11,30 @@ import {
   suggestFollowUpsSchema,
   saveWeeklyPreferencesSchema,
   updateTrainingBlockSchema,
+  orchestratorGoalSchema,
+  orchestratorGoalUpdateSchema,
+  orchestratorPlanItemSchema,
+  orchestratorPlanItemUpdateSchema,
+  orchestratorBlockerSchema,
+  orchestratorBlockerUpdateSchema,
+  orchestratorHandoffSchema,
+  orchestratorHandoffUpdateSchema,
 } from '@/lib/aiTools';
 import {createRetrievalTools} from '@/lib/aiRetrievalTools';
 import {db} from '@/db';
-import {userSettings, trainingBlocks} from '@/db/schema';
+import {
+  userSettings,
+  trainingBlocks,
+  orchestratorGoals,
+  orchestratorPlanItems,
+  orchestratorBlockers,
+  orchestratorHandoffs,
+} from '@/db/schema';
 import {eq, and, isNull} from 'drizzle-orm';
 import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
+import {chatRequestSchema} from '@/lib/aiRequestSchemas';
+import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -39,6 +56,9 @@ const ALLOWED_MODELS: Record<
   'claude-sonnet-4-5': () => anthropic('claude-sonnet-4-5'),
   'claude-haiku-3-5': () => anthropic('claude-3-5-haiku-latest'),
 };
+
+const ORCHESTRATOR_ENABLED =
+  (process.env.AI_ORCHESTRATOR_ENABLED ?? 'true').toLowerCase() !== 'false';
 
 // ----- Provider / model selection -----
 
@@ -63,7 +83,31 @@ const getModel = (clientModel?: string) => {
 // ----- Route handler -----
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  const trace = createTraceContext('ai.chat', req);
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({error: 'Invalid JSON body'}), {
+      status: 400,
+      headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
+    });
+  }
+
+  const parsedBody = chatRequestSchema.safeParse(body);
+  if (!parsedBody.success) {
+    return new Response(
+      JSON.stringify({
+        error: 'Invalid request body',
+        issues: parsedBody.error.issues.map((issue) => issue.message),
+      }),
+      {
+        status: 400,
+        headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
+      },
+    );
+  }
+
   const {
     messages,
     persona,
@@ -80,7 +124,22 @@ export async function POST(req: Request) {
     athleteId?: number | null;
     sessionId?: string | null;
     explicitContext?: ResolvedMention[] | null;
-  } = body;
+  } = parsedBody.data as {
+    messages: UIMessage[];
+    persona: string;
+    memory?: string | null;
+    model?: string;
+    athleteId?: number | null;
+    sessionId?: string | null;
+    explicitContext?: ResolvedMention[] | null;
+  };
+
+  logAiTrace(trace, 'request_received', {
+    persona,
+    sessionId: sessionId ?? null,
+    athleteId: athleteId ?? null,
+    messageCount: messages.length,
+  });
 
   // --- AI Debug Logging ---
   const resolvedModel =
@@ -111,9 +170,26 @@ export async function POST(req: Request) {
   if (!persona || !isValidPersona(persona)) {
     return new Response(
       JSON.stringify({
-        error: 'Invalid persona. Must be one of: coach, nutritionist, physio',
+        error:
+          'Invalid persona. Must be one of: coach, nutritionist, physio, orchestrator',
       }),
-      {status: 400, headers: {'Content-Type': 'application/json'}},
+      {
+        status: 400,
+        headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
+      },
+    );
+  }
+
+  if (persona === 'orchestrator' && !ORCHESTRATOR_ENABLED) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Orchestrator chat is currently disabled. Ask an admin to enable AI_ORCHESTRATOR_ENABLED.',
+      }),
+      {
+        status: 503,
+        headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
+      },
     );
   }
 
@@ -124,6 +200,21 @@ export async function POST(req: Request) {
         error: 'Messages array is required and must not be empty',
       }),
       {status: 400, headers: {'Content-Type': 'application/json'}},
+    );
+  }
+
+  if (persona === 'orchestrator' && (!athleteId || !sessionId)) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Orchestrator requires athleteId and sessionId to coordinate goals, blockers, and handoffs.',
+        clarification:
+          'Open an orchestrator conversation from AI Team and try again.',
+      }),
+      {
+        status: 400,
+        headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
+      },
     );
   }
 
@@ -161,6 +252,10 @@ export async function POST(req: Request) {
     trainingBalance,
     memory ?? null,
   );
+  logAiTrace(trace, 'system_prompt_built', {
+    promptHash: promptHash(system),
+    memoryChars: memory?.length ?? 0,
+  });
 
   // Strip client-side mention metadata (<!-- mentions:... -->) from all user messages
   // so the LLM never sees the raw HTML comment markers
@@ -207,7 +302,17 @@ export async function POST(req: Request) {
   }
 
   // Build tools — retrieval tools (all personas) + follow-up suggestions
-  const retrievalTools = athleteId ? createRetrievalTools(athleteId) : {};
+  const allRetrievalTools = athleteId ? createRetrievalTools(athleteId) : null;
+  const retrievalTools = allRetrievalTools ?? {};
+  const orchestratorRetrievalTools =
+    allRetrievalTools && persona === 'orchestrator'
+      ? {
+          getTrainingGoal: allRetrievalTools.getTrainingGoal,
+          getInjuries: allRetrievalTools.getInjuries,
+          getWeeklyPlan: allRetrievalTools.getWeeklyPlan,
+          getTrainingBlock: allRetrievalTools.getTrainingBlock,
+        }
+      : {};
 
   const suggestFollowUps = {
     suggestFollowUps: {
@@ -293,14 +398,238 @@ export async function POST(req: Request) {
         }
       : {};
 
+  const orchestratorTools =
+    persona === 'orchestrator'
+      ? {
+          createOrchestratorGoal: {
+            description:
+              'Create a high-level goal tracked in the orchestrator board.',
+            inputSchema: orchestratorGoalSchema,
+            execute: async (input: {
+              title: string;
+              detail?: string;
+              status?: 'active' | 'on_hold' | 'done';
+            }) => {
+              if (!athleteId || !sessionId) {
+                return {saved: false, error: 'athleteId and sessionId required'};
+              }
+              const now = Date.now();
+              const record = {
+                id: crypto.randomUUID(),
+                athleteId,
+                sessionId,
+                title: input.title,
+                detail: input.detail ?? null,
+                status: input.status ?? 'active',
+                createdAt: now,
+                updatedAt: now,
+              };
+              await db.insert(orchestratorGoals).values(record);
+              return {saved: true, goal: record};
+            },
+          },
+          updateOrchestratorGoal: {
+            description: 'Update an existing orchestrator goal.',
+            inputSchema: orchestratorGoalUpdateSchema,
+            execute: async (input: {
+              id: string;
+              title?: string;
+              detail?: string;
+              status?: 'active' | 'on_hold' | 'done';
+            }) => {
+              await db
+                .update(orchestratorGoals)
+                .set({
+                  ...(input.title !== undefined ? {title: input.title} : {}),
+                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
+                  ...(input.status !== undefined ? {status: input.status} : {}),
+                  updatedAt: Date.now(),
+                })
+                .where(eq(orchestratorGoals.id, input.id));
+              return {updated: true, id: input.id};
+            },
+          },
+          createOrchestratorPlanItem: {
+            description:
+              'Create a concrete execution item for the not-done queue.',
+            inputSchema: orchestratorPlanItemSchema,
+            execute: async (input: {
+              title: string;
+              detail?: string;
+              status?: 'todo' | 'in_progress' | 'blocked' | 'done';
+              ownerPersona?: 'coach' | 'nutritionist' | 'physio';
+              dueDate?: string;
+            }) => {
+              if (!athleteId || !sessionId) {
+                return {saved: false, error: 'athleteId and sessionId required'};
+              }
+              const now = Date.now();
+              const record = {
+                id: crypto.randomUUID(),
+                athleteId,
+                sessionId,
+                title: input.title,
+                detail: input.detail ?? null,
+                status: input.status ?? 'todo',
+                ownerPersona: input.ownerPersona ?? null,
+                dueDate: input.dueDate ?? null,
+                createdAt: now,
+                updatedAt: now,
+              };
+              await db.insert(orchestratorPlanItems).values(record);
+              return {saved: true, planItem: record};
+            },
+          },
+          updateOrchestratorPlanItem: {
+            description: 'Update an existing plan item in the orchestrator queue.',
+            inputSchema: orchestratorPlanItemUpdateSchema,
+            execute: async (input: {
+              id: string;
+              title?: string;
+              detail?: string;
+              status?: 'todo' | 'in_progress' | 'blocked' | 'done';
+              ownerPersona?: 'coach' | 'nutritionist' | 'physio';
+              dueDate?: string;
+            }) => {
+              await db
+                .update(orchestratorPlanItems)
+                .set({
+                  ...(input.title !== undefined ? {title: input.title} : {}),
+                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
+                  ...(input.status !== undefined ? {status: input.status} : {}),
+                  ...(input.ownerPersona !== undefined
+                    ? {ownerPersona: input.ownerPersona}
+                    : {}),
+                  ...(input.dueDate !== undefined ? {dueDate: input.dueDate} : {}),
+                  updatedAt: Date.now(),
+                })
+                .where(eq(orchestratorPlanItems.id, input.id));
+              return {updated: true, id: input.id};
+            },
+          },
+          createOrchestratorBlocker: {
+            description: 'Create a blocker item that prevents plan completion.',
+            inputSchema: orchestratorBlockerSchema,
+            execute: async (input: {
+              title: string;
+              detail?: string;
+              linkedPlanItemId?: string;
+              status?: 'open' | 'resolved';
+            }) => {
+              if (!athleteId || !sessionId) {
+                return {saved: false, error: 'athleteId and sessionId required'};
+              }
+              const now = Date.now();
+              const record = {
+                id: crypto.randomUUID(),
+                athleteId,
+                sessionId,
+                title: input.title,
+                detail: input.detail ?? null,
+                status: input.status ?? 'open',
+                linkedPlanItemId: input.linkedPlanItemId ?? null,
+                createdAt: now,
+                updatedAt: now,
+              };
+              await db.insert(orchestratorBlockers).values(record);
+              return {saved: true, blocker: record};
+            },
+          },
+          updateOrchestratorBlocker: {
+            description: 'Update an existing blocker.',
+            inputSchema: orchestratorBlockerUpdateSchema,
+            execute: async (input: {
+              id: string;
+              title?: string;
+              detail?: string;
+              linkedPlanItemId?: string;
+              status?: 'open' | 'resolved';
+            }) => {
+              await db
+                .update(orchestratorBlockers)
+                .set({
+                  ...(input.title !== undefined ? {title: input.title} : {}),
+                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
+                  ...(input.status !== undefined ? {status: input.status} : {}),
+                  ...(input.linkedPlanItemId !== undefined
+                    ? {linkedPlanItemId: input.linkedPlanItemId}
+                    : {}),
+                  updatedAt: Date.now(),
+                })
+                .where(eq(orchestratorBlockers.id, input.id));
+              return {updated: true, id: input.id};
+            },
+          },
+          createOrchestratorHandoff: {
+            description:
+              'Create a handoff task for coach, nutritionist, or physio execution.',
+            inputSchema: orchestratorHandoffSchema,
+            execute: async (input: {
+              targetPersona: 'coach' | 'nutritionist' | 'physio';
+              title: string;
+              detail?: string;
+              status?: 'pending' | 'accepted' | 'done' | 'cancelled';
+            }) => {
+              if (!athleteId || !sessionId) {
+                return {saved: false, error: 'athleteId and sessionId required'};
+              }
+              const now = Date.now();
+              const record = {
+                id: crypto.randomUUID(),
+                athleteId,
+                sessionId,
+                targetPersona: input.targetPersona,
+                title: input.title,
+                detail: input.detail ?? null,
+                status: input.status ?? 'pending',
+                createdAt: now,
+                updatedAt: now,
+              };
+              await db.insert(orchestratorHandoffs).values(record);
+              return {saved: true, handoff: record};
+            },
+          },
+          updateOrchestratorHandoff: {
+            description: 'Update the state of an existing handoff.',
+            inputSchema: orchestratorHandoffUpdateSchema,
+            execute: async (input: {
+              id: string;
+              targetPersona?: 'coach' | 'nutritionist' | 'physio';
+              title?: string;
+              detail?: string;
+              status?: 'pending' | 'accepted' | 'done' | 'cancelled';
+            }) => {
+              await db
+                .update(orchestratorHandoffs)
+                .set({
+                  ...(input.targetPersona !== undefined
+                    ? {targetPersona: input.targetPersona}
+                    : {}),
+                  ...(input.title !== undefined ? {title: input.title} : {}),
+                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
+                  ...(input.status !== undefined ? {status: input.status} : {}),
+                  updatedAt: Date.now(),
+                })
+                .where(eq(orchestratorHandoffs.id, input.id));
+              return {updated: true, id: input.id};
+            },
+          },
+        }
+      : {};
+
   const tools = {
-    ...retrievalTools,
+    ...(persona === 'orchestrator' ? orchestratorRetrievalTools : retrievalTools),
     ...coachOnlyTools,
+    ...orchestratorTools,
     ...suggestFollowUps,
   };
 
   const toolNames = Object.keys(tools);
   console.log(`[AI] Tools registered: [${toolNames.join(', ')}]`);
+  logAiTrace(trace, 'tools_registered', {
+    toolCount: toolNames.length,
+    tools: toolNames,
+  });
 
   const result = streamText({
     model: getModel(clientModel),
@@ -309,6 +638,13 @@ export async function POST(req: Request) {
     tools: Object.keys(tools).length > 0 ? tools : undefined,
     stopWhen: stepCountIs(5),
     onStepFinish(event) {
+      logAiTrace(trace, 'step_finished', {
+        finishReason: event.finishReason,
+        toolCalls: event.toolCalls?.length ?? 0,
+        toolResults: event.toolResults?.length ?? 0,
+        inputTokens: event.usage?.inputTokens ?? null,
+        outputTokens: event.usage?.outputTokens ?? null,
+      });
       console.log(`[AI] --- Step finished (reason: ${event.finishReason}) ---`);
       const calls = event.toolCalls;
       if (Array.isArray(calls) && calls.length > 0) {
@@ -341,6 +677,12 @@ export async function POST(req: Request) {
       }
     },
     onFinish(event) {
+      logAiTrace(trace, 'request_finished', {
+        finishReason: event.finishReason,
+        steps: Array.isArray(event.steps) ? event.steps.length : null,
+        inputTokens: event.usage?.inputTokens ?? null,
+        outputTokens: event.usage?.outputTokens ?? null,
+      });
       console.log(`[AI] ========== Request Complete ==========`);
       console.log(`[AI] Final reason: ${event.finishReason}`);
       console.log(
@@ -356,5 +698,9 @@ export async function POST(req: Request) {
     },
   });
 
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse({
+    headers: {
+      'x-trace-id': trace.traceId,
+    },
+  });
 }

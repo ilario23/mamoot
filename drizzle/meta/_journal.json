@@ -78,6 +78,20 @@
       "when": 1772496000000,
       "tag": "0011_training_block_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1772748295562,
+      "tag": "0011_curly_goliath",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1772749800000,
+      "tag": "0012_orchestrator_state",
+      "breakpoints": true
     }
   ]
 }

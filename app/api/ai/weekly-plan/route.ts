@@ -1,4 +1,3 @@
-import {generateObject, generateText} from 'ai';
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
 import {db} from '@/db';
@@ -20,11 +19,7 @@ import {
 import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/activityModel';
 import {buildCoachPipelinePrompt, buildPhysioPipelinePrompt} from '@/lib/weeklyPlanPrompts';
 import {
-  coachWeekOutputSchema,
-  physioWeekOutputSchema,
-  planMetaSchema,
-  type CoachWeekOutput,
-  type PhysioWeekOutput,
+  coachWeekOutputSchema, physioWeekOutputSchema, planMetaSchema, type CoachWeekOutput, type PhysioWeekOutput, type PlanMeta,
 } from '@/lib/weeklyPlanSchema';
 import type {UnifiedSession} from '@/lib/cacheTypes';
 import {buildWeekReview} from '@/lib/weekReview';
@@ -39,6 +34,13 @@ import {
   type StrategySelectionMode,
   type TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
+import {weeklyPlanRequestSchema} from '@/lib/aiRequestSchemas';
+import {generateObjectWithRetry} from '@/lib/aiGeneration';
+import {
+  validateCoachWeekOutput,
+  validateCombinedWeekSemantics,
+} from '@/lib/planSemanticValidators';
+import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 
 export const maxDuration = 120;
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
@@ -105,7 +107,38 @@ const getDatesForWeek = (mondayStr: string): {day: string; date: string}[] => {
 };
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  const trace = createTraceContext('ai.weekly-plan', req);
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      {error: 'Invalid JSON body'},
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
+    );
+  }
+  const parsedBody = weeklyPlanRequestSchema.safeParse(body);
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      {
+        error: 'Invalid request body',
+        issues: parsedBody.error.issues.map((issue) => issue.message),
+      },
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
+    );
+  }
+  const parsedData = parsedBody.data as {
+    athleteId: number;
+    weekStartDate?: string;
+    model?: string;
+    preferences?: string;
+    mode?: 'full' | 'remaining_days';
+    sourcePlanId?: string;
+    today?: string;
+    strategySelectionMode?: StrategySelectionMode;
+    strategyPreset?: TrainingStrategyPreset;
+    optimizationPriority?: OptimizationPriority;
+  };
   const {
     athleteId,
     weekStartDate,
@@ -117,21 +150,19 @@ export async function POST(req: Request) {
     strategySelectionMode,
     strategyPreset,
     optimizationPriority,
-  }: {
-    athleteId: number;
-    weekStartDate?: string;
-    model?: string;
-    preferences?: string;
-    mode?: 'full' | 'remaining_days';
-    sourcePlanId?: string;
-    today?: string;
-    strategySelectionMode?: StrategySelectionMode;
-    strategyPreset?: TrainingStrategyPreset;
-    optimizationPriority?: OptimizationPriority;
-  } = body;
+  } = parsedData;
+
+  logAiTrace(trace, 'request_received', {
+    athleteId,
+    mode: generationMode ?? 'full',
+    model: clientModel ?? null,
+  });
 
   if (!athleteId) {
-    return NextResponse.json({error: 'athleteId required'}, {status: 400});
+    return NextResponse.json(
+      {error: 'athleteId required'},
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
+    );
   }
 
   const mode = generationMode ?? 'full';
@@ -450,13 +481,18 @@ export async function POST(req: Request) {
       metricsSummary,
     });
 
-    const coachResult = await generateObject({
+    logAiTrace(trace, 'coach_prompt_built', {
+      promptHash: promptHash(coachPrompt),
+      mode,
+    });
+    const coachObject = await generateObjectWithRetry<CoachWeekOutput>({
       model,
       schema: coachWeekOutputSchema,
       prompt: coachPrompt,
+      semanticCheck: validateCoachWeekOutput,
     });
 
-    const coachSessions = coachResult.object.sessions;
+    const coachSessions = coachObject.sessions;
     console.log(`[WeeklyPlan] Coach produced ${coachSessions.length} sessions`);
 
     // Step 3: Physio generates complementary sessions
@@ -477,13 +513,19 @@ export async function POST(req: Request) {
       optimizationPriorityLabel,
     });
 
-    const physioResult = await generateObject({
+    logAiTrace(trace, 'physio_prompt_built', {
+      promptHash: promptHash(physioPrompt),
+      coachSessions: coachSessions.length,
+    });
+    const physioObject = await generateObjectWithRetry<PhysioWeekOutput>({
       model,
       schema: physioWeekOutputSchema,
       prompt: physioPrompt,
+      semanticCheck: (candidate) =>
+        validateCombinedWeekSemantics(coachObject, candidate),
     });
 
-    const physioSessions = physioResult.object.sessions;
+    const physioSessions = physioObject.sessions;
     console.log(`[WeeklyPlan] Physio produced ${physioSessions.length} sessions`);
 
     // Step 4: Merge by date
@@ -606,14 +648,14 @@ export async function POST(req: Request) {
       })
       .join('\n');
 
-    const metaResult = await generateObject({
+    const metaObject = await generateObjectWithRetry<PlanMeta>({
       model,
       schema: planMetaSchema,
       prompt: `Generate a short title and 1-2 sentence summary for this unified weekly training plan (${weekStart} to ${weekEnd}):\n\n${sessionOverview}${settings?.goal ? `\n\nAthlete goal: ${settings.goal}` : ''}`,
     });
 
     // Build markdown content
-    const markdownLines = [`# ${metaResult.object.title}`, '', metaResult.object.summary, ''];
+    const markdownLines = [`# ${metaObject.title}`, '', metaObject.summary, ''];
     for (const s of unifiedSessions) {
       markdownLines.push(`## ${s.day} — ${s.date}`);
       if (s.run) {
@@ -671,8 +713,8 @@ export async function POST(req: Request) {
       id: planId,
       athleteId,
       weekStart,
-      title: metaResult.object.title,
-      summary: metaResult.object.summary,
+      title: metaObject.title,
+      summary: metaObject.summary,
       goal: settings?.goal ?? null,
       sessions: unifiedSessions,
       content,
@@ -695,12 +737,18 @@ export async function POST(req: Request) {
 
     console.log(`[WeeklyPlan] Plan saved: ${planId}`);
     console.log(`[WeeklyPlan] ========================================\n`);
+    logAiTrace(trace, 'request_finished', {
+      planId,
+      weekStart,
+      sessionCount: unifiedSessions.length,
+      mode,
+    });
 
     return NextResponse.json({
       id: planId,
       weekStart,
-      title: metaResult.object.title,
-      summary: metaResult.object.summary,
+      title: metaObject.title,
+      summary: metaObject.summary,
       goal: settings?.goal ?? null,
       sessions: unifiedSessions,
       content,
@@ -709,12 +757,15 @@ export async function POST(req: Request) {
       mode,
       sourcePlanId: sourcePlanForReplan?.id ?? null,
       createdAt: now2,
-    });
+    }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {
+    logAiTrace(trace, 'request_failed', {
+      message: error instanceof Error ? error.message : 'unknown error',
+    });
     console.error('[WeeklyPlan] Error:', error);
     return NextResponse.json(
       {error: 'Failed to generate weekly plan'},
-      {status: 500},
+      {status: 500, headers: {'x-trace-id': trace.traceId}},
     );
   }
 }

@@ -1,4 +1,3 @@
-import {generateObject} from 'ai';
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
 import {db} from '@/db';
@@ -17,7 +16,11 @@ import {
   getLatestMetricsSnapshot,
 } from '@/utils/trainingLoad';
 import {formatPace, formatDuration, type UserSettings} from '@/lib/activityModel';
-import {trainingBlockOutputSchema} from '@/lib/trainingBlockSchema';
+import type {WeekOutline} from '@/lib/cacheTypes';
+import {
+  trainingBlockOutputSchema,
+  type TrainingBlockOutput,
+} from '@/lib/trainingBlockSchema';
 import {NextResponse} from 'next/server';
 import {
   describeStrategyPreset,
@@ -28,6 +31,10 @@ import {
   type StrategySelectionMode,
   type TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
+import {trainingBlockRequestSchema} from '@/lib/aiRequestSchemas';
+import {generateObjectWithRetry} from '@/lib/aiGeneration';
+import {validateTrainingBlockWeekOutlines} from '@/lib/planSemanticValidators';
+import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 
 export const maxDuration = 120;
 
@@ -102,7 +109,49 @@ const withStrategyStamp = <T extends {notes?: string}>(
 };
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  const trace = createTraceContext('ai.training-block', req);
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      {error: 'Invalid JSON body'},
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
+    );
+  }
+  const parsedBody = trainingBlockRequestSchema.safeParse(body);
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      {
+        error: 'Invalid request body',
+        issues: parsedBody.error.issues.map((issue) => issue.message),
+      },
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
+    );
+  }
+  const parsedData = parsedBody.data as {
+    athleteId: number;
+    mode?: 'create' | 'adapt';
+    goalEvent: string;
+    goalDate: string;
+    totalWeeks?: number;
+    model?: string;
+    adaptationType?:
+      | 'recalibrate_remaining_weeks'
+      | 'insert_event'
+      | 'shift_target_date';
+    sourceBlockId?: string;
+    effectiveFromWeek?: number;
+    event?: {
+      name: string;
+      date: string;
+      distanceKm?: number;
+      priority?: 'A' | 'B' | 'C';
+    };
+    strategySelectionMode?: StrategySelectionMode;
+    strategyPreset?: TrainingStrategyPreset;
+    optimizationPriority?: OptimizationPriority;
+  };
   const {
     athleteId,
     mode,
@@ -117,31 +166,12 @@ export async function POST(req: Request) {
     strategySelectionMode,
     strategyPreset,
     optimizationPriority,
-  }: {
-    athleteId: number;
-    mode?: 'create' | 'adapt';
-    goalEvent: string;
-    goalDate: string;
-    totalWeeks?: number;
-    model?: string;
-    adaptationType?: 'recalibrate_remaining_weeks' | 'insert_event' | 'shift_target_date';
-    sourceBlockId?: string;
-    effectiveFromWeek?: number;
-    event?: {
-      name: string;
-      date: string;
-      distanceKm?: number;
-      priority?: 'A' | 'B' | 'C';
-    };
-    strategySelectionMode?: StrategySelectionMode;
-    strategyPreset?: TrainingStrategyPreset;
-    optimizationPriority?: OptimizationPriority;
-  } = body;
+  } = parsedData;
 
   if (!athleteId) {
     return NextResponse.json(
       {error: 'athleteId required'},
-      {status: 400},
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
 
@@ -151,16 +181,22 @@ export async function POST(req: Request) {
   if (resolvedMode === 'create' && (!goalEvent || !goalDate)) {
     return NextResponse.json(
       {error: 'athleteId, goalEvent, and goalDate required'},
-      {status: 400},
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
 
   if (resolvedMode === 'adapt' && !adaptationType) {
     return NextResponse.json(
       {error: 'adaptationType required in adapt mode'},
-      {status: 400},
+      {status: 400, headers: {'x-trace-id': trace.traceId}},
     );
   }
+
+  logAiTrace(trace, 'request_received', {
+    athleteId,
+    mode: resolvedMode,
+    model: clientModel ?? null,
+  });
 
   console.log(`\n[TrainingBlock] ========== Generating Block ==========`);
   console.log(`[TrainingBlock] Athlete: ${athleteId}`);
@@ -197,7 +233,7 @@ export async function POST(req: Request) {
       if (!sourceBlock) {
         return NextResponse.json(
           {error: 'No source training block found for adaptation'},
-          {status: 400},
+          {status: 400, headers: {'x-trace-id': trace.traceId}},
         );
       }
 
@@ -318,13 +354,22 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
 - Return full block output for all weeks (week numbers remain 1..${sourceBlock.totalWeeks}).
 - Keep exactly ${sourceBlock.totalWeeks} week outlines.`;
 
-      const adapted = await generateObject({
+      logAiTrace(trace, 'adapt_prompt_built', {
+        promptHash: promptHash(adaptationPrompt),
+        totalWeeks: sourceBlock.totalWeeks,
+      });
+      const adaptedObject = await generateObjectWithRetry<TrainingBlockOutput>({
         model,
         schema: trainingBlockOutputSchema,
         prompt: adaptationPrompt,
+        semanticCheck: (candidate) =>
+          validateTrainingBlockWeekOutlines(
+            candidate.weekOutlines as WeekOutline[],
+            sourceBlock.totalWeeks,
+          ),
       });
       const stampedWeekOutlines = withStrategyStamp(
-        adapted.object.weekOutlines,
+        adaptedObject.weekOutlines,
         resolvedStrategyMode,
         strategyLabel,
         priorityLabel,
@@ -343,7 +388,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         goalDate: resolvedGoalDate,
         totalWeeks: sourceBlock.totalWeeks,
         startDate,
-        phases: adapted.object.phases,
+        phases: adaptedObject.phases,
         weekOutlines: stampedWeekOutlines,
         isActive: true,
         createdAt: nowMs,
@@ -361,6 +406,11 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
           ),
         );
 
+      logAiTrace(trace, 'request_finished', {
+        blockId,
+        mode: resolvedMode,
+        totalWeeks: sourceBlock.totalWeeks,
+      });
       return NextResponse.json({
         id: blockId,
         athleteId,
@@ -368,12 +418,12 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         goalDate: resolvedGoalDate,
         totalWeeks: sourceBlock.totalWeeks,
         startDate,
-        phases: adapted.object.phases,
+        phases: adaptedObject.phases,
         weekOutlines: stampedWeekOutlines,
         isActive: true,
         createdAt: nowMs,
         updatedAt: nowMs,
-      });
+      }, {headers: {'x-trace-id': trace.traceId}});
     }
 
     const startDate = getNextMonday();
@@ -533,13 +583,22 @@ ${injuriesText}
 
     console.log(`[TrainingBlock] Generating with ${totalWeeks} weeks...`);
 
-    const result = await generateObject({
+    logAiTrace(trace, 'create_prompt_built', {
+      promptHash: promptHash(prompt),
+      totalWeeks,
+    });
+    const resultObject = await generateObjectWithRetry<TrainingBlockOutput>({
       model,
       schema: trainingBlockOutputSchema,
       prompt,
+      semanticCheck: (candidate) =>
+        validateTrainingBlockWeekOutlines(
+          candidate.weekOutlines as WeekOutline[],
+          totalWeeks,
+        ),
     });
     const stampedWeekOutlines = withStrategyStamp(
-      result.object.weekOutlines,
+      resultObject.weekOutlines,
       resolvedStrategyMode,
       strategyLabel,
       priorityLabel,
@@ -556,7 +615,7 @@ ${injuriesText}
       goalDate,
       totalWeeks,
       startDate,
-      phases: result.object.phases,
+      phases: resultObject.phases,
       weekOutlines: stampedWeekOutlines,
       isActive: true,
       createdAt: nowMs,
@@ -576,6 +635,11 @@ ${injuriesText}
 
     console.log(`[TrainingBlock] Block saved: ${blockId}`);
     console.log(`[TrainingBlock] ========================================\n`);
+    logAiTrace(trace, 'request_finished', {
+      blockId,
+      mode: resolvedMode,
+      totalWeeks,
+    });
 
     return NextResponse.json({
       id: blockId,
@@ -584,17 +648,20 @@ ${injuriesText}
       goalDate,
       totalWeeks,
       startDate,
-      phases: result.object.phases,
+      phases: resultObject.phases,
       weekOutlines: stampedWeekOutlines,
       isActive: true,
       createdAt: nowMs,
       updatedAt: nowMs,
-    });
+    }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {
+    logAiTrace(trace, 'request_failed', {
+      message: error instanceof Error ? error.message : 'unknown error',
+    });
     console.error('[TrainingBlock] Error:', error);
     return NextResponse.json(
       {error: 'Failed to generate training block'},
-      {status: 500},
+      {status: 500, headers: {'x-trace-id': trace.traceId}},
     );
   }
 }

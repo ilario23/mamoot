@@ -21,8 +21,13 @@ import {
   userSettings,
   chatSessions,
   chatMessages,
+  chatMessageFeedback,
   trainingBlocks,
   weeklyPlans,
+  orchestratorGoals,
+  orchestratorPlanItems,
+  orchestratorBlockers,
+  orchestratorHandoffs,
 } from '@/db/schema';
 import {eq, and, sql, desc, inArray, gte, isNull} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
@@ -303,6 +308,145 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .from(chatMessages)
           .where(eq(chatMessages.sessionId, sessionId))
           .orderBy(chatMessages.createdAt);
+        return NextResponse.json(rows);
+      }
+
+      case 'chat-message-feedback': {
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(chatMessageFeedback)
+            .where(eq(chatMessageFeedback.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const sessionId = req.nextUrl.searchParams.get('sessionId');
+        if (!sessionId) {
+          return NextResponse.json(
+            {error: 'sessionId required'},
+            {status: 400},
+          );
+        }
+        const rows = await db
+          .select()
+          .from(chatMessageFeedback)
+          .where(eq(chatMessageFeedback.sessionId, sessionId))
+          .orderBy(chatMessageFeedback.createdAt);
+        return NextResponse.json(rows);
+      }
+
+      case 'orchestrator-goals': {
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(orchestratorGoals)
+            .where(eq(orchestratorGoals.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const athleteId = req.nextUrl.searchParams.get('athleteId');
+        const sessionId = req.nextUrl.searchParams.get('sessionId');
+        if (!athleteId || !sessionId) {
+          return NextResponse.json(
+            {error: 'athleteId and sessionId required'},
+            {status: 400},
+          );
+        }
+        const rows = await db
+          .select()
+          .from(orchestratorGoals)
+          .where(
+            and(
+              eq(orchestratorGoals.athleteId, Number(athleteId)),
+              eq(orchestratorGoals.sessionId, sessionId),
+            ),
+          )
+          .orderBy(desc(orchestratorGoals.updatedAt));
+        return NextResponse.json(rows);
+      }
+
+      case 'orchestrator-plan-items': {
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(orchestratorPlanItems)
+            .where(eq(orchestratorPlanItems.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const athleteId = req.nextUrl.searchParams.get('athleteId');
+        const sessionId = req.nextUrl.searchParams.get('sessionId');
+        if (!athleteId || !sessionId) {
+          return NextResponse.json(
+            {error: 'athleteId and sessionId required'},
+            {status: 400},
+          );
+        }
+        const rows = await db
+          .select()
+          .from(orchestratorPlanItems)
+          .where(
+            and(
+              eq(orchestratorPlanItems.athleteId, Number(athleteId)),
+              eq(orchestratorPlanItems.sessionId, sessionId),
+            ),
+          )
+          .orderBy(desc(orchestratorPlanItems.updatedAt));
+        return NextResponse.json(rows);
+      }
+
+      case 'orchestrator-blockers': {
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(orchestratorBlockers)
+            .where(eq(orchestratorBlockers.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const athleteId = req.nextUrl.searchParams.get('athleteId');
+        const sessionId = req.nextUrl.searchParams.get('sessionId');
+        if (!athleteId || !sessionId) {
+          return NextResponse.json(
+            {error: 'athleteId and sessionId required'},
+            {status: 400},
+          );
+        }
+        const rows = await db
+          .select()
+          .from(orchestratorBlockers)
+          .where(
+            and(
+              eq(orchestratorBlockers.athleteId, Number(athleteId)),
+              eq(orchestratorBlockers.sessionId, sessionId),
+            ),
+          )
+          .orderBy(desc(orchestratorBlockers.updatedAt));
+        return NextResponse.json(rows);
+      }
+
+      case 'orchestrator-handoffs': {
+        if (pk) {
+          const rows = await db
+            .select()
+            .from(orchestratorHandoffs)
+            .where(eq(orchestratorHandoffs.id, pk));
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const athleteId = req.nextUrl.searchParams.get('athleteId');
+        const sessionId = req.nextUrl.searchParams.get('sessionId');
+        if (!athleteId || !sessionId) {
+          return NextResponse.json(
+            {error: 'athleteId and sessionId required'},
+            {status: 400},
+          );
+        }
+        const rows = await db
+          .select()
+          .from(orchestratorHandoffs)
+          .where(
+            and(
+              eq(orchestratorHandoffs.athleteId, Number(athleteId)),
+              eq(orchestratorHandoffs.sessionId, sessionId),
+            ),
+          )
+          .orderBy(desc(orchestratorHandoffs.updatedAt));
         return NextResponse.json(rows);
       }
 
@@ -625,6 +769,85 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
+      case 'chat-message-feedback':
+        await db
+          .insert(chatMessageFeedback)
+          .values(records)
+          .onConflictDoUpdate({
+            target: chatMessageFeedback.id,
+            set: {
+              rating: sql`excluded.rating`,
+              reason: sql`excluded.reason`,
+              freeText: sql`excluded.free_text`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
+      case 'orchestrator-goals':
+        await db
+          .insert(orchestratorGoals)
+          .values(records)
+          .onConflictDoUpdate({
+            target: orchestratorGoals.id,
+            set: {
+              title: sql`excluded.title`,
+              detail: sql`excluded.detail`,
+              status: sql`excluded.status`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
+      case 'orchestrator-plan-items':
+        await db
+          .insert(orchestratorPlanItems)
+          .values(records)
+          .onConflictDoUpdate({
+            target: orchestratorPlanItems.id,
+            set: {
+              title: sql`excluded.title`,
+              detail: sql`excluded.detail`,
+              status: sql`excluded.status`,
+              ownerPersona: sql`excluded.owner_persona`,
+              dueDate: sql`excluded.due_date`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
+      case 'orchestrator-blockers':
+        await db
+          .insert(orchestratorBlockers)
+          .values(records)
+          .onConflictDoUpdate({
+            target: orchestratorBlockers.id,
+            set: {
+              title: sql`excluded.title`,
+              detail: sql`excluded.detail`,
+              status: sql`excluded.status`,
+              linkedPlanItemId: sql`excluded.linked_plan_item_id`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
+      case 'orchestrator-handoffs':
+        await db
+          .insert(orchestratorHandoffs)
+          .values(records)
+          .onConflictDoUpdate({
+            target: orchestratorHandoffs.id,
+            set: {
+              targetPersona: sql`excluded.target_persona`,
+              title: sql`excluded.title`,
+              detail: sql`excluded.detail`,
+              status: sql`excluded.status`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
       case 'training-blocks':
         await db
           .insert(trainingBlocks)
@@ -791,6 +1014,88 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         return NextResponse.json({success: true});
       }
 
+      case 'orchestrator-goals': {
+        const goalId = req.nextUrl.searchParams.get('id');
+        if (!goalId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        const body = await req.json();
+        await db
+          .update(orchestratorGoals)
+          .set({
+            ...(body.title !== undefined ? {title: body.title} : {}),
+            ...(body.detail !== undefined ? {detail: body.detail} : {}),
+            ...(body.status !== undefined ? {status: body.status} : {}),
+            updatedAt: Date.now(),
+          })
+          .where(eq(orchestratorGoals.id, goalId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'orchestrator-plan-items': {
+        const planItemId = req.nextUrl.searchParams.get('id');
+        if (!planItemId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        const body = await req.json();
+        await db
+          .update(orchestratorPlanItems)
+          .set({
+            ...(body.title !== undefined ? {title: body.title} : {}),
+            ...(body.detail !== undefined ? {detail: body.detail} : {}),
+            ...(body.status !== undefined ? {status: body.status} : {}),
+            ...(body.ownerPersona !== undefined
+              ? {ownerPersona: body.ownerPersona}
+              : {}),
+            ...(body.dueDate !== undefined ? {dueDate: body.dueDate} : {}),
+            updatedAt: Date.now(),
+          })
+          .where(eq(orchestratorPlanItems.id, planItemId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'orchestrator-blockers': {
+        const blockerId = req.nextUrl.searchParams.get('id');
+        if (!blockerId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        const body = await req.json();
+        await db
+          .update(orchestratorBlockers)
+          .set({
+            ...(body.title !== undefined ? {title: body.title} : {}),
+            ...(body.detail !== undefined ? {detail: body.detail} : {}),
+            ...(body.status !== undefined ? {status: body.status} : {}),
+            ...(body.linkedPlanItemId !== undefined
+              ? {linkedPlanItemId: body.linkedPlanItemId}
+              : {}),
+            updatedAt: Date.now(),
+          })
+          .where(eq(orchestratorBlockers.id, blockerId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'orchestrator-handoffs': {
+        const handoffId = req.nextUrl.searchParams.get('id');
+        if (!handoffId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        const body = await req.json();
+        await db
+          .update(orchestratorHandoffs)
+          .set({
+            ...(body.targetPersona !== undefined
+              ? {targetPersona: body.targetPersona}
+              : {}),
+            ...(body.title !== undefined ? {title: body.title} : {}),
+            ...(body.detail !== undefined ? {detail: body.detail} : {}),
+            ...(body.status !== undefined ? {status: body.status} : {}),
+            updatedAt: Date.now(),
+          })
+          .where(eq(orchestratorHandoffs.id, handoffId));
+        return NextResponse.json({success: true});
+      }
+
       default:
         return NextResponse.json({error: 'Unknown table'}, {status: 404});
     }
@@ -880,6 +1185,48 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         if (!wpPlanId)
           return NextResponse.json({error: 'id required'}, {status: 400});
         await db.delete(weeklyPlans).where(eq(weeklyPlans.id, wpPlanId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'orchestrator-goals': {
+        const goalId = req.nextUrl.searchParams.get('id');
+        if (!goalId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        await db.delete(orchestratorGoals).where(eq(orchestratorGoals.id, goalId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'orchestrator-plan-items': {
+        const planItemId = req.nextUrl.searchParams.get('id');
+        if (!planItemId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        await db
+          .delete(orchestratorPlanItems)
+          .where(eq(orchestratorPlanItems.id, planItemId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'orchestrator-blockers': {
+        const blockerId = req.nextUrl.searchParams.get('id');
+        if (!blockerId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        await db
+          .delete(orchestratorBlockers)
+          .where(eq(orchestratorBlockers.id, blockerId));
+        return NextResponse.json({success: true});
+      }
+
+      case 'orchestrator-handoffs': {
+        const handoffId = req.nextUrl.searchParams.get('id');
+        if (!handoffId) {
+          return NextResponse.json({error: 'id required'}, {status: 400});
+        }
+        await db
+          .delete(orchestratorHandoffs)
+          .where(eq(orchestratorHandoffs.id, handoffId));
         return NextResponse.json({success: true});
       }
 

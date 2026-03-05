@@ -129,6 +129,21 @@ export const chatMessages = pgTable('chat_messages', {
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
 });
 
+// ----- Chat Message Feedback -----
+// Explicit quality labels for assistant responses (thumbs up/down + reason).
+export const chatMessageFeedback = pgTable('chat_message_feedback', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  sessionId: text('session_id').notNull(),
+  messageId: text('message_id').notNull(),
+  persona: text('persona').notNull(),
+  rating: text('rating').notNull(), // "helpful" | "not_helpful"
+  reason: text('reason'), // short taxonomy code
+  freeText: text('free_text'),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
 // ----- Activity Labels -----
 // Maps to CachedActivityLabel (src/lib/db.ts)
 // Rule-based workout classification labels (e.g., "Intervals: 5x1000m @ 4:10/km Z4")
@@ -221,4 +236,60 @@ export const weeklyPlans = pgTable('weekly_plans', {
   /** 1-indexed week number within the training block */
   weekNumber: integer('week_number'),
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Orchestrator Goals -----
+// High-level objectives tracked in the master orchestrator chat.
+export const orchestratorGoals = pgTable('orchestrator_goals', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  sessionId: text('session_id').notNull(),
+  title: text('title').notNull(),
+  detail: text('detail'),
+  status: text('status').notNull(), // "active" | "on_hold" | "done"
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Orchestrator Plan Items -----
+// Actionable tasks tracked by the orchestrator and execution personas.
+export const orchestratorPlanItems = pgTable('orchestrator_plan_items', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  sessionId: text('session_id').notNull(),
+  title: text('title').notNull(),
+  detail: text('detail'),
+  status: text('status').notNull(), // "todo" | "in_progress" | "blocked" | "done"
+  ownerPersona: text('owner_persona'),
+  dueDate: text('due_date'),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Orchestrator Blockers -----
+// Open issues that prevent plan completion.
+export const orchestratorBlockers = pgTable('orchestrator_blockers', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  sessionId: text('session_id').notNull(),
+  title: text('title').notNull(),
+  detail: text('detail'),
+  status: text('status').notNull(), // "open" | "resolved"
+  linkedPlanItemId: text('linked_plan_item_id'),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Orchestrator Handoffs -----
+// Explicit coordination tasks sent from orchestrator to specialist personas.
+export const orchestratorHandoffs = pgTable('orchestrator_handoffs', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  sessionId: text('session_id').notNull(),
+  targetPersona: text('target_persona').notNull(), // "coach" | "nutritionist" | "physio"
+  title: text('title').notNull(),
+  detail: text('detail'),
+  status: text('status').notNull(), // "pending" | "accepted" | "done" | "cancelled"
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
 });

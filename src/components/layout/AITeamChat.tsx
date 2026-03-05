@@ -12,6 +12,12 @@ import {
   Trash2,
   Menu,
   ChevronRight,
+  ThumbsUp,
+  ThumbsDown,
+  ClipboardList,
+  Target,
+  AlertOctagon,
+  ArrowRightLeft,
   type LucideIcon,
 } from 'lucide-react';
 import {useChat} from '@ai-sdk/react';
@@ -28,11 +34,32 @@ import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/activityModel';
 import type {PersonaId} from '@/lib/aiPrompts';
+import type {
+  CachedChatMessageFeedback,
+  ChatFeedbackRating,
+  ChatFeedbackReason,
+  CachedOrchestratorGoal,
+  CachedOrchestratorPlanItem,
+  CachedOrchestratorBlocker,
+  CachedOrchestratorHandoff,
+  CachedWeeklyPlan,
+  CachedTrainingBlock,
+} from '@/lib/cacheTypes';
 import {
   getMentionCategory,
   parseMentionMeta,
   type MentionReference,
 } from '@/lib/mentionTypes';
+import {
+  neonGetChatMessageFeedback,
+  neonSyncChatMessageFeedback,
+  neonGetOrchestratorGoals,
+  neonGetOrchestratorPlanItems,
+  neonGetOrchestratorBlockers,
+  neonGetOrchestratorHandoffs,
+  neonGetActiveWeeklyPlan,
+  neonGetActiveTrainingBlock,
+} from '@/lib/chatSync';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import {
   AlertDialog,
@@ -93,6 +120,15 @@ const personas: Persona[] = [
     labelColor: 'text-destructive',
     tintBg: 'bg-destructive/10',
   },
+  {
+    id: 'orchestrator',
+    label: 'Orchestrator',
+    icon: ClipboardList,
+    color: 'bg-primary',
+    bubbleBorder: 'border-l-primary',
+    labelColor: 'text-primary',
+    tintBg: 'bg-primary/10',
+  },
 ];
 
 const PERSONA_STARTERS: Record<PersonaId, string[]> = {
@@ -111,7 +147,20 @@ const PERSONA_STARTERS: Record<PersonaId, string[]> = {
     'Post-run stretch routine',
     'Hip mobility drills',
   ],
+  orchestrator: [
+    'Set my weekly goals',
+    'What is still blocked?',
+    'Create handoffs for the team',
+  ],
 };
+
+const NEGATIVE_FEEDBACK_REASONS: ChatFeedbackReason[] = [
+  'unsafe',
+  'too_generic',
+  'not_actionable',
+  'wrong_context',
+  'other',
+];
 
 const PersonaAvatar = ({
   persona,
@@ -344,6 +393,26 @@ const AITeamChat = () => {
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
     string | null
   >(null);
+  const [feedbackByMessageId, setFeedbackByMessageId] = useState<
+    Record<string, CachedChatMessageFeedback>
+  >({});
+  const [orchestratorGoals, setOrchestratorGoals] = useState<
+    CachedOrchestratorGoal[]
+  >([]);
+  const [orchestratorPlanItems, setOrchestratorPlanItems] = useState<
+    CachedOrchestratorPlanItem[]
+  >([]);
+  const [orchestratorBlockers, setOrchestratorBlockers] = useState<
+    CachedOrchestratorBlocker[]
+  >([]);
+  const [orchestratorHandoffs, setOrchestratorHandoffs] = useState<
+    CachedOrchestratorHandoff[]
+  >([]);
+  const [activeWeeklyPlan, setActiveWeeklyPlan] = useState<CachedWeeklyPlan | null>(
+    null,
+  );
+  const [activeTrainingBlock, setActiveTrainingBlock] =
+    useState<CachedTrainingBlock | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {athlete} = useStravaAuth();
@@ -356,14 +425,16 @@ const AITeamChat = () => {
   const coachSessions = useChatSessions(athleteId, 'coach');
   const nutritionistSessions = useChatSessions(athleteId, 'nutritionist');
   const physioSessions = useChatSessions(athleteId, 'physio');
+  const orchestratorSessions = useChatSessions(athleteId, 'orchestrator');
 
   const sessionManagers = useMemo(
     () => ({
       coach: coachSessions,
       nutritionist: nutritionistSessions,
       physio: physioSessions,
+      orchestrator: orchestratorSessions,
     }),
-    [coachSessions, nutritionistSessions, physioSessions],
+    [coachSessions, nutritionistSessions, physioSessions, orchestratorSessions],
   );
 
   const activeSM = sessionManagers[activePersona];
@@ -415,6 +486,59 @@ const AITeamChat = () => {
 
     load();
   }, [activeSession?.id, loadMessages, getMemorySummary, activeChat]);
+
+  useEffect(() => {
+    const sid = activeSession?.id;
+    if (!sid) {
+      setFeedbackByMessageId({});
+      return;
+    }
+    (async () => {
+      const feedback = await neonGetChatMessageFeedback(sid);
+      if (!feedback) {
+        setFeedbackByMessageId({});
+        return;
+      }
+      const map = feedback.reduce<Record<string, CachedChatMessageFeedback>>(
+        (acc, item) => {
+          acc[item.messageId] = item;
+          return acc;
+        },
+        {},
+      );
+      setFeedbackByMessageId(map);
+    })();
+  }, [activeSession?.id]);
+
+  useEffect(() => {
+    if (activePersona !== 'orchestrator' || !activeSession?.id || !athleteId) {
+      setOrchestratorGoals([]);
+      setOrchestratorPlanItems([]);
+      setOrchestratorBlockers([]);
+      setOrchestratorHandoffs([]);
+      setActiveWeeklyPlan(null);
+      setActiveTrainingBlock(null);
+      return;
+    }
+
+    (async () => {
+      const [goals, planItems, blockers, handoffs, weeklyPlan, trainingBlock] =
+        await Promise.all([
+          neonGetOrchestratorGoals(athleteId, activeSession.id),
+          neonGetOrchestratorPlanItems(athleteId, activeSession.id),
+          neonGetOrchestratorBlockers(athleteId, activeSession.id),
+          neonGetOrchestratorHandoffs(athleteId, activeSession.id),
+          neonGetActiveWeeklyPlan(athleteId),
+          neonGetActiveTrainingBlock(athleteId),
+        ]);
+      setOrchestratorGoals(goals ?? []);
+      setOrchestratorPlanItems(planItems ?? []);
+      setOrchestratorBlockers(blockers ?? []);
+      setOrchestratorHandoffs(handoffs ?? []);
+      setActiveWeeklyPlan(weeklyPlan ?? null);
+      setActiveTrainingBlock(trainingBlock ?? null);
+    })();
+  }, [activePersona, activeSession?.id, athleteId, activeChat.messages.length]);
 
   // Auto-scroll on new messages and while tokens stream in
   const lastMsg = activeChat.messages[activeChat.messages.length - 1];
@@ -599,6 +723,57 @@ const AITeamChat = () => {
   const isStreaming = activeChat.status === 'streaming';
   const hasError = activeChat.error;
 
+  const handleMessageFeedback = useCallback(
+    async (messageId: string, rating: ChatFeedbackRating) => {
+      if (!activeSession?.id || !athleteId) return;
+
+      let reason: ChatFeedbackReason | null =
+        rating === 'helpful' ? 'helpful' : 'too_generic';
+      let freeText: string | null = null;
+
+      if (rating === 'not_helpful' && typeof window !== 'undefined') {
+        const reasonInput = window
+          .prompt(
+            'Why was this not helpful? (unsafe | too_generic | not_actionable | wrong_context | other)',
+            'too_generic',
+          )
+          ?.trim()
+          .toLowerCase() as ChatFeedbackReason | undefined;
+
+        if (!reasonInput || !NEGATIVE_FEEDBACK_REASONS.includes(reasonInput)) {
+          reason = 'other';
+        } else {
+          reason = reasonInput;
+        }
+
+        if (reason === 'other') {
+          const freeTextInput = window
+            .prompt('Optional details for improvement', '')
+            ?.trim();
+          freeText = freeTextInput || null;
+        }
+      }
+
+      const now = Date.now();
+      const record: CachedChatMessageFeedback = {
+        id: `${activeSession.id}:${messageId}`,
+        athleteId,
+        sessionId: activeSession.id,
+        messageId,
+        persona: activePersona,
+        rating,
+        reason,
+        freeText,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await neonSyncChatMessageFeedback(record);
+      setFeedbackByMessageId((prev) => ({...prev, [messageId]: record}));
+    },
+    [activeSession?.id, activePersona, athleteId],
+  );
+
   // Extract follow-up suggestions from the last assistant message's tool parts
   const followUpSuggestions = useMemo(() => {
     if (isStreaming) return [];
@@ -620,6 +795,11 @@ const AITeamChat = () => {
     }
     return [];
   }, [activeChat.messages, isStreaming]);
+
+  const orchestratorNotDoneQueue = useMemo(
+    () => orchestratorPlanItems.filter((item) => item.status !== 'done'),
+    [orchestratorPlanItems],
+  );
 
   // ----- Sidebar content (shared between desktop and mobile drawer) -----
 
@@ -809,6 +989,89 @@ const AITeamChat = () => {
           </div>
         )}
 
+        {activePersona === 'orchestrator' && (
+          <div className='border-b-3 border-border bg-background p-2 md:p-3 space-y-2'>
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
+              <div className='border-2 border-border p-2 bg-primary/5'>
+                <div className='flex items-center gap-1.5 mb-1'>
+                  <Target className='h-3.5 w-3.5 text-primary' />
+                  <span className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                    Goals
+                  </span>
+                </div>
+                <p className='text-xs font-medium'>
+                  {orchestratorGoals.filter((goal) => goal.status === 'active').length}{' '}
+                  active / {orchestratorGoals.length} total
+                </p>
+              </div>
+              <div className='border-2 border-border p-2 bg-secondary/5'>
+                <div className='flex items-center gap-1.5 mb-1'>
+                  <ClipboardList className='h-3.5 w-3.5 text-secondary' />
+                  <span className='text-[10px] font-black uppercase tracking-widest text-secondary'>
+                    Not Done Queue
+                  </span>
+                </div>
+                <p className='text-xs font-medium'>
+                  {orchestratorNotDoneQueue.length} remaining items
+                </p>
+              </div>
+              <div className='border-2 border-border p-2 bg-destructive/5'>
+                <div className='flex items-center gap-1.5 mb-1'>
+                  <AlertOctagon className='h-3.5 w-3.5 text-destructive' />
+                  <span className='text-[10px] font-black uppercase tracking-widest text-destructive'>
+                    Blockers
+                  </span>
+                </div>
+                <p className='text-xs font-medium'>
+                  {
+                    orchestratorBlockers.filter((blocker) => blocker.status === 'open')
+                      .length
+                  }{' '}
+                  open / {orchestratorBlockers.length} total
+                </p>
+              </div>
+              <div className='border-2 border-border p-2 bg-accent/30'>
+                <div className='flex items-center gap-1.5 mb-1'>
+                  <ArrowRightLeft className='h-3.5 w-3.5 text-foreground' />
+                  <span className='text-[10px] font-black uppercase tracking-widest'>
+                    Handoffs
+                  </span>
+                </div>
+                <p className='text-xs font-medium'>
+                  {
+                    orchestratorHandoffs.filter(
+                      (handoff) => handoff.status !== 'done' && handoff.status !== 'cancelled',
+                    ).length
+                  }{' '}
+                  pending / {orchestratorHandoffs.length} total
+                </p>
+              </div>
+            </div>
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
+              <div className='border-2 border-border p-2 bg-background'>
+                <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
+                  Active Weekly Plan
+                </p>
+                <p className='text-xs font-medium truncate'>
+                  {activeWeeklyPlan
+                    ? `${activeWeeklyPlan.title} (${activeWeeklyPlan.weekStart})`
+                    : 'None'}
+                </p>
+              </div>
+              <div className='border-2 border-border p-2 bg-background'>
+                <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
+                  Active Training Block
+                </p>
+                <p className='text-xs font-medium truncate'>
+                  {activeTrainingBlock
+                    ? `${activeTrainingBlock.goalEvent} (${activeTrainingBlock.totalWeeks}w)`
+                    : 'None'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Messages */}
         <div
           ref={scrollRef}
@@ -842,6 +1105,8 @@ const AITeamChat = () => {
                       'Ask about fueling, hydration, and recovery nutrition'}
                     {activePersona === 'physio' &&
                       'Ask about injury prevention, mobility, and recovery'}
+                    {activePersona === 'orchestrator' &&
+                      'Coordinate goals, plan queue, blockers, and specialist handoffs'}
                   </p>
                 </div>
                 {/* Quick-start suggestion buttons */}
@@ -865,6 +1130,7 @@ const AITeamChat = () => {
 
           {activeChat.messages.map((msg, msgIdx) => {
             const isUser = msg.role === 'user';
+            const messageFeedback = feedbackByMessageId[msg.id];
             const prevRole =
               msgIdx > 0 ? activeChat.messages[msgIdx - 1]?.role : null;
             const isRoleSwitch = prevRole !== null && prevRole !== msg.role;
@@ -988,6 +1254,38 @@ const AITeamChat = () => {
                             msg.role === 'assistant' && (
                               <span className='inline-block w-2 h-4 bg-primary animate-neo-blink ml-0.5 align-middle' />
                             )}
+                        </div>
+                      )}
+                      {!isUser && textContent && (
+                        <div className='flex items-center gap-1.5 mt-2'>
+                          <button
+                            onClick={() => handleMessageFeedback(msg.id, 'helpful')}
+                            aria-label='Mark response helpful'
+                            tabIndex={0}
+                            className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
+                              messageFeedback?.rating === 'helpful'
+                                ? 'bg-secondary/20 text-secondary border-secondary/40'
+                                : 'bg-background text-muted-foreground border-border hover:text-foreground'
+                            }`}
+                          >
+                            <ThumbsUp className='h-3 w-3' />
+                            Helpful
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleMessageFeedback(msg.id, 'not_helpful')
+                            }
+                            aria-label='Mark response not helpful'
+                            tabIndex={0}
+                            className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
+                              messageFeedback?.rating === 'not_helpful'
+                                ? 'bg-destructive/15 text-destructive border-destructive/40'
+                                : 'bg-background text-muted-foreground border-border hover:text-foreground'
+                            }`}
+                          >
+                            <ThumbsDown className='h-3 w-3' />
+                            Not helpful
+                          </button>
                         </div>
                       )}
                     </>

@@ -6,7 +6,19 @@
 // for chat sessions, messages, and weekly plans.
 // Neon is the primary persistent store — writes are awaitable.
 
-import type {CachedChatSession, CachedChatMessage, CachedWeeklyPlan, CachedTrainingBlock, WeekOutline, TrainingPhase} from './cacheTypes';
+import type {
+  CachedChatSession,
+  CachedChatMessage,
+  CachedChatMessageFeedback,
+  CachedWeeklyPlan,
+  CachedTrainingBlock,
+  CachedOrchestratorGoal,
+  CachedOrchestratorPlanItem,
+  CachedOrchestratorBlocker,
+  CachedOrchestratorHandoff,
+  WeekOutline,
+  TrainingPhase,
+} from './cacheTypes';
 
 const API = '/api/db';
 
@@ -78,6 +90,19 @@ export const neonSyncChatMessages = async (
   records: CachedChatMessage | CachedChatMessage[],
 ): Promise<void> => {
   await postToNeon('chat-messages', records);
+};
+
+export const neonGetChatMessageFeedback = async (
+  sessionId: string,
+): Promise<CachedChatMessageFeedback[] | null> =>
+  getFromNeon<CachedChatMessageFeedback[]>(
+    `${API}/chat-message-feedback?sessionId=${sessionId}`,
+  );
+
+export const neonSyncChatMessageFeedback = async (
+  records: CachedChatMessageFeedback | CachedChatMessageFeedback[],
+): Promise<void> => {
+  await postToNeon('chat-message-feedback', records);
 };
 
 /** Awaitable delete of a chat session and all its data (messages, plans, memory). */
@@ -203,4 +228,62 @@ export const neonUpdateTrainingBlockOutlines = async (
   } catch (err) {
     console.warn('[chatSync] PATCH training-block outlines error:', err);
   }
+};
+
+// ---- Orchestrator state ----
+
+export const neonGetOrchestratorGoals = async (
+  athleteId: number,
+  sessionId: string,
+): Promise<CachedOrchestratorGoal[] | null> =>
+  getFromNeon<CachedOrchestratorGoal[]>(
+    `${API}/orchestrator-goals?athleteId=${athleteId}&sessionId=${sessionId}`,
+  );
+
+export const neonSyncOrchestratorGoals = async (
+  records: CachedOrchestratorGoal | CachedOrchestratorGoal[],
+): Promise<void> => {
+  await postToNeon('orchestrator-goals', records);
+};
+
+export const neonGetOrchestratorPlanItems = async (
+  athleteId: number,
+  sessionId: string,
+): Promise<CachedOrchestratorPlanItem[] | null> =>
+  getFromNeon<CachedOrchestratorPlanItem[]>(
+    `${API}/orchestrator-plan-items?athleteId=${athleteId}&sessionId=${sessionId}`,
+  );
+
+export const neonSyncOrchestratorPlanItems = async (
+  records: CachedOrchestratorPlanItem | CachedOrchestratorPlanItem[],
+): Promise<void> => {
+  await postToNeon('orchestrator-plan-items', records);
+};
+
+export const neonGetOrchestratorBlockers = async (
+  athleteId: number,
+  sessionId: string,
+): Promise<CachedOrchestratorBlocker[] | null> =>
+  getFromNeon<CachedOrchestratorBlocker[]>(
+    `${API}/orchestrator-blockers?athleteId=${athleteId}&sessionId=${sessionId}`,
+  );
+
+export const neonSyncOrchestratorBlockers = async (
+  records: CachedOrchestratorBlocker | CachedOrchestratorBlocker[],
+): Promise<void> => {
+  await postToNeon('orchestrator-blockers', records);
+};
+
+export const neonGetOrchestratorHandoffs = async (
+  athleteId: number,
+  sessionId: string,
+): Promise<CachedOrchestratorHandoff[] | null> =>
+  getFromNeon<CachedOrchestratorHandoff[]>(
+    `${API}/orchestrator-handoffs?athleteId=${athleteId}&sessionId=${sessionId}`,
+  );
+
+export const neonSyncOrchestratorHandoffs = async (
+  records: CachedOrchestratorHandoff | CachedOrchestratorHandoff[],
+): Promise<void> => {
+  await postToNeon('orchestrator-handoffs', records);
 };

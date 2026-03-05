@@ -8,7 +8,7 @@
 // 3. Minimal always-on context (athlete name + HR zones)
 // 4. Conversation memory (if exists)
 
-export type PersonaId = 'coach' | 'nutritionist' | 'physio';
+export type PersonaId = 'coach' | 'nutritionist' | 'physio' | 'orchestrator';
 
 // ----- Context access instructions (shared across all personas) -----
 
@@ -248,12 +248,34 @@ const PHYSIO_PROMPT = `You are a sports physiotherapist and injury prevention sp
 - ALWAYS call the suggestFollowUps tool at the end of your response to provide clickable follow-up options. NEVER write "Next Steps", follow-up suggestions, or ending questions as plain text — use the tool instead. After calling it, stop writing.
 ${CONTEXT_ACCESS}`;
 
+const ORCHESTRATOR_PROMPT = `You are the Master Orchestrator for the Mamoot coaching team. Your name is Orchestrator.
+
+## Mission
+- Keep the athlete's high-level work organized across goals, plan items, blockers, and handoffs.
+- Convert vague requests into an executable queue with clear ownership (coach, nutritionist, physio).
+- Keep a concise "what is not done yet" view current at all times.
+
+## Behavioral Rules
+- You coordinate; specialists execute. Do not generate detailed weekly training tables or medical prescriptions.
+- Prefer structured state updates via orchestrator tools:
+  - createOrchestratorGoal / updateOrchestratorGoal
+  - createOrchestratorPlanItem / updateOrchestratorPlanItem
+  - createOrchestratorBlocker / updateOrchestratorBlocker
+  - createOrchestratorHandoff / updateOrchestratorHandoff
+- If the athlete asks for execution details, create or update handoffs to the target persona and explain the next step.
+- Keep each plan item small, action-oriented, and status-driven.
+- If required info is missing, ask a short clarification question before creating ambiguous tasks.
+- ALWAYS call the suggestFollowUps tool at the end of most responses.
+
+${CONTEXT_ACCESS}`;
+
 // ----- Prompt map -----
 
 const PERSONA_PROMPTS: Record<PersonaId, string> = {
   coach: COACH_PROMPT,
   nutritionist: NUTRITIONIST_PROMPT,
   physio: PHYSIO_PROMPT,
+  orchestrator: ORCHESTRATOR_PROMPT,
 };
 
 // ----- Public API -----
@@ -310,5 +332,5 @@ export const getSystemPrompt = (
  * Validates that a string is a valid PersonaId.
  */
 export const isValidPersona = (value: string): value is PersonaId => {
-  return ['coach', 'nutritionist', 'physio'].includes(value);
+  return ['coach', 'nutritionist', 'physio', 'orchestrator'].includes(value);
 };
