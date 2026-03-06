@@ -68,9 +68,9 @@
     ]
   },
   {
-    "id": "all-personas-uncertainty-policy",
+    "id": "all-personas-confidence-policy",
     "persona": "shared",
-    "description": "Uncertainty policy is explicit",
+    "description": "Confidence-aware fallback policy is explicit",
     "mustInclude": [
       "If data is missing or uncertain, ask one clarifying question or provide a safe fallback."
     ]
@@ -99,14 +99,6 @@
     "mustInclude": [
       "createOrchestratorHandoff / updateOrchestratorHandoff",
       "clear ownership (coach, nutritionist, physio)"
-    ]
-  },
-  {
-    "id": "shared-conservative-fallback",
-    "persona": "shared",
-    "description": "All personas keep conservative fallback when data is uncertain",
-    "mustInclude": [
-      "If data is missing or uncertain, ask one clarifying question or provide a safe fallback."
     ]
   }
 ]

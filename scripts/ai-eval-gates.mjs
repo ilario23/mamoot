@@ -14,6 +14,9 @@ const REQUIRED_IDS = new Set([
   'orchestrator-bounded-multi-agent',
   'orchestrator-structured-handoffs',
 ]);
+const ALLOWED_SHARED_MUST_INCLUDE = new Set([
+  'Head over to the **Weekly Plan** page and tap **Generate Weekly Plan**',
+]);
 
 const run = async () => {
   const raw = await readFile(SCENARIOS_PATH, 'utf8');
@@ -31,6 +34,26 @@ const run = async () => {
     .filter(Boolean);
   const duplicateIds = ids.filter((id, index) => ids.indexOf(id) !== index);
   const missingRequiredIds = [...REQUIRED_IDS].filter((id) => !ids.includes(id));
+  const mustIncludeMap = new Map();
+  for (const scenario of scenarios) {
+    const scenarioId =
+      typeof scenario?.id === 'string' ? scenario.id : '(missing-id)';
+    const mustInclude = Array.isArray(scenario?.mustInclude)
+      ? scenario.mustInclude
+      : [];
+    for (const rawPhrase of mustInclude) {
+      if (typeof rawPhrase !== 'string') continue;
+      const phrase = rawPhrase.trim();
+      if (!phrase) continue;
+      if (!mustIncludeMap.has(phrase)) mustIncludeMap.set(phrase, []);
+      mustIncludeMap.get(phrase).push(scenarioId);
+    }
+  }
+  const duplicateMustIncludePhrases = [...mustIncludeMap.entries()]
+    .filter(([phrase, owners]) =>
+      owners.length > 1 && !ALLOWED_SHARED_MUST_INCLUDE.has(phrase),
+    )
+    .map(([phrase, owners]) => ({phrase, scenarioIds: owners}));
   const reliabilityScore =
     scenarioCount === 0 ? 0 : scenariosWithAssertions / scenarioCount;
 
@@ -38,12 +61,14 @@ const run = async () => {
     scenarioCount,
     scenariosWithAssertions,
     duplicateIds,
+    duplicateMustIncludePhrases,
     missingRequiredIds,
     reliabilityScore: Number(reliabilityScore.toFixed(3)),
     pass:
       scenarioCount >= threshold.minScenarioCount &&
       reliabilityScore >= threshold.minReliabilityScore &&
       duplicateIds.length === 0 &&
+      duplicateMustIncludePhrases.length === 0 &&
       missingRequiredIds.length === 0,
   };
 
