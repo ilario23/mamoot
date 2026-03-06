@@ -6,7 +6,7 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test:prompts": "node scripts/check-prompt-contracts.mjs",
     "test:prompt-scenarios": "node scripts/check-prompt-scenarios.mjs",
     "test:ai-gates": "npm run test:prompts && npm run test:prompt-scenarios",
