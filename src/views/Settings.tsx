@@ -298,6 +298,23 @@ const Settings = () => {
     ? `${athlete.firstname} ${athlete.lastname}`
     : 'Unknown';
 
+  const formatUsdPer1M = (amount: number): string => {
+    const fixed = amount >= 1 ? amount.toFixed(2) : amount.toFixed(3);
+    return `$${fixed.replace(/\.?0+$/, '')}`;
+  };
+
+  const getModelOptionLabel = (model: ModelOption): string => {
+    const hasPricing =
+      typeof model.inputCostPer1MUsd === 'number' &&
+      typeof model.outputCostPer1MUsd === 'number';
+
+    if (!hasPricing) {
+      return `${model.label} — ${model.provider} (${model.tier})`;
+    }
+
+    return `${model.label} (${formatUsdPer1M(model.inputCostPer1MUsd)} in / ${formatUsdPer1M(model.outputCostPer1MUsd)} out) — ${model.provider} (${model.tier})`;
+  };
+
   return (
     <div className='space-y-6 w-full max-w-4xl mx-auto'>
       <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
@@ -358,7 +375,7 @@ const Settings = () => {
             >
               {filteredModelOptions.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.label} — {m.provider} ({m.tier})
+                  {getModelOptionLabel(m)}
                 </option>
               ))}
             </select>

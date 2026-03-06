@@ -52,6 +52,8 @@ export interface ModelOption {
   label: string;
   provider: string;
   tier: string;
+  inputCostPer1MUsd?: number;
+  outputCostPer1MUsd?: number;
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
@@ -60,29 +62,81 @@ export const MODEL_OPTIONS: ModelOption[] = [
     label: 'GPT-4.1 Nano',
     provider: 'OpenAI',
     tier: 'Cheapest',
+    inputCostPer1MUsd: 0.1,
+    outputCostPer1MUsd: 0.4,
   },
-  {id: 'gpt-4o-mini', label: 'GPT-4o Mini', provider: 'OpenAI', tier: 'Budget'},
+  {
+    id: 'gpt-4o-mini',
+    label: 'GPT-4o Mini',
+    provider: 'OpenAI',
+    tier: 'Budget',
+    inputCostPer1MUsd: 0.15,
+    outputCostPer1MUsd: 0.6,
+  },
   {
     id: 'gpt-4.1-mini',
     label: 'GPT-4.1 Mini',
     provider: 'OpenAI',
     tier: 'Balanced',
+    inputCostPer1MUsd: 0.4,
+    outputCostPer1MUsd: 1.6,
   },
-  {id: 'gpt-4o', label: 'GPT-4o', provider: 'OpenAI', tier: 'Smart'},
-  {id: 'gpt-4.1', label: 'GPT-4.1', provider: 'OpenAI', tier: 'Smartest'},
+  {
+    id: 'gpt-4o',
+    label: 'GPT-4o',
+    provider: 'OpenAI',
+    tier: 'Smart',
+    inputCostPer1MUsd: 2.5,
+    outputCostPer1MUsd: 10,
+  },
+  {
+    id: 'gpt-4.1',
+    label: 'GPT-4.1',
+    provider: 'OpenAI',
+    tier: 'Smartest',
+    inputCostPer1MUsd: 2,
+    outputCostPer1MUsd: 8,
+  },
   {
     id: 'gpt-5-nano',
     label: 'GPT-5 Nano',
     provider: 'OpenAI',
     tier: 'Budget',
+    inputCostPer1MUsd: 0.05,
+    outputCostPer1MUsd: 0.4,
   },
   {
     id: 'gpt-5-mini',
     label: 'GPT-5 Mini',
     provider: 'OpenAI',
     tier: 'Balanced',
+    inputCostPer1MUsd: 0.25,
+    outputCostPer1MUsd: 2,
   },
-  {id: 'gpt-5.2', label: 'GPT-5.2', provider: 'OpenAI', tier: 'Smartest'},
+  {
+    id: 'gpt-5.2',
+    label: 'GPT-5.2',
+    provider: 'OpenAI',
+    tier: 'Smartest',
+    inputCostPer1MUsd: 1.75,
+    outputCostPer1MUsd: 14,
+  },
+  {
+    id: 'gpt-5.3',
+    label: 'GPT-5.3',
+    provider: 'OpenAI',
+    tier: 'Smartest',
+    inputCostPer1MUsd: 1.75,
+    outputCostPer1MUsd: 14,
+  },
+  {
+    id: 'gpt-5.4',
+    label: 'GPT-5.4',
+    provider: 'OpenAI',
+    tier: 'Smartest',
+    inputCostPer1MUsd: 2.5,
+    outputCostPer1MUsd: 15,
+  },
   {
     id: 'claude-haiku-3-5',
     label: 'Claude 3.5 Haiku',

@@ -59,6 +59,8 @@ const ALLOWED_MODELS: Record<string, () => ReturnType<typeof openai | typeof ant
   'gpt-5-mini': () => openai('gpt-5-mini'),
   'gpt-5-nano': () => openai('gpt-5-nano'),
   'gpt-5.2': () => openai('gpt-5.2'),
+  'gpt-5.3': () => openai('gpt-5.3'),
+  'gpt-5.4': () => openai('gpt-5.4'),
   'claude-sonnet-4-5': () => anthropic('claude-sonnet-4-5'),
   'claude-haiku-3-5': () => anthropic('claude-3-5-haiku-latest'),
 };
