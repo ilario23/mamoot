@@ -11,7 +11,6 @@ import {
   MessageSquare,
   ClipboardList,
   Target,
-  BarChart3,
 } from 'lucide-react';
 
 export type NavItem = {
@@ -44,7 +43,6 @@ export const navEntries: NavEntry[] = [
       {href: '/ai-chat', icon: MessageSquare, label: 'AI Chat', activeClass: 'bg-nav-ai text-nav-ai-foreground'},
       {href: '/training-block', icon: Target, label: 'Training Block', activeClass: 'bg-nav-training-block text-nav-training-block-foreground'},
       {href: '/weekly-plan', icon: ClipboardList, label: 'Weekly Plan', activeClass: 'bg-nav-weekly-plan text-nav-weekly-plan-foreground'},
-      {href: '/ai-feedback', icon: BarChart3, label: 'AI Feedback', activeClass: 'bg-nav-ai text-nav-ai-foreground'},
     ],
   },
   {

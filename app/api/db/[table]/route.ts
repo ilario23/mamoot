@@ -21,7 +21,6 @@ import {
   userSettings,
   chatSessions,
   chatMessages,
-  chatMessageFeedback,
   trainingFeedback,
   athleteReadinessSignals,
   aiTelemetryEvents,
@@ -36,35 +35,7 @@ import {eq, and, sql, desc, inArray, gte, isNull} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
 
 type RouteContext = {params: Promise<{table: string}>};
-type ChatFeedbackRating = 'helpful' | 'not_helpful';
-type ChatFeedbackReason =
-  | 'helpful'
-  | 'unsafe'
-  | 'too_generic'
-  | 'not_actionable'
-  | 'wrong_context'
-  | 'other';
 type TrainingFeedbackSource = 'weekly_plan_ui' | 'coach_chat';
-
-const CHAT_FEEDBACK_RATINGS = new Set<ChatFeedbackRating>([
-  'helpful',
-  'not_helpful',
-]);
-const CHAT_FEEDBACK_REASONS = new Set<ChatFeedbackReason>([
-  'helpful',
-  'unsafe',
-  'too_generic',
-  'not_actionable',
-  'wrong_context',
-  'other',
-]);
-const NEGATIVE_CHAT_FEEDBACK_REASONS = new Set<ChatFeedbackReason>([
-  'unsafe',
-  'too_generic',
-  'not_actionable',
-  'wrong_context',
-  'other',
-]);
 const TRAINING_FEEDBACK_SOURCES = new Set<TrainingFeedbackSource>([
   'weekly_plan_ui',
   'coach_chat',
@@ -112,95 +83,6 @@ const enforceDbRouteAccess = (
   }
 
   return null;
-};
-
-const validateChatMessageFeedbackRecord = (
-  record: unknown,
-): {valid: true} | {valid: false; message: string} => {
-  if (!record || typeof record !== 'object') {
-    return {valid: false, message: 'Each feedback record must be an object'};
-  }
-
-  const r = record as Record<string, unknown>;
-  const id = typeof r.id === 'string' ? r.id : null;
-  const sessionId = typeof r.sessionId === 'string' ? r.sessionId : null;
-  const messageId = typeof r.messageId === 'string' ? r.messageId : null;
-  const rating =
-    typeof r.rating === 'string' ? (r.rating as ChatFeedbackRating) : null;
-  const reason =
-    r.reason == null ? null : typeof r.reason === 'string' ? r.reason : null;
-  const route =
-    r.route == null ? null : typeof r.route === 'string' ? r.route : null;
-  const model =
-    r.model == null ? null : typeof r.model === 'string' ? r.model : null;
-  const traceId =
-    r.traceId == null
-      ? null
-      : typeof r.traceId === 'string'
-        ? r.traceId
-        : null;
-
-  if (!id || !sessionId || !messageId) {
-    return {
-      valid: false,
-      message: 'chat-message-feedback requires id, sessionId, and messageId',
-    };
-  }
-
-  const expectedId = `${sessionId}:${messageId}`;
-  if (id !== expectedId) {
-    return {
-      valid: false,
-      message: `Feedback id must match session/message composite id (${expectedId})`,
-    };
-  }
-
-  if (!rating || !CHAT_FEEDBACK_RATINGS.has(rating)) {
-    return {
-      valid: false,
-      message: 'rating must be one of: helpful, not_helpful',
-    };
-  }
-
-  if (reason !== null && !CHAT_FEEDBACK_REASONS.has(reason as ChatFeedbackReason)) {
-    return {
-      valid: false,
-      message:
-        'reason must be one of: helpful, unsafe, too_generic, not_actionable, wrong_context, other',
-    };
-  }
-
-  if (r.route !== undefined && route === null) {
-    return {valid: false, message: 'route must be a string when provided'};
-  }
-
-  if (r.model !== undefined && model === null) {
-    return {valid: false, message: 'model must be a string when provided'};
-  }
-
-  if (r.traceId !== undefined && traceId === null) {
-    return {valid: false, message: 'traceId must be a string when provided'};
-  }
-
-  if (rating === 'helpful') {
-    if (reason !== null && reason !== 'helpful') {
-      return {
-        valid: false,
-        message: 'helpful rating cannot use a negative reason',
-      };
-    }
-    return {valid: true};
-  }
-
-  if (!reason || !NEGATIVE_CHAT_FEEDBACK_REASONS.has(reason as ChatFeedbackReason)) {
-    return {
-      valid: false,
-      message:
-        'not_helpful rating requires one of: unsafe, too_generic, not_actionable, wrong_context, other',
-    };
-  }
-
-  return {valid: true};
 };
 
 const isScore = (value: unknown): value is number =>
@@ -621,29 +503,6 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .from(chatMessages)
           .where(eq(chatMessages.sessionId, sessionId))
           .orderBy(chatMessages.createdAt);
-        return NextResponse.json(rows);
-      }
-
-      case 'chat-message-feedback': {
-        if (pk) {
-          const rows = await db
-            .select()
-            .from(chatMessageFeedback)
-            .where(eq(chatMessageFeedback.id, pk));
-          return NextResponse.json(rows[0] ?? null);
-        }
-        const sessionId = req.nextUrl.searchParams.get('sessionId');
-        if (!sessionId) {
-          return NextResponse.json(
-            {error: 'sessionId required'},
-            {status: 400},
-          );
-        }
-        const rows = await db
-          .select()
-          .from(chatMessageFeedback)
-          .where(eq(chatMessageFeedback.sessionId, sessionId))
-          .orderBy(chatMessageFeedback.createdAt);
         return NextResponse.json(rows);
       }
 
@@ -1196,33 +1055,6 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
-      case 'chat-message-feedback':
-        for (const record of records) {
-          const validation = validateChatMessageFeedbackRecord(record);
-          if (validation.valid === false) {
-            return NextResponse.json(
-              {error: validation.message},
-              {status: 400},
-            );
-          }
-        }
-        await db
-          .insert(chatMessageFeedback)
-          .values(records)
-          .onConflictDoUpdate({
-            target: chatMessageFeedback.id,
-            set: {
-              route: sql`excluded.route`,
-              model: sql`excluded.model`,
-              traceId: sql`excluded.trace_id`,
-              rating: sql`excluded.rating`,
-              reason: sql`excluded.reason`,
-              freeText: sql`excluded.free_text`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
-        break;
-
       case 'training-feedback':
         for (const record of records) {
           const validation = validateTrainingFeedbackRecord(record);
@@ -1532,7 +1364,12 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'training-blocks': {
-        const body = await req.json();
+        let body: Record<string, unknown> = {};
+        try {
+          body = await req.json();
+        } catch {
+          body = {};
+        }
         const tbId = req.nextUrl.searchParams.get('id');
         const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
 
@@ -1704,10 +1541,6 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         const sessionId = req.nextUrl.searchParams.get('id');
         if (!sessionId)
           return NextResponse.json({error: 'id required'}, {status: 400});
-        // Delete feedback records linked to this session
-        await db
-          .delete(chatMessageFeedback)
-          .where(eq(chatMessageFeedback.sessionId, sessionId));
         // Delete messages belonging to this session
         await db
           .delete(chatMessages)

@@ -9,7 +9,6 @@
 import type {
   CachedChatSession,
   CachedChatMessage,
-  CachedChatMessageFeedback,
   CachedTrainingFeedback,
   CachedWeeklyPlan,
   CachedTrainingBlock,
@@ -93,19 +92,6 @@ export const neonSyncChatMessages = async (
   await postToNeon('chat-messages', records);
 };
 
-export const neonGetChatMessageFeedback = async (
-  sessionId: string,
-): Promise<CachedChatMessageFeedback[] | null> =>
-  getFromNeon<CachedChatMessageFeedback[]>(
-    `${API}/chat-message-feedback?sessionId=${sessionId}`,
-  );
-
-export const neonSyncChatMessageFeedback = async (
-  records: CachedChatMessageFeedback | CachedChatMessageFeedback[],
-): Promise<void> => {
-  await postToNeon('chat-message-feedback', records);
-};
-
 export const neonGetTrainingFeedback = async (
   athleteId: number,
   weekStart?: string,
@@ -172,13 +158,17 @@ export const neonDeleteWeeklyPlan = async (planId: string): Promise<void> => {
 export const neonActivateWeeklyPlan = async (
   planId: string,
   athleteId: number,
-): Promise<void> => {
+): Promise<boolean> => {
   try {
-    await fetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
+    const res = await fetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
       method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({}),
     });
+    return res.ok;
   } catch (err) {
     console.warn('[chatSync] PATCH weekly-plan activate error:', err);
+    return false;
   }
 };
 
@@ -218,13 +208,17 @@ export const neonDeleteTrainingBlock = async (
 export const neonActivateTrainingBlock = async (
   blockId: string,
   athleteId: number,
-): Promise<void> => {
+): Promise<boolean> => {
   try {
-    await fetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
+    const res = await fetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
       method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({}),
     });
+    return res.ok;
   } catch (err) {
     console.warn('[chatSync] PATCH training-block activate error:', err);
+    return false;
   }
 };
 

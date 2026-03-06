@@ -303,7 +303,7 @@ export async function POST(req: Request) {
     trainingBalance,
     memory ?? null,
   );
-  const reliabilityPolicy = `\n\n## Reliability Policy\n- For training-science or factual claims, cite concrete evidence from tool outputs or attached context.\n- Prefix final guidance with confidence tier: [Confidence: high|medium|low].\n- If confidence is low due to missing data, ask a clarifying question before giving specific prescriptions.\n- If the user asks for medical diagnosis, medication, or reports severe red-flag symptoms, refuse safely and recommend immediate professional care.\n- Keep critic loop bounded: produce one coherent answer; do not recurse endlessly.`;
+  const reliabilityPolicy = `\n\n## Reliability Policy\n- For training-science or factual claims, cite concrete evidence from tool outputs or attached context.\n- If data is missing or uncertain, ask a clarifying question before giving specific prescriptions.\n- If the user asks for medical diagnosis, medication, or reports severe red-flag symptoms, refuse safely and recommend immediate professional care.\n- Keep critic loop bounded: produce one coherent answer; do not recurse endlessly.`;
   const system = `${baseSystem}${reliabilityPolicy}`;
   logAiTrace(trace, 'system_prompt_built', {
     promptHash: promptHash(system),
@@ -370,7 +370,7 @@ export async function POST(req: Request) {
             ? 'an edit to your weekly plan'
             : 'a new weekly plan';
       return new Response(
-        `[Confidence: high]\nPerfect timing — I can start a guided setup for ${subject}. Use the guided card in Coach chat to answer one focused question at a time, then review and press Generate when ready.`,
+        `Perfect timing — I can start a guided setup for ${subject}. Use the guided card in Coach chat to answer one focused question at a time, then review and press Generate when ready.`,
         {
           status: 200,
           headers: {
@@ -405,7 +405,7 @@ export async function POST(req: Request) {
       reason: reliability.rationale,
     });
     return new Response(
-      `[Confidence: low]\nI can't safely provide diagnosis or emergency guidance in chat. Please stop training now and seek urgent medical care or contact local emergency services. I can help you prepare a short symptom summary for a clinician once you're safe.`,
+      `I can't safely provide diagnosis or emergency guidance in chat. Please stop training now and seek urgent medical care or contact local emergency services. I can help you prepare a short symptom summary for a clinician once you're safe.`,
       {
         status: 200,
         headers: {

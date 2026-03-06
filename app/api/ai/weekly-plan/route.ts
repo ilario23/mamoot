@@ -54,6 +54,12 @@ import {
   validateCoachWeekOutput,
   validateCombinedWeekSemantics,
 } from '@/lib/planSemanticValidators';
+import {
+  evaluateCoachWeeklyDistribution,
+  evaluateUnifiedWeeklyDistribution,
+  summarizeDistributionForPrompt,
+  type DistributionEvaluation,
+} from '@/lib/weeklyDistributionEvaluator';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
 import {
@@ -137,6 +143,53 @@ const getDatesForWeek = (mondayStr: string): {day: string; date: string}[] => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     return {day: name, date: d.toISOString().slice(0, 10)};
+  });
+};
+
+const buildGeneratedSessions = (
+  weekDates: {day: string; date: string}[],
+  coachSessions: CoachWeekOutput['sessions'],
+  physioSessions: PhysioWeekOutput['sessions'],
+): UnifiedSession[] => {
+  const physioByDate = new Map(physioSessions.map((session) => [session.date, session]));
+  const n2u = <T,>(value: T | null | undefined): T | undefined => value ?? undefined;
+
+  return weekDates.map(({day, date}) => {
+    const coach = coachSessions.find((session) => session.date === date);
+    const physio = physioByDate.get(date);
+    const unified: UnifiedSession = {day, date};
+
+    if (coach && coach.type !== 'rest') {
+      unified.run = {
+        type: coach.type,
+        description: coach.description,
+        duration: n2u(coach.duration),
+        targetPace: n2u(coach.targetPace),
+        targetZone: n2u(coach.targetZone),
+        notes: n2u(coach.notes),
+      };
+    }
+
+    if (physio) {
+      unified.physio = {
+        type: physio.type,
+        exercises: physio.exercises.map((exercise) => ({
+          name: exercise.name,
+          sets: n2u(exercise.sets),
+          reps: n2u(exercise.reps),
+          tempo: n2u(exercise.tempo),
+          notes: n2u(exercise.notes),
+        })),
+        duration: n2u(physio.duration),
+        notes: n2u(physio.notes),
+      };
+    }
+
+    if (coach?.type === 'rest' && !physio) {
+      unified.notes = coach.description;
+    }
+
+    return unified;
   });
 };
 
@@ -299,6 +352,10 @@ export async function POST(req: Request) {
     let roundCount = 0;
     let multiAgentConflicts: WeeklyAgentConflict[] = [];
     let repairApplied = false;
+    let distributionRepairApplied = false;
+    let distributionRepairAttempts = 0;
+    let coachDistributionEvaluation: DistributionEvaluation | null = null;
+    let finalDistributionEvaluation: DistributionEvaluation | null = null;
     let conflictSummary = 'No coach/physio conflicts detected.';
     const isEditRequest =
       Boolean(editInstructions && editInstructions.trim()) ||
@@ -788,7 +845,7 @@ export async function POST(req: Request) {
     if (!hasRuntimeBudget()) {
       throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_COACH');
     }
-    const coachObject = await generateObjectWithRetry<CoachWeekOutput>({
+    let coachObject = await generateObjectWithRetry<CoachWeekOutput>({
       model,
       schema: coachWeekOutputSchema,
       prompt: finalCoachPrompt,
@@ -797,9 +854,53 @@ export async function POST(req: Request) {
     specialistTurnsUsed += 1;
     roundCount += 1;
 
-    const coachSessions = coachObject.sessions;
+    let coachSessions = coachObject.sessions;
+    coachDistributionEvaluation = evaluateCoachWeeklyDistribution(coachObject);
+    logAiTrace(trace, 'weekly_distribution_coach_evaluated', {
+      athleteId,
+      score: coachDistributionEvaluation.score,
+      threshold: coachDistributionEvaluation.threshold,
+      accepted: coachDistributionEvaluation.accepted,
+      subscores: coachDistributionEvaluation.subscores,
+      issueCount: coachDistributionEvaluation.issues.length,
+      mode: effectiveMode,
+    });
+    if (
+      !coachDistributionEvaluation.accepted &&
+      hasRuntimeBudget() &&
+      roundCount < multiAgentConfig.maxRounds
+    ) {
+      sendProgress('coach', 'Applying coach distribution repair pass.');
+      const repairPrompt = `${finalCoachPrompt}\n\n## Deterministic Weekly Distribution Feedback\n${summarizeDistributionForPrompt(
+        coachDistributionEvaluation,
+      )}\n\nRepair instructions:\n- Keep all dates.\n- Reduce hard clustering.\n- Keep easy volume dominant.\n- Preserve key block intent and safety constraints.\n- Minimize unnecessary restructuring.`;
+      coachObject = await generateObjectWithRetry<CoachWeekOutput>({
+        model,
+        schema: coachWeekOutputSchema,
+        prompt: repairPrompt,
+        semanticCheck: validateCoachWeekOutput,
+      });
+      coachSessions = coachObject.sessions;
+      coachDistributionEvaluation = evaluateCoachWeeklyDistribution(coachObject);
+      distributionRepairApplied = true;
+      distributionRepairAttempts += 1;
+      roundCount += 1;
+      specialistTurnsUsed += 1;
+      logAiTrace(trace, 'weekly_distribution_coach_repaired', {
+        athleteId,
+        score: coachDistributionEvaluation.score,
+        threshold: coachDistributionEvaluation.threshold,
+        accepted: coachDistributionEvaluation.accepted,
+        issueCount: coachDistributionEvaluation.issues.length,
+        repairAttempts: distributionRepairAttempts,
+      });
+    }
     console.log(`[WeeklyPlan] Coach produced ${coachSessions.length} sessions`);
-    sendProgress('coach', 'Coach draft ready.', {sessionCount: coachSessions.length});
+    sendProgress('coach', 'Coach draft ready.', {
+      sessionCount: coachSessions.length,
+      distributionScore: coachDistributionEvaluation.score,
+      distributionAccepted: coachDistributionEvaluation.accepted,
+    });
 
     // Step 3: Physio generates complementary sessions
     console.log(`[WeeklyPlan] Step 3: Physio generateObject...`);
@@ -945,49 +1046,90 @@ export async function POST(req: Request) {
 
     // Step 4: Merge by date
     sendProgress('merge', 'Merging coach and physio plans by date.');
-    const physioByDate = new Map(physioSessions.map((s) => [s.date, s]));
-
-    // Convert nullable fields (null → undefined) for the UnifiedSession interface
-    const n2u = <T,>(v: T | null | undefined): T | undefined => v ?? undefined;
-
-    const generatedSessions: UnifiedSession[] = weekDates.map(({day, date}) => {
-      const coach = coachSessions.find((s) => s.date === date);
-      const physio = physioByDate.get(date);
-
-      const session: UnifiedSession = {day, date};
-
-      if (coach && coach.type !== 'rest') {
-        session.run = {
-          type: coach.type,
-          description: coach.description,
-          duration: n2u(coach.duration),
-          targetPace: n2u(coach.targetPace),
-          targetZone: n2u(coach.targetZone),
-          notes: n2u(coach.notes),
-        };
-      }
-
-      if (physio) {
-        session.physio = {
-          type: physio.type,
-          exercises: physio.exercises.map((e) => ({
-            name: e.name,
-            sets: n2u(e.sets),
-            reps: n2u(e.reps),
-            tempo: n2u(e.tempo),
-            notes: n2u(e.notes),
-          })),
-          duration: n2u(physio.duration),
-          notes: n2u(physio.notes),
-        };
-      }
-
-      if (coach?.type === 'rest' && !physio) {
-        session.notes = coach.description;
-      }
-
-      return session;
+    let generatedSessions: UnifiedSession[] = buildGeneratedSessions(
+      weekDates,
+      coachSessions,
+      physioSessions,
+    );
+    finalDistributionEvaluation = evaluateUnifiedWeeklyDistribution(generatedSessions);
+    logAiTrace(trace, 'weekly_distribution_final_evaluated', {
+      athleteId,
+      score: finalDistributionEvaluation.score,
+      threshold: finalDistributionEvaluation.threshold,
+      accepted: finalDistributionEvaluation.accepted,
+      subscores: finalDistributionEvaluation.subscores,
+      issueCount: finalDistributionEvaluation.issues.length,
+      mode: effectiveMode,
+      physioFallbackReason,
     });
+    if (
+      !finalDistributionEvaluation.accepted &&
+      !distributionRepairApplied &&
+      hasRuntimeBudget() &&
+      roundCount < multiAgentConfig.maxRounds
+    ) {
+      sendProgress('repair', 'Applying targeted distribution repair pass.');
+      const distributionRepairPrompt = `${finalCoachPrompt}\n\n## Deterministic Weekly Distribution Repair Feedback\n${summarizeDistributionForPrompt(
+        finalDistributionEvaluation,
+      )}\n\nRepair instructions:\n- Keep all dates fixed.\n- Reduce hard clustering and excessive weekend load.\n- Keep easy-minute dominance.\n- Preserve key workout intent from block context and athlete goals.\n- Keep changes minimal and safety-first.`;
+      coachObject = await generateObjectWithRetry<CoachWeekOutput>({
+        model,
+        schema: coachWeekOutputSchema,
+        prompt: distributionRepairPrompt,
+        semanticCheck: validateCoachWeekOutput,
+      });
+      coachSessions = coachObject.sessions;
+      specialistTurnsUsed += 1;
+      roundCount += 1;
+      distributionRepairApplied = true;
+      distributionRepairAttempts += 1;
+
+      const repairedCoachSessionsSummary = coachSessions
+        .map((session) => `- ${session.day} (${session.date}): ${session.type} — ${session.description}`)
+        .join('\n');
+      const repairedPhysioPrompt = buildPhysioPipelinePrompt({
+        athleteName: null,
+        weight: settings?.weight ?? null,
+        trainingBalance: settings?.trainingBalance ?? null,
+        weekStart,
+        weekEnd,
+        injuries: injuriesText,
+        coachSessions: repairedCoachSessionsSummary,
+        preferences: generationPreferences || null,
+        optimizationPriorityLabel,
+      });
+      const repairedPhysioObject = await generateObjectWithRetry<PhysioWeekOutput>({
+        model,
+        schema: physioWeekOutputSchema,
+        prompt: repairedPhysioPrompt,
+        semanticCheck: (candidate) =>
+          validateCombinedWeekSemantics(coachObject, candidate, {
+            allowMissingStrengthBeforeDate,
+          }),
+      });
+      specialistTurnsUsed += 1;
+      roundCount += 1;
+      physioSessions = repairedPhysioObject.sessions;
+
+      const conflictResolution = resolveWeeklyCoachPhysioConflicts(
+        coachObject,
+        {sessions: physioSessions},
+      );
+      multiAgentConflicts = conflictResolution.conflicts;
+      conflictSummary = summarizeConflictResolution(conflictResolution.conflicts);
+      physioSessions = conflictResolution.resolvedPhysioSessions;
+      generatedSessions = buildGeneratedSessions(weekDates, coachSessions, physioSessions);
+      finalDistributionEvaluation = evaluateUnifiedWeeklyDistribution(generatedSessions);
+      logAiTrace(trace, 'weekly_distribution_final_repaired', {
+        athleteId,
+        score: finalDistributionEvaluation.score,
+        threshold: finalDistributionEvaluation.threshold,
+        accepted: finalDistributionEvaluation.accepted,
+        issueCount: finalDistributionEvaluation.issues.length,
+        repairAttempts: distributionRepairAttempts,
+      });
+      sendProgress('repair', 'Distribution repair pass completed.');
+    }
 
     const activitiesByDate = new Map<string, ActivitySummary[]>();
     for (const activity of allActivities) {
@@ -1107,7 +1249,7 @@ export async function POST(req: Request) {
 
     markdownLines.push('## Evidence and Risk');
     markdownLines.push(
-      `[Confidence: ${riskIntelligence.riskLevel === 'high' ? 'medium' : 'high'}] Recommendations were grounded in your recent load metrics and profile data.`,
+      'Recommendations were grounded in your recent load metrics and profile data.',
     );
     markdownLines.push(
       `- Risk level: ${riskIntelligence.riskLevel} (${riskIntelligence.riskScore}/100)`,
@@ -1119,6 +1261,22 @@ export async function POST(req: Request) {
       markdownLines.push(
         '- Fallback applied: physio step skipped because the runtime budget was exceeded; this version includes coach sessions only.',
       );
+    }
+    if (finalDistributionEvaluation) {
+      markdownLines.push(
+        `- Weekly distribution score: ${finalDistributionEvaluation.score}/100 (target >= ${finalDistributionEvaluation.threshold})`,
+      );
+      markdownLines.push(
+        `- Distribution subscores: type ${finalDistributionEvaluation.subscores.sessionType}, intensity ${finalDistributionEvaluation.subscores.intensity}, spread ${finalDistributionEvaluation.subscores.loadSpread}`,
+      );
+      if (!finalDistributionEvaluation.accepted) {
+        markdownLines.push(
+          '- Distribution tradeoff: below target but accepted because safety constraints were satisfied.',
+        );
+      }
+      for (const issue of finalDistributionEvaluation.issues.slice(0, 3)) {
+        markdownLines.push(`- Distribution note: ${issue.message}`);
+      }
     }
     markdownLines.push(`- Coordination summary: ${conflictSummary}`);
     for (const contributor of riskIntelligence.topContributors) {
@@ -1155,6 +1313,7 @@ export async function POST(req: Request) {
         digitalTwin: twinProfile,
         counterfactualRanking,
         risk: riskIntelligence,
+        distribution: finalDistributionEvaluation,
       }),
     );
     const content = `${PLAN_PREFERENCES_PREFIX}${encodedPreferences}${PLAN_PREFERENCES_SUFFIX}\n${PLAN_STRATEGY_PREFIX}${strategyMetaPayload}${PLAN_STRATEGY_SUFFIX}\n${markdownContent}`;
@@ -1205,6 +1364,10 @@ export async function POST(req: Request) {
           (conflict) => conflict.severity === 'high',
         ).length,
         conflictSummary,
+        distributionScore: finalDistributionEvaluation?.score ?? null,
+        distributionAccepted: finalDistributionEvaluation?.accepted ?? null,
+        distributionRepairApplied,
+        distributionRepairAttempts,
       });
       await db.insert(orchestratorPlanItems).values({
         id: crypto.randomUUID(),
@@ -1295,6 +1458,10 @@ export async function POST(req: Request) {
       highSeverityConflictCount: multiAgentConflicts.filter(
         (conflict) => conflict.severity === 'high',
       ).length,
+      distributionScore: finalDistributionEvaluation?.score ?? null,
+      distributionAccepted: finalDistributionEvaluation?.accepted ?? null,
+      distributionRepairApplied,
+      distributionRepairAttempts,
       elapsedMs: elapsedMs(),
       inputTokens: null,
       outputTokens: null,
@@ -1326,6 +1493,7 @@ export async function POST(req: Request) {
         summary: conflictSummary,
         physioFallbackReason,
       },
+      distribution: finalDistributionEvaluation,
       createdAt: now2,
     };
     sendProgress('save', 'Plan saved successfully.');

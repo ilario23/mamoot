@@ -135,24 +135,6 @@ export const chatMessages = pgTable('chat_messages', {
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
 });
 
-// ----- Chat Message Feedback -----
-// Explicit quality labels for assistant responses (thumbs up/down + reason).
-export const chatMessageFeedback = pgTable('chat_message_feedback', {
-  id: text('id').primaryKey(),
-  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
-  sessionId: text('session_id').notNull(),
-  messageId: text('message_id').notNull(),
-  persona: text('persona').notNull(),
-  route: text('route'),
-  model: text('model'),
-  traceId: text('trace_id'),
-  rating: text('rating').notNull(), // "helpful" | "not_helpful"
-  reason: text('reason'), // short taxonomy code
-  freeText: text('free_text'),
-  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
-  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
-});
-
 // ----- Training Feedback -----
 // Athlete reflection on how a training week went and felt.
 export const trainingFeedback = pgTable('training_feedback', {

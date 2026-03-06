@@ -12,8 +12,6 @@ import {
   Menu,
   ChevronDown,
   ChevronRight,
-  ThumbsUp,
-  ThumbsDown,
   ClipboardList,
   Target,
   AlertOctagon,
@@ -35,9 +33,6 @@ import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/activityModel';
 import type {PersonaId} from '@/lib/aiPrompts';
 import type {
-  CachedChatMessageFeedback,
-  ChatFeedbackRating,
-  ChatFeedbackReason,
   CachedTrainingFeedback,
   CachedOrchestratorGoal,
   CachedOrchestratorPlanItem,
@@ -52,8 +47,6 @@ import {
   type MentionReference,
 } from '@/lib/mentionTypes';
 import {
-  neonGetChatMessageFeedback,
-  neonSyncChatMessageFeedback,
   neonSyncTrainingFeedback,
   neonGetOrchestratorGoals,
   neonGetOrchestratorPlanItems,
@@ -168,19 +161,6 @@ const PERSONA_STARTERS: Record<PersonaId, string[]> = {
     'Create handoffs for the team',
   ],
 };
-
-type NegativeFeedbackReason = Exclude<ChatFeedbackReason, 'helpful'>;
-
-const NEGATIVE_FEEDBACK_OPTIONS: Array<{
-  id: NegativeFeedbackReason;
-  label: string;
-}> = [
-  {id: 'unsafe', label: 'Unsafe'},
-  {id: 'too_generic', label: 'Too generic'},
-  {id: 'not_actionable', label: 'Not actionable'},
-  {id: 'wrong_context', label: 'Wrong context'},
-  {id: 'other', label: 'Other'},
-];
 
 const PersonaAvatar = ({
   persona,
@@ -459,9 +439,6 @@ const AITeamChat = () => {
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
     string | null
   >(null);
-  const [feedbackByMessageId, setFeedbackByMessageId] = useState<
-    Record<string, CachedChatMessageFeedback>
-  >({});
   const [orchestratorGoals, setOrchestratorGoals] = useState<
     CachedOrchestratorGoal[]
   >([]);
@@ -484,9 +461,6 @@ const AITeamChat = () => {
   >({});
   const [submittingTrainingFeedbackWeek, setSubmittingTrainingFeedbackWeek] =
     useState<string | null>(null);
-  const [negativeFeedbackDrafts, setNegativeFeedbackDrafts] = useState<
-    Record<string, {reason: NegativeFeedbackReason; freeText: string; open: boolean}>
-  >({});
   const [isWeeklyPlanGenerating, setIsWeeklyPlanGenerating] = useState(false);
   const [weeklyPlanProgress, setWeeklyPlanProgress] = useState<AiProgressEvent[]>(
     [],
@@ -580,29 +554,6 @@ const AITeamChat = () => {
 
     load();
   }, [activeSession?.id, loadMessages, getMemorySummary, activeChat]);
-
-  useEffect(() => {
-    const sid = activeSession?.id;
-    if (!sid) {
-      setFeedbackByMessageId({});
-      return;
-    }
-    (async () => {
-      const feedback = await neonGetChatMessageFeedback(sid);
-      if (!feedback) {
-        setFeedbackByMessageId({});
-        return;
-      }
-      const map = feedback.reduce<Record<string, CachedChatMessageFeedback>>(
-        (acc, item) => {
-          acc[item.messageId] = item;
-          return acc;
-        },
-        {},
-      );
-      setFeedbackByMessageId(map);
-    })();
-  }, [activeSession?.id]);
 
   const refreshOrchestratorSnapshot = useCallback(async () => {
     if (!activeSession?.id || !athleteId) return;
@@ -855,83 +806,6 @@ const AITeamChat = () => {
       return parseAiErrorFromUnknown({error: rawMessage}, rawMessage);
     }
   }, [activeChat.error]);
-
-  const persistMessageFeedback = useCallback(
-    async (
-      messageId: string,
-      rating: ChatFeedbackRating,
-      reason: ChatFeedbackReason | null,
-      freeText: string | null,
-    ) => {
-      if (!activeSession?.id || !athleteId) return;
-      const now = Date.now();
-      const record: CachedChatMessageFeedback = {
-        id: `${activeSession.id}:${messageId}`,
-        athleteId,
-        sessionId: activeSession.id,
-        messageId,
-        persona: activePersona,
-        route: 'ai.chat',
-        model: selectedModel ?? null,
-        traceId: null,
-        rating,
-        reason,
-        freeText,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await neonSyncChatMessageFeedback(record);
-      setFeedbackByMessageId((prev) => ({...prev, [messageId]: record}));
-    },
-    [activeSession?.id, activePersona, athleteId, selectedModel],
-  );
-
-  const handleMessageFeedback = useCallback(
-    async (messageId: string, rating: ChatFeedbackRating) => {
-      if (rating === 'helpful') {
-        await persistMessageFeedback(messageId, 'helpful', 'helpful', null);
-        setNegativeFeedbackDrafts((prev) => {
-          const next = {...prev};
-          delete next[messageId];
-          return next;
-        });
-        return;
-      }
-
-      const existing = feedbackByMessageId[messageId];
-      const existingReason: NegativeFeedbackReason =
-        existing?.rating === 'not_helpful' && existing.reason && existing.reason !== 'helpful'
-          ? (existing.reason as NegativeFeedbackReason)
-          : 'too_generic';
-      setNegativeFeedbackDrafts((prev) => ({
-        ...prev,
-        [messageId]: {
-          reason: prev[messageId]?.reason ?? existingReason,
-          freeText: prev[messageId]?.freeText ?? existing?.freeText ?? '',
-          open: !prev[messageId]?.open,
-        },
-      }));
-    },
-    [feedbackByMessageId, persistMessageFeedback],
-  );
-
-  const handleSubmitNegativeFeedback = useCallback(
-    async (messageId: string) => {
-      const draft = negativeFeedbackDrafts[messageId];
-      if (!draft) return;
-      await persistMessageFeedback(
-        messageId,
-        'not_helpful',
-        draft.reason,
-        draft.reason === 'other' ? (draft.freeText.trim() || null) : null,
-      );
-      setNegativeFeedbackDrafts((prev) => ({
-        ...prev,
-        [messageId]: {...draft, open: false},
-      }));
-    },
-    [negativeFeedbackDrafts, persistMessageFeedback],
-  );
 
   const handleSubmitTrainingFeedback = useCallback(
     async (
@@ -1694,7 +1568,6 @@ const AITeamChat = () => {
 
           {activeChat.messages.map((msg, msgIdx) => {
             const isUser = msg.role === 'user';
-            const messageFeedback = feedbackByMessageId[msg.id];
             const prevRole =
               msgIdx > 0 ? activeChat.messages[msgIdx - 1]?.role : null;
             const isRoleSwitch = prevRole !== null && prevRole !== msg.role;
@@ -1863,117 +1736,6 @@ const AITeamChat = () => {
                             }
                           />
                         </div>
-                      )}
-                      {!isUser && textContent && (
-                        <>
-                          <div className='flex items-center gap-1.5 mt-2'>
-                            <button
-                              onClick={() => handleMessageFeedback(msg.id, 'helpful')}
-                              aria-label='Mark response helpful'
-                              tabIndex={0}
-                              className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
-                                messageFeedback?.rating === 'helpful'
-                                  ? 'bg-secondary/20 text-secondary border-secondary/40'
-                                  : 'bg-background text-muted-foreground border-border hover:text-foreground'
-                              }`}
-                            >
-                              <ThumbsUp className='h-3 w-3' />
-                              Helpful
-                            </button>
-                            <button
-                              onClick={() =>
-                                handleMessageFeedback(msg.id, 'not_helpful')
-                              }
-                              aria-label='Mark response not helpful'
-                              tabIndex={0}
-                              className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
-                                messageFeedback?.rating === 'not_helpful'
-                                  ? 'bg-destructive/15 text-destructive border-destructive/40'
-                                  : 'bg-background text-muted-foreground border-border hover:text-foreground'
-                              }`}
-                            >
-                              <ThumbsDown className='h-3 w-3' />
-                              Not helpful
-                            </button>
-                          </div>
-
-                          {negativeFeedbackDrafts[msg.id]?.open && (
-                            <div className='mt-2 border-2 border-border bg-muted/40 p-2.5 space-y-2'>
-                              <p className='text-[10px] font-black uppercase tracking-wider text-destructive'>
-                                Improve this response
-                              </p>
-                              <div className='flex flex-wrap gap-1.5'>
-                                {NEGATIVE_FEEDBACK_OPTIONS.map((option) => (
-                                  <button
-                                    key={option.id}
-                                    onClick={() =>
-                                      setNegativeFeedbackDrafts((prev) => ({
-                                        ...prev,
-                                        [msg.id]: {
-                                          ...prev[msg.id],
-                                          reason: option.id,
-                                        },
-                                      }))
-                                    }
-                                    tabIndex={0}
-                                    aria-label={`Feedback reason: ${option.label}`}
-                                    className={`px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 ${
-                                      negativeFeedbackDrafts[msg.id]?.reason === option.id
-                                        ? 'bg-destructive/15 text-destructive border-destructive/40'
-                                        : 'bg-background text-muted-foreground border-border hover:text-foreground'
-                                    }`}
-                                  >
-                                    {option.label}
-                                  </button>
-                                ))}
-                              </div>
-                              {negativeFeedbackDrafts[msg.id]?.reason === 'other' && (
-                                <textarea
-                                  value={negativeFeedbackDrafts[msg.id]?.freeText ?? ''}
-                                  onChange={(event) =>
-                                    setNegativeFeedbackDrafts((prev) => ({
-                                      ...prev,
-                                      [msg.id]: {
-                                        ...prev[msg.id],
-                                        freeText: event.target.value,
-                                      },
-                                    }))
-                                  }
-                                  rows={2}
-                                  className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium resize-none'
-                                  placeholder='Optional details'
-                                  aria-label='Feedback details'
-                                />
-                              )}
-                              <div className='flex gap-1.5'>
-                                <button
-                                  onClick={() => handleSubmitNegativeFeedback(msg.id)}
-                                  tabIndex={0}
-                                  aria-label='Submit negative feedback'
-                                  className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground'
-                                >
-                                  Save feedback
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    setNegativeFeedbackDrafts((prev) => ({
-                                      ...prev,
-                                      [msg.id]: {
-                                        ...prev[msg.id],
-                                        open: false,
-                                      },
-                                    }))
-                                  }
-                                  tabIndex={0}
-                                  aria-label='Cancel negative feedback'
-                                  className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background hover:bg-muted'
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </>
                       )}
                     </>
                   )}

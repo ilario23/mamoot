@@ -164,45 +164,6 @@ export interface CachedChatMessage {
   createdAt: number;
 }
 
-export type ChatFeedbackRating = 'helpful' | 'not_helpful';
-
-export type ChatFeedbackReason =
-  | 'helpful'
-  | 'unsafe'
-  | 'too_generic'
-  | 'not_actionable'
-  | 'wrong_context'
-  | 'other';
-
-export interface CachedChatMessageFeedback {
-  /** UUID primary key */
-  id: string;
-  /** Strava athlete ID */
-  athleteId: number;
-  /** FK to CachedChatSession.id */
-  sessionId: string;
-  /** FK to CachedChatMessage.id */
-  messageId: string;
-  /** Persona used when this response was produced */
-  persona: string;
-  /** Route that produced the response, e.g. "ai.chat" */
-  route: string | null;
-  /** Model used to produce the response */
-  model: string | null;
-  /** Optional trace correlation ID from AI response headers */
-  traceId: string | null;
-  /** "helpful" or "not_helpful" */
-  rating: ChatFeedbackRating;
-  /** Short taxonomy code */
-  reason: ChatFeedbackReason | null;
-  /** Optional user free text comment */
-  freeText: string | null;
-  /** Unix ms timestamp */
-  createdAt: number;
-  /** Unix ms timestamp */
-  updatedAt: number;
-}
-
 export type TrainingFeedbackSource = 'weekly_plan_ui' | 'coach_chat';
 
 export interface CachedTrainingFeedback {
