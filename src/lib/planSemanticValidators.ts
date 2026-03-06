@@ -1,5 +1,9 @@
 import type {CoachWeekOutput, PhysioWeekOutput} from '@/lib/weeklyPlanSchema';
 import type {WeekOutline} from '@/lib/cacheTypes';
+import {
+  evaluateUnifiedWeeklyDistribution,
+  type DistributionEvaluation,
+} from '@/lib/weeklyDistributionEvaluator';
 
 const HARD_RUN_TYPES = new Set(['intervals', 'tempo', 'threshold', 'race']);
 const HARD_OR_LONG_RUN_TYPES = new Set(['intervals', 'tempo', 'threshold', 'race', 'long']);
@@ -80,7 +84,7 @@ export const validateCombinedWeekSemantics = (
   coach: CoachWeekOutput,
   physio: PhysioWeekOutput,
   options?: {allowMissingStrengthBeforeDate?: string},
-): {ok: boolean; reason?: string} => {
+): {ok: boolean; reason?: string; distribution?: DistributionEvaluation} => {
   const coachDates = coach.sessions.map((session) => session.date);
   const coachDateSet = new Set(coachDates);
   if (coachDateSet.size !== coachDates.length) {
@@ -155,7 +159,88 @@ export const validateCombinedWeekSemantics = (
     }
   }
 
-  return {ok: true};
+  const mergedSessions = coach.sessions.map((runSession) => {
+    const physioSession = physioByDate.get(runSession.date);
+    return {
+      day: runSession.day,
+      date: runSession.date,
+      run:
+        runSession.type === 'rest'
+          ? undefined
+          : {
+              type: runSession.type,
+              description: runSession.description,
+              duration: runSession.duration ?? undefined,
+              targetPace: runSession.targetPace ?? undefined,
+              targetZone: runSession.targetZone ?? undefined,
+              notes: runSession.notes ?? undefined,
+            },
+      physio: physioSession
+        ? {
+            type: physioSession.type,
+            exercises: physioSession.exercises.map((exercise) => ({
+              name: exercise.name,
+              sets: exercise.sets ?? undefined,
+              reps: exercise.reps ?? undefined,
+              tempo: exercise.tempo ?? undefined,
+              notes: exercise.notes ?? undefined,
+            })),
+            duration: physioSession.duration ?? undefined,
+            notes: physioSession.notes ?? undefined,
+          }
+        : undefined,
+    };
+  });
+  const distribution = evaluateUnifiedWeeklyDistribution(mergedSessions);
+  if (distribution.score < 50) {
+    return {
+      ok: false,
+      reason: `Distribution safety floor not met (${distribution.score}/100)`,
+      distribution,
+    };
+  }
+
+  return {ok: true, distribution};
+};
+
+export const assessCombinedWeekDistribution = (
+  coach: CoachWeekOutput,
+  physio: PhysioWeekOutput,
+): DistributionEvaluation => {
+  const physioByDate = new Map(physio.sessions.map((session) => [session.date, session]));
+  const mergedSessions = coach.sessions.map((runSession) => {
+    const physioSession = physioByDate.get(runSession.date);
+    return {
+      day: runSession.day,
+      date: runSession.date,
+      run:
+        runSession.type === 'rest'
+          ? undefined
+          : {
+              type: runSession.type,
+              description: runSession.description,
+              duration: runSession.duration ?? undefined,
+              targetPace: runSession.targetPace ?? undefined,
+              targetZone: runSession.targetZone ?? undefined,
+              notes: runSession.notes ?? undefined,
+            },
+      physio: physioSession
+        ? {
+            type: physioSession.type,
+            exercises: physioSession.exercises.map((exercise) => ({
+              name: exercise.name,
+              sets: exercise.sets ?? undefined,
+              reps: exercise.reps ?? undefined,
+              tempo: exercise.tempo ?? undefined,
+              notes: exercise.notes ?? undefined,
+            })),
+            duration: physioSession.duration ?? undefined,
+            notes: physioSession.notes ?? undefined,
+          }
+        : undefined,
+    };
+  });
+  return evaluateUnifiedWeeklyDistribution(mergedSessions);
 };
 
 export const validateTrainingBlockWeekOutlines = (

@@ -51,6 +51,13 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 - Coach owns strength slot allocation: intentionally create 1-3 "strength-capable" windows across the week (typically on rest or low-run-load days), then leave execution details for Physio.
 - Use activity-type-aware sequencing: pair strength-capable windows with easy/recovery/rest context; avoid placing them right before key run days whenever possible.
 - DOMS-aware planning: after a likely heavy lower-body strength window, the next day must NOT be a long run, intervals, or tempo; use easy/recovery/rest as a buffer.
+- Weekly distribution targets (deterministic scorer aligned):
+  - Run days: usually 3-6/week.
+  - Rest days: usually 1-3/week.
+  - Hard run days (intervals/tempo/threshold/race): usually 1-3/week.
+  - Avoid back-to-back hard run days.
+  - Keep easy aerobic minutes dominant over moderate+hard combined.
+  - Avoid overloading weekend share of run volume (do not stack most load only on Sat/Sun).
 - Keep long-run freshness: avoid scheduling long runs within 24 hours after hard lower-body strength stress.
 - Base pace targets on the athlete's personal records.
 - If ACWR is high (>1.3) or volume has been increasing rapidly, include extra rest.
@@ -103,6 +110,10 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
   - Do NOT schedule heavy eccentric lower-body sessions on the day before long run or quality run days.
   - Prefer warm-up, cooldown, mobility, and tissue-prep work around quality run days.
   - If recent soreness/injury risk is implied, bias toward mobility, isometrics, and controlled tempo work over maximal loading.
+- Distribution alignment with deterministic scorer:
+  - Preserve coach hard-day spacing (no new back-to-back hard stress patterns).
+  - Prefer physio prescriptions that support easy-day recovery when weekly hard density is already high.
+  - If coach load is weekend-heavy, avoid adding extra high-fatigue physio load on Sat/Sun.
 - Honor the training balance: higher values = fuller strength programs; lower values = minimal, injury-prevention focused.
 - If injuries are reported, include targeted rehab exercises and avoid aggravating movements.
 - Include specific exercises with sets, reps, and tempo cues.

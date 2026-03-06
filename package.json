@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:prompts": "node scripts/check-prompt-contracts.mjs",
     "test:prompt-scenarios": "node scripts/check-prompt-scenarios.mjs",
-    "test:ai-evals": "node scripts/ai-eval-gates.mjs && node scripts/check-multi-agent-telemetry.mjs",
+    "test:ai-evals": "node scripts/ai-eval-gates.mjs && node scripts/check-multi-agent-telemetry.mjs && node scripts/check-weekly-distribution-logic.mjs",
     "test:cohort-replay": "node scripts/run-cohort-replay-benchmark.mjs",
     "test:ai-gates": "npm run test:prompts && npm run test:prompt-scenarios",
     "db:generate": "drizzle-kit generate",

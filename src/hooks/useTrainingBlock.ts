@@ -47,7 +47,7 @@ export interface GenerateTrainingBlockOptions {
 export interface UseTrainingBlockResult {
   blocks: TrainingBlock[];
   activeBlock: TrainingBlock | null;
-  activateBlock: (blockId: string) => void;
+  activateBlock: (blockId: string) => Promise<void>;
   deleteBlock: (blockId: string) => Promise<void>;
   isLoading: boolean;
   isGenerating: boolean;
@@ -255,14 +255,17 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
   );
 
   const activateBlock = useCallback(
-    (blockId: string) => {
+    async (blockId: string) => {
       setBlocks((prev) =>
         prev.map((b) => ({...b, isActive: b.id === blockId})),
       );
       if (!athleteId) return;
-      neonActivateTrainingBlock(blockId, athleteId);
+      const activated = await neonActivateTrainingBlock(blockId, athleteId);
+      if (!activated) {
+        await loadBlocks();
+      }
     },
-    [athleteId],
+    [athleteId, loadBlocks],
   );
 
   const deleteBlock = useCallback(

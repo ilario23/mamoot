@@ -1066,10 +1066,19 @@ const WeeklyPlan = () => {
 
       {/* Empty state */}
       {!activePlan && (
-        <EmptyState
-          onGenerate={handleGenerate}
-          isGenerating={isGenerating}
-        />
+        <div className='space-y-3'>
+          <EmptyState
+            onGenerate={handleGenerate}
+            isGenerating={isGenerating}
+          />
+          {plans.length > 0 && (
+            <div className='border-3 border-border bg-background shadow-neo-sm p-4'>
+              <p className='text-sm font-bold'>
+                No active plan selected. Choose one from history below.
+              </p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Active plan */}
@@ -1288,47 +1297,47 @@ const WeeklyPlan = () => {
             </div>
           )}
 
-          {/* Plan history */}
-          {plans.length > 0 && (
-            <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
-              <button
-                onClick={handleToggleHistory}
-                aria-expanded={historyOpen}
-                aria-label={`${historyOpen ? 'Collapse' : 'Expand'} plan history`}
-                tabIndex={0}
-                className='w-full flex items-center justify-between p-4 md:p-5 hover:bg-muted/50 transition-colors'
-              >
-                <span className='font-black text-base md:text-lg uppercase tracking-wider'>
-                  Plan History ({plans.length})
-                </span>
-                <ChevronDown
-                  className={`h-5 w-5 shrink-0 transition-transform duration-200 ${
-                    historyOpen ? 'rotate-180' : ''
-                  }`}
-                  aria-hidden='true'
-                />
-              </button>
-              {historyOpen && (
-                <div className='space-y-1 p-2 overflow-hidden'>
-                  {plans.map((plan) => (
-                    <PlanHistoryItem
-                      key={plan.id}
-                      plan={plan}
-                      isActive={plan.id === activePlan?.id}
-                      onActivate={() => activatePlan(plan.id)}
-                      onDelete={() => handleDeletePlanRequest(plan.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           <WeeklyPlanDistribution
             weekStart={activePlan.weekStart}
             sessions={activePlan.sessions}
           />
         </>
+      )}
+
+      {/* Plan history */}
+      {plans.length > 0 && (
+        <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
+          <button
+            onClick={handleToggleHistory}
+            aria-expanded={historyOpen}
+            aria-label={`${historyOpen ? 'Collapse' : 'Expand'} plan history`}
+            tabIndex={0}
+            className='w-full flex items-center justify-between p-4 md:p-5 hover:bg-muted/50 transition-colors'
+          >
+            <span className='font-black text-base md:text-lg uppercase tracking-wider'>
+              Plan History ({plans.length})
+            </span>
+            <ChevronDown
+              className={`h-5 w-5 shrink-0 transition-transform duration-200 ${
+                historyOpen ? 'rotate-180' : ''
+              }`}
+              aria-hidden='true'
+            />
+          </button>
+          {historyOpen && (
+            <div className='space-y-1 p-2 overflow-hidden'>
+              {plans.map((plan) => (
+                <PlanHistoryItem
+                  key={plan.id}
+                  plan={plan}
+                  isActive={plan.isActive}
+                  onActivate={() => activatePlan(plan.id)}
+                  onDelete={() => handleDeletePlanRequest(plan.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       <AlertDialog

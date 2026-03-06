@@ -48,7 +48,7 @@ export interface GeneratePlanOptions {
 export interface UseWeeklyPlanResult {
   plans: WeeklyPlan[];
   activePlan: WeeklyPlan | null;
-  activatePlan: (planId: string) => void;
+  activatePlan: (planId: string) => Promise<void>;
   deletePlan: (planId: string) => Promise<void>;
   isLoading: boolean;
   isGenerating: boolean;
@@ -458,7 +458,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   );
 
   const activatePlan = useCallback(
-    (planId: string) => {
+    async (planId: string) => {
       setPlans((prev) =>
         prev.map((p) => ({...p, isActive: p.id === planId})),
       );
@@ -467,9 +467,12 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
       if (target && athleteId) writeActiveRef(athleteId, {...target, isActive: true});
 
       if (!athleteId) return;
-      neonActivateWeeklyPlan(planId, athleteId);
+      const activated = await neonActivateWeeklyPlan(planId, athleteId);
+      if (!activated) {
+        await loadPlans();
+      }
     },
-    [athleteId, plans],
+    [athleteId, loadPlans, plans],
   );
 
   const deletePlan = useCallback(
@@ -498,7 +501,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
       if (wasActive && athleteId) {
         const nextActive = plans.filter((p) => p.id !== planId)[0];
         if (nextActive) {
-          neonActivateWeeklyPlan(nextActive.id, athleteId);
+          await neonActivateWeeklyPlan(nextActive.id, athleteId);
         }
       }
     },
