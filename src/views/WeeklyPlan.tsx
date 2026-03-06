@@ -1107,7 +1107,7 @@ const WeeklyPlan = () => {
           )}
 
           {/* Plan history */}
-          {plans.length > 1 && (
+          {plans.length > 0 && (
             <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
               <button
                 onClick={handleToggleHistory}

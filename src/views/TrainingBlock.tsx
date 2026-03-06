@@ -918,7 +918,7 @@ const TrainingBlockView = () => {
           </div>
 
           {/* Block history */}
-          {blocks.length > 1 && (
+          {blocks.length > 0 && (
             <div className="border-3 border-border bg-background shadow-neo overflow-hidden">
               <button
                 onClick={handleToggleHistory}
