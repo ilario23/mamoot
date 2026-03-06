@@ -21,7 +21,7 @@ const IntakeStepControls = ({
   onCancel,
   onSaveDraft,
 }: IntakeStepControlsProps) => (
-  <div className='flex flex-wrap items-center gap-1.5 pt-2'>
+  <div className='flex flex-wrap items-center gap-1.5 pt-1.5'>
     <button
       onClick={onBack}
       disabled={!canGoBack || isSubmitting}

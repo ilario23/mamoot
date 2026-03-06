@@ -4,9 +4,10 @@ import type {
   TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
 
-export type CoachIntakeIntent = 'weekly_plan' | 'training_block';
+export type CoachIntakeIntent = 'weekly_plan' | 'weekly_plan_edit' | 'training_block';
 export type WeeklyTargetWeek = 'current' | 'next';
 export type WeeklyPlanIntensity = 'conservative' | 'balanced' | 'aggressive';
+export type WeeklyPlanEditFocus = 'small_adjustments' | 'moderate_adjustments' | 'major_rework';
 
 export interface WeeklyPlanRequirements {
   targetWeek: WeeklyTargetWeek;
@@ -30,6 +31,17 @@ export interface TrainingBlockRequirements {
   unavailableDays: string[];
   weeklyKmBackground: string;
   notes: string;
+  strategySelectionMode: StrategySelectionMode;
+  strategyPreset?: TrainingStrategyPreset;
+  optimizationPriority: OptimizationPriority;
+}
+
+export interface WeeklyPlanEditRequirements {
+  generationMode: 'full' | 'remaining_days';
+  editFocus: WeeklyPlanEditFocus;
+  editGoal: string;
+  constraints: string;
+  daySpecificNotes: string;
   strategySelectionMode: StrategySelectionMode;
   strategyPreset?: TrainingStrategyPreset;
   optimizationPriority: OptimizationPriority;
@@ -72,16 +84,29 @@ export const defaultTrainingBlockRequirements = (): TrainingBlockRequirements =>
 
 const NEW_PLAN_RE = /\b(new|create|build|generate|start)\b[\s\S]{0,40}\b(weekly\s*plan|plan for (this|next) week|next week plan|new plan)\b/i;
 const NEW_BLOCK_RE = /\b(new|create|build|generate|start)\b[\s\S]{0,40}\b(training\s*block|block|macro plan|marathon block)\b/i;
+const EDIT_PLAN_RE = /\b(edit|update|adjust|change|modify|tweak|revise|rework)\b[\s\S]{0,60}\b(weekly\s*plan|this week(?:'s)? plan|current plan|plan)\b/i;
 
 export const detectCoachIntakeIntent = (
   text: string,
 ): CoachIntakeIntent | null => {
   const clean = text.trim();
   if (!clean) return null;
+  if (EDIT_PLAN_RE.test(clean)) return 'weekly_plan_edit';
   if (NEW_BLOCK_RE.test(clean)) return 'training_block';
   if (NEW_PLAN_RE.test(clean)) return 'weekly_plan';
   return null;
 };
+
+export const defaultWeeklyPlanEditRequirements = (): WeeklyPlanEditRequirements => ({
+  generationMode: 'remaining_days',
+  editFocus: 'small_adjustments',
+  editGoal: 'Adjust the active weekly plan without overloading recovery.',
+  constraints:
+    'Keep the overall week structure stable unless a change is explicitly requested.',
+  daySpecificNotes: '',
+  strategySelectionMode: 'auto',
+  optimizationPriority: 'fitness_growth',
+});
 
 export const summarizeWeeklyPlanRequirements = (
   input: WeeklyPlanRequirements,
@@ -121,6 +146,23 @@ export const summarizeTrainingBlockRequirements = (
       : null,
     constraints,
     input.notes.trim() ? `Notes: ${input.notes.trim()}.` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+};
+
+export const summarizeWeeklyPlanEditRequirements = (
+  input: WeeklyPlanEditRequirements,
+): string => {
+  return [
+    'Edit request for active weekly plan.',
+    `Generation mode: ${input.generationMode}.`,
+    `Edit focus: ${input.editFocus}.`,
+    `Primary goal: ${input.editGoal}.`,
+    `Constraints: ${input.constraints}.`,
+    input.daySpecificNotes.trim()
+      ? `Day-specific notes: ${input.daySpecificNotes.trim()}.`
+      : null,
   ]
     .filter(Boolean)
     .join(' ');

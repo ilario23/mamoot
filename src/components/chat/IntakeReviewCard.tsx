@@ -26,7 +26,7 @@ const IntakeReviewCard = ({
   onGenerate,
   onCancel,
 }: IntakeReviewCardProps) => (
-  <div className='border-3 border-border bg-background p-3 space-y-3 shadow-neo-sm'>
+  <div className='border-3 border-border bg-background p-2.5 space-y-2.5 shadow-neo-sm'>
     <div className='space-y-1'>
       <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
         {title}
@@ -34,7 +34,7 @@ const IntakeReviewCard = ({
       <p className='text-xs font-medium text-muted-foreground'>{subtitle}</p>
     </div>
 
-    <div className='space-y-1.5'>
+    <div className='space-y-1'>
       {items.map((item) => (
         <div
           key={item.label}

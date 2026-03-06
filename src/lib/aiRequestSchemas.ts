@@ -41,6 +41,9 @@ export const weeklyPlanRequestSchema = z.object({
   optimizationPriority: z.string().optional(),
   orchestratorSessionId: z.string().optional(),
   useMultiAgent: z.boolean().optional(),
+  editSourcePlanId: z.string().optional(),
+  editInstructions: z.string().optional(),
+  editTargetDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
 });
 
 export const trainingBlockRequestSchema = z.object({

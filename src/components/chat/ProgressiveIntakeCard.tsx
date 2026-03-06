@@ -40,7 +40,7 @@ const ProgressiveIntakeCard = ({
   children,
   footer,
 }: ProgressiveIntakeCardProps) => (
-  <div className='border-3 border-border bg-background p-3 space-y-3 shadow-neo-sm'>
+  <div className='border-3 border-border bg-background p-2.5 space-y-2.5 shadow-neo-sm'>
     <div className='flex items-start justify-between gap-2'>
       <div className='space-y-1'>
         <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
@@ -53,7 +53,7 @@ const ProgressiveIntakeCard = ({
       </span>
     </div>
 
-    <div className='space-y-2'>
+    <div className='space-y-1.5'>
       <p className='text-sm font-bold flex items-start gap-1.5'>
         <MessageSquareQuote className='h-4 w-4 mt-0.5 text-primary shrink-0' />
         <span>{question}</span>

@@ -1504,6 +1504,24 @@ const AITeamChat = () => {
           })}
         </div>
 
+        <CoachGuidedIntakePanel
+          activePersonaId={activePersona}
+          athleteId={athleteId}
+          selectedModel={selectedModel}
+          launchIntent={requestedCoachIntake}
+          onLaunchHandled={() => setRequestedCoachIntake(null)}
+          onWeeklyPlanCreated={async () => {
+            if (!athleteId) return;
+            const weeklyPlan = await neonGetActiveWeeklyPlan(athleteId);
+            setActiveWeeklyPlan(weeklyPlan ?? null);
+          }}
+          onTrainingBlockCreated={async () => {
+            if (!athleteId) return;
+            const trainingBlock = await neonGetActiveTrainingBlock(athleteId);
+            setActiveTrainingBlock(trainingBlock ?? null);
+          }}
+        />
+
         {/* Desktop header — new chat button top-right */}
         <div
           className={`hidden md:flex items-center justify-between px-3 py-2 border-b-[5px] border-border bg-neo-stripe ${currentPersona.color}`}
@@ -1765,7 +1783,7 @@ const AITeamChat = () => {
                   className={`text-[13px] md:text-sm font-medium overflow-hidden break-words min-w-0 ${
                     isUser
                       ? 'p-2.5 md:p-3 border-3 border-border bg-accent text-accent-foreground ml-auto max-w-[94%] md:max-w-[75%] shadow-neo-sm hover:shadow-neo transition-shadow'
-                      : 'py-1 mr-auto max-w-[98%] md:max-w-[80%] text-foreground'
+                      : 'py-0.5 mr-auto max-w-[98%] md:max-w-[80%] text-foreground'
                   }`}
                   style={{overflowWrap: 'anywhere'}}
                 >
@@ -2002,24 +2020,6 @@ const AITeamChat = () => {
             />
           </div>
         )}
-
-        <CoachGuidedIntakePanel
-          activePersonaId={activePersona}
-          athleteId={athleteId}
-          selectedModel={selectedModel}
-          launchIntent={requestedCoachIntake}
-          onLaunchHandled={() => setRequestedCoachIntake(null)}
-          onWeeklyPlanCreated={async () => {
-            if (!athleteId) return;
-            const weeklyPlan = await neonGetActiveWeeklyPlan(athleteId);
-            setActiveWeeklyPlan(weeklyPlan ?? null);
-          }}
-          onTrainingBlockCreated={async () => {
-            if (!athleteId) return;
-            const trainingBlock = await neonGetActiveTrainingBlock(athleteId);
-            setActiveTrainingBlock(trainingBlock ?? null);
-          }}
-        />
 
         {/* Input with @-mention support */}
         <ChatInput

@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
-import {Loader2, Sparkles, Target} from 'lucide-react';
+import {CheckCircle2, ChevronDown, Loader2, Sparkles, Target} from 'lucide-react';
 import ProgressiveIntakeCard from '@/components/chat/ProgressiveIntakeCard';
 import IntakeStepControls from '@/components/chat/IntakeStepControls';
 import IntakeReviewCard from '@/components/chat/IntakeReviewCard';
@@ -18,14 +18,19 @@ import {
 import {
   detectCoachIntakeIntent,
   defaultTrainingBlockRequirements,
+  defaultWeeklyPlanEditRequirements,
   defaultWeeklyPlanRequirements,
   summarizeTrainingBlockRequirements,
+  summarizeWeeklyPlanEditRequirements,
   summarizeWeeklyPlanRequirements,
   WEEKDAY_OPTIONS,
   type CoachIntakeIntent,
   type TrainingBlockRequirements,
+  type WeeklyPlanEditRequirements,
   type WeeklyPlanRequirements,
 } from '@/lib/coachIntake';
+import type {CachedWeeklyPlan} from '@/lib/cacheTypes';
+import {neonGetActiveWeeklyPlan} from '@/lib/chatSync';
 
 const WEEKLY_PHASE_ORDER: AiProgressPhase[] = [
   'context',
@@ -98,6 +103,14 @@ const BLOCK_STEP_IDS = [
   'notes',
 ] as const;
 
+const WEEKLY_EDIT_STEP_IDS = [
+  'mode',
+  'focus',
+  'goal',
+  'constraints',
+  'day_notes',
+] as const;
+
 type IntakeMode = 'idle' | 'collecting' | 'review';
 
 const logIntakeEvent = (
@@ -135,7 +148,12 @@ const CoachGuidedIntakePanel = ({
   const [blockReq, setBlockReq] = useState<TrainingBlockRequirements>(
     defaultTrainingBlockRequirements(),
   );
+  const [editReq, setEditReq] = useState<WeeklyPlanEditRequirements>(
+    defaultWeeklyPlanEditRequirements(),
+  );
   const [stepNotes, setStepNotes] = useState<Record<string, string>>({});
+  const [activePlanForEdit, setActivePlanForEdit] = useState<CachedWeeklyPlan | null>(null);
+  const [isLoadingActivePlanForEdit, setIsLoadingActivePlanForEdit] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isGeneratingWeeklyPlan, setIsGeneratingWeeklyPlan] = useState(false);
@@ -156,9 +174,15 @@ const CoachGuidedIntakePanel = ({
     null,
   );
   const [showIntakeDuringGeneration, setShowIntakeDuringGeneration] = useState(false);
+  const [isSetupExpanded, setIsSetupExpanded] = useState(false);
+  const [isActiveIntakeExpanded, setIsActiveIntakeExpanded] = useState(true);
 
   const isVisible = activePersonaId === 'coach';
-  const stepIds = intent === 'weekly_plan' ? WEEKLY_STEP_IDS : BLOCK_STEP_IDS;
+  const stepIds = useMemo(() => {
+    if (intent === 'weekly_plan') return WEEKLY_STEP_IDS;
+    if (intent === 'weekly_plan_edit') return WEEKLY_EDIT_STEP_IDS;
+    return BLOCK_STEP_IDS;
+  }, [intent]);
   const activeStepId = stepIds[stepIndex] ?? null;
   const activeStepNote = activeStepId ? (stepNotes[activeStepId] ?? '') : '';
   const isSubmitting = isGeneratingWeeklyPlan || isGeneratingBlock;
@@ -176,8 +200,11 @@ const CoachGuidedIntakePanel = ({
     setWeeklyPlanError(null);
     setBlockError(null);
     setShowIntakeDuringGeneration(false);
+    setIsActiveIntakeExpanded(true);
     setWeeklyReq(defaultWeeklyPlanRequirements());
     setBlockReq(defaultTrainingBlockRequirements());
+    setEditReq(defaultWeeklyPlanEditRequirements());
+    setActivePlanForEdit(null);
   }, []);
 
   useEffect(() => {
@@ -186,6 +213,34 @@ const CoachGuidedIntakePanel = ({
     onLaunchHandled();
   }, [isVisible, launchIntent, beginIntake, onLaunchHandled]);
 
+  useEffect(() => {
+    if (!athleteId || intent !== 'weekly_plan_edit') {
+      setIsLoadingActivePlanForEdit(false);
+      setActivePlanForEdit(null);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingActivePlanForEdit(true);
+    void (async () => {
+      const plan = await neonGetActiveWeeklyPlan(athleteId);
+      if (cancelled) return;
+      setActivePlanForEdit(plan ?? null);
+      setIsLoadingActivePlanForEdit(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [athleteId, intent]);
+
+  useEffect(() => {
+    if (intent !== 'weekly_plan_edit' || !activePlanForEdit) return;
+    setEditReq((prev) => ({
+      ...prev,
+      editGoal: `Refine ${activePlanForEdit.title} while preserving core intent.`,
+      constraints: `Keep the weekly structure for week starting ${activePlanForEdit.weekStart} unless explicitly changed.`,
+    }));
+  }, [intent, activePlanForEdit]);
+
   const canGoNext = useMemo(() => {
     if (!intent) return false;
     if (intent === 'weekly_plan') {
@@ -193,11 +248,25 @@ const CoachGuidedIntakePanel = ({
       if (step === 'focus') return weeklyReq.focus.trim().length > 0;
       return true;
     }
+    if (intent === 'weekly_plan_edit') {
+      const step = WEEKLY_EDIT_STEP_IDS[stepIndex];
+      if (step === 'goal') return editReq.editGoal.trim().length > 0;
+      if (step === 'constraints') return editReq.constraints.trim().length > 0;
+      return true;
+    }
     const step = BLOCK_STEP_IDS[stepIndex];
     if (step === 'goal_event') return blockReq.goalEvent.trim().length > 0;
     if (step === 'goal_date') return blockReq.goalDate.trim().length > 0;
     return true;
-  }, [intent, stepIndex, weeklyReq.focus, blockReq.goalDate, blockReq.goalEvent]);
+  }, [
+    intent,
+    stepIndex,
+    weeklyReq.focus,
+    editReq.editGoal,
+    editReq.constraints,
+    blockReq.goalDate,
+    blockReq.goalEvent,
+  ]);
 
   const handleCancel = useCallback(() => {
     logIntakeEvent('intake_cancelled', {
@@ -212,6 +281,8 @@ const CoachGuidedIntakePanel = ({
     setWeeklyPlanError(null);
     setBlockError(null);
     setShowIntakeDuringGeneration(false);
+    setActivePlanForEdit(null);
+    setIsActiveIntakeExpanded(true);
   }, [intent, mode, stepIndex]);
 
   useEffect(() => {
@@ -888,6 +959,193 @@ const CoachGuidedIntakePanel = ({
     );
   };
 
+  const renderEditStep = () => {
+    const step = WEEKLY_EDIT_STEP_IDS[stepIndex];
+
+    if (step === 'mode') {
+      return (
+        <ProgressiveIntakeCard
+          title='Coach guided setup'
+          subtitle='Weekly plan edit'
+          question='How broad should this edit be?'
+          stepIndex={stepIndex}
+          totalSteps={WEEKLY_EDIT_STEP_IDS.length}
+          options={[
+            {id: 'remaining_days', label: 'Remaining days only'},
+            {id: 'full', label: 'Full week'},
+          ]}
+          selectedOptionIds={[editReq.generationMode]}
+          onSelectOption={(id) =>
+            setEditReq((prev) => ({
+              ...prev,
+              generationMode: id as WeeklyPlanEditRequirements['generationMode'],
+            }))
+          }
+          freeText={activeStepNote}
+          onChangeFreeText={updateStepNote}
+          footer={
+            <IntakeStepControls
+              canGoBack={stepIndex > 0}
+              canGoNext={canGoNext}
+              isLastStep={stepIndex === WEEKLY_EDIT_STEP_IDS.length - 1}
+              isSubmitting={isSubmitting}
+              onBack={handleBack}
+              onNext={handleNext}
+              onSaveDraft={handleSaveDraft}
+              onCancel={handleCancel}
+            />
+          }
+        />
+      );
+    }
+
+    if (step === 'focus') {
+      return (
+        <ProgressiveIntakeCard
+          title='Coach guided setup'
+          subtitle='Weekly plan edit'
+          question='How much should we change from the current plan?'
+          stepIndex={stepIndex}
+          totalSteps={WEEKLY_EDIT_STEP_IDS.length}
+          options={[
+            {id: 'small_adjustments', label: 'Small adjustments'},
+            {id: 'moderate_adjustments', label: 'Moderate adjustments'},
+            {id: 'major_rework', label: 'Major rework'},
+          ]}
+          selectedOptionIds={[editReq.editFocus]}
+          onSelectOption={(id) =>
+            setEditReq((prev) => ({
+              ...prev,
+              editFocus: id as WeeklyPlanEditRequirements['editFocus'],
+            }))
+          }
+          freeText={activeStepNote}
+          onChangeFreeText={updateStepNote}
+          footer={
+            <IntakeStepControls
+              canGoBack={stepIndex > 0}
+              canGoNext={canGoNext}
+              isLastStep={stepIndex === WEEKLY_EDIT_STEP_IDS.length - 1}
+              isSubmitting={isSubmitting}
+              onBack={handleBack}
+              onNext={handleNext}
+              onSaveDraft={handleSaveDraft}
+              onCancel={handleCancel}
+            />
+          }
+        />
+      );
+    }
+
+    if (step === 'goal') {
+      return (
+        <ProgressiveIntakeCard
+          title='Coach guided setup'
+          subtitle='Weekly plan edit'
+          question='What should this edit optimize for?'
+          stepIndex={stepIndex}
+          totalSteps={WEEKLY_EDIT_STEP_IDS.length}
+          freeText={activeStepNote}
+          onChangeFreeText={updateStepNote}
+          footer={
+            <IntakeStepControls
+              canGoBack={stepIndex > 0}
+              canGoNext={canGoNext}
+              isLastStep={stepIndex === WEEKLY_EDIT_STEP_IDS.length - 1}
+              isSubmitting={isSubmitting}
+              onBack={handleBack}
+              onNext={handleNext}
+              onSaveDraft={handleSaveDraft}
+              onCancel={handleCancel}
+            />
+          }
+        >
+          <input
+            value={editReq.editGoal}
+            onChange={(event) =>
+              setEditReq((prev) => ({...prev, editGoal: event.target.value}))
+            }
+            placeholder='Example: reduce fatigue while keeping one quality run'
+            aria-label='Weekly plan edit goal'
+            className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium'
+          />
+        </ProgressiveIntakeCard>
+      );
+    }
+
+    if (step === 'constraints') {
+      return (
+        <ProgressiveIntakeCard
+          title='Coach guided setup'
+          subtitle='Weekly plan edit'
+          question='What constraints must remain true?'
+          stepIndex={stepIndex}
+          totalSteps={WEEKLY_EDIT_STEP_IDS.length}
+          freeText={activeStepNote}
+          onChangeFreeText={updateStepNote}
+          footer={
+            <IntakeStepControls
+              canGoBack={stepIndex > 0}
+              canGoNext={canGoNext}
+              isLastStep={stepIndex === WEEKLY_EDIT_STEP_IDS.length - 1}
+              isSubmitting={isSubmitting}
+              onBack={handleBack}
+              onNext={handleNext}
+              onSaveDraft={handleSaveDraft}
+              onCancel={handleCancel}
+            />
+          }
+        >
+          <textarea
+            value={editReq.constraints}
+            onChange={(event) =>
+              setEditReq((prev) => ({...prev, constraints: event.target.value}))
+            }
+            rows={3}
+            placeholder='Keep long run on Saturday, no hard sessions on back-to-back days, etc.'
+            aria-label='Weekly plan edit constraints'
+            className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium resize-none'
+          />
+        </ProgressiveIntakeCard>
+      );
+    }
+
+    return (
+      <ProgressiveIntakeCard
+        title='Coach guided setup'
+        subtitle='Weekly plan edit'
+        question='Any day-specific edits?'
+        stepIndex={stepIndex}
+        totalSteps={WEEKLY_EDIT_STEP_IDS.length}
+        freeText={activeStepNote}
+        onChangeFreeText={updateStepNote}
+        footer={
+          <IntakeStepControls
+            canGoBack={stepIndex > 0}
+            canGoNext={canGoNext}
+            isLastStep={stepIndex === WEEKLY_EDIT_STEP_IDS.length - 1}
+            isSubmitting={isSubmitting}
+            onBack={handleBack}
+            onNext={handleNext}
+            onSaveDraft={handleSaveDraft}
+            onCancel={handleCancel}
+          />
+        }
+      >
+        <textarea
+          value={editReq.daySpecificNotes}
+          onChange={(event) =>
+            setEditReq((prev) => ({...prev, daySpecificNotes: event.target.value}))
+          }
+          rows={3}
+          placeholder='Example: Tuesday becomes easy only, move tempo to Friday'
+          aria-label='Day-specific weekly plan edits'
+          className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium resize-none'
+        />
+      </ProgressiveIntakeCard>
+    );
+  };
+
   const reviewItems = useMemo(() => {
     if (!intent) return [];
     if (intent === 'weekly_plan') {
@@ -922,6 +1180,29 @@ const CoachGuidedIntakePanel = ({
           value: OPTIMIZATION_PRIORITY_LABELS[weeklyReq.optimizationPriority],
         },
         {label: 'Notes', value: notes || weeklyReq.notes || 'None'},
+      ];
+    }
+    if (intent === 'weekly_plan_edit') {
+      const notes = Object.values(stepNotes)
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(' | ');
+      return [
+        {
+          label: 'Editing plan',
+          value: activePlanForEdit
+            ? `${activePlanForEdit.title} (${activePlanForEdit.weekStart})`
+            : 'No active plan found',
+        },
+        {label: 'Generation mode', value: editReq.generationMode},
+        {label: 'Edit focus', value: editReq.editFocus},
+        {label: 'Goal', value: editReq.editGoal},
+        {label: 'Constraints', value: editReq.constraints},
+        {
+          label: 'Day-specific notes',
+          value: editReq.daySpecificNotes.trim() || 'None',
+        },
+        {label: 'Notes', value: notes || 'None'},
       ];
     }
     const notes = Object.values(stepNotes)
@@ -959,7 +1240,7 @@ const CoachGuidedIntakePanel = ({
           .join(' | ') || 'None',
       },
     ];
-  }, [intent, weeklyReq, blockReq, stepNotes]);
+  }, [intent, weeklyReq, editReq, blockReq, stepNotes, activePlanForEdit]);
 
   const handleGenerateWeeklyPlan = useCallback(async () => {
     if (!athleteId || isGeneratingWeeklyPlan) return;
@@ -1089,6 +1370,34 @@ const CoachGuidedIntakePanel = ({
         if (streamErrored || completed) break;
       }
 
+      if (!streamErrored && !completed && buffer.trim().length > 0) {
+        const parsed = parseSseChunks<AiProgressEvent>(buffer, '\n\n');
+        for (const event of parsed.events) {
+          setWeeklyPlanProgress((prev) => [...prev, event]);
+          setWeeklyPlanCurrentMessage(event.message);
+          if (event.type === 'progress') {
+            markPhaseInProgress(event.phase);
+            continue;
+          }
+          if (event.type === 'error') {
+            markTerminal('error');
+            setWeeklyPlanError(
+              parseAiErrorFromUnknown(
+                {code: (event.meta as {code?: string} | undefined)?.code, error: event.message},
+                event.message,
+              ),
+            );
+            streamErrored = true;
+            break;
+          }
+          if (event.type === 'done') {
+            markTerminal('done');
+            completed = true;
+            break;
+          }
+        }
+      }
+
       if (completed) {
         logIntakeEvent('weekly_plan_generation_succeeded', {
           intent: 'weekly_plan',
@@ -1116,6 +1425,201 @@ const CoachGuidedIntakePanel = ({
     selectedModel,
     stepNotes,
     weeklyReq,
+  ]);
+
+  const handleEditWeeklyPlan = useCallback(async () => {
+    if (!athleteId || isGeneratingWeeklyPlan || !activePlanForEdit) return;
+    logIntakeEvent('weekly_plan_edit_started', {
+      intent: 'weekly_plan_edit',
+      planId: activePlanForEdit.id,
+      generationMode: editReq.generationMode,
+    });
+    setIsGeneratingWeeklyPlan(true);
+    setWeeklyPlanProgress([]);
+    setWeeklyPlanCurrentMessage('Starting weekly plan edit...');
+    setWeeklyPlanPhaseMap(createPhaseMap());
+    setWeeklyPlanError(null);
+
+    const notes = Object.values(stepNotes)
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join('\n');
+    const editInstructions = `${summarizeWeeklyPlanEditRequirements(editReq)}${
+      notes ? `\nAdditional notes:\n${notes}` : ''
+    }`;
+    const payload = {
+      athleteId,
+      model: selectedModel,
+      weekStartDate: activePlanForEdit.weekStart,
+      mode: editReq.generationMode,
+      sourcePlanId: activePlanForEdit.id,
+      editSourcePlanId: activePlanForEdit.id,
+      editInstructions,
+      strategySelectionMode: editReq.strategySelectionMode,
+      strategyPreset: editReq.strategyPreset,
+      optimizationPriority: editReq.optimizationPriority,
+    };
+
+    try {
+      const response = await fetch('/api/ai/weekly-plan', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        let body: unknown = null;
+        try {
+          body = await response.json();
+        } catch {
+          body = null;
+        }
+        setWeeklyPlanError(parseAiErrorFromUnknown(body, 'Failed to edit weekly plan'));
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        setWeeklyPlanError(
+          parseAiErrorFromUnknown(
+            null,
+            'Missing response stream while editing weekly plan',
+          ),
+        );
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let latestPhase: AiProgressPhase | null = null;
+      let streamErrored = false;
+      let completed = false;
+
+      const markPhaseInProgress = (phase: AiProgressPhase) => {
+        if (!WEEKLY_PHASE_ORDER.includes(phase)) return;
+        setWeeklyPlanPhaseMap((prev) => {
+          const next = {...prev};
+          if (
+            latestPhase &&
+            latestPhase !== phase &&
+            next[latestPhase] === 'in_progress'
+          ) {
+            next[latestPhase] = 'done';
+          }
+          next[phase] = 'in_progress';
+          return next;
+        });
+        latestPhase = phase;
+      };
+
+      const markTerminal = (state: 'done' | 'error') => {
+        setWeeklyPlanPhaseMap((prev) => {
+          const next = {...prev};
+          if (latestPhase && next[latestPhase] === 'in_progress') {
+            next[latestPhase] = state;
+          }
+          next[state] = state;
+          return next;
+        });
+      };
+
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const parsed = parseSseChunks<AiProgressEvent>(buffer, '');
+        buffer = parsed.remainder;
+
+        for (const event of parsed.events) {
+          setWeeklyPlanProgress((prev) => [...prev, event]);
+          setWeeklyPlanCurrentMessage(event.message);
+          if (event.type === 'progress') {
+            markPhaseInProgress(event.phase);
+            continue;
+          }
+          if (event.type === 'error') {
+            markTerminal('error');
+            setWeeklyPlanError(
+              parseAiErrorFromUnknown(
+                {
+                  code: (event.meta as {code?: string} | undefined)?.code,
+                  error: event.message,
+                },
+                event.message,
+              ),
+            );
+            streamErrored = true;
+            break;
+          }
+          if (event.type === 'done') {
+            markTerminal('done');
+            completed = true;
+            break;
+          }
+        }
+
+        if (streamErrored || completed) break;
+      }
+
+      if (!streamErrored && !completed && buffer.trim().length > 0) {
+        const parsed = parseSseChunks<AiProgressEvent>(buffer, '\n\n');
+        for (const event of parsed.events) {
+          setWeeklyPlanProgress((prev) => [...prev, event]);
+          setWeeklyPlanCurrentMessage(event.message);
+          if (event.type === 'progress') {
+            markPhaseInProgress(event.phase);
+            continue;
+          }
+          if (event.type === 'error') {
+            markTerminal('error');
+            setWeeklyPlanError(
+              parseAiErrorFromUnknown(
+                {
+                  code: (event.meta as {code?: string} | undefined)?.code,
+                  error: event.message,
+                },
+                event.message,
+              ),
+            );
+            streamErrored = true;
+            break;
+          }
+          if (event.type === 'done') {
+            markTerminal('done');
+            completed = true;
+            break;
+          }
+        }
+      }
+
+      if (completed) {
+        logIntakeEvent('weekly_plan_edit_succeeded', {
+          intent: 'weekly_plan_edit',
+        });
+        setSuccessMessage('Weekly plan updated. A new version is now active.');
+        setMode('idle');
+        setIntent(null);
+        await onWeeklyPlanCreated?.();
+      }
+    } catch (error) {
+      logIntakeEvent('weekly_plan_edit_failed', {
+        intent: 'weekly_plan_edit',
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      setWeeklyPlanError(
+        parseAiErrorFromUnknown(error, 'Failed to edit weekly plan'),
+      );
+    } finally {
+      setIsGeneratingWeeklyPlan(false);
+    }
+  }, [
+    athleteId,
+    isGeneratingWeeklyPlan,
+    activePlanForEdit,
+    editReq,
+    selectedModel,
+    stepNotes,
+    onWeeklyPlanCreated,
   ]);
 
   const handleGenerateTrainingBlock = useCallback(async () => {
@@ -1194,46 +1698,111 @@ const CoachGuidedIntakePanel = ({
       await handleGenerateWeeklyPlan();
       return;
     }
+    if (intent === 'weekly_plan_edit') {
+      await handleEditWeeklyPlan();
+      return;
+    }
     if (intent === 'training_block') {
       await handleGenerateTrainingBlock();
     }
-  }, [intent, handleGenerateTrainingBlock, handleGenerateWeeklyPlan]);
+  }, [
+    intent,
+    handleEditWeeklyPlan,
+    handleGenerateTrainingBlock,
+    handleGenerateWeeklyPlan,
+  ]);
+
+  const intakeLabel =
+    intent === 'weekly_plan'
+      ? 'Weekly plan'
+      : intent === 'weekly_plan_edit'
+        ? 'Weekly plan edit'
+        : 'Training block';
 
   if (!isVisible) return null;
 
   return (
-    <div className='px-2 md:px-3 pb-2 space-y-2'>
-      {mode === 'idle' && (
-        <div className='border-2 border-border bg-primary/5 p-2.5 space-y-2'>
-          <div className='flex items-center gap-1.5'>
-            <Sparkles className='h-3.5 w-3.5 text-primary' />
-            <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
-              Coach guided setup
-            </p>
+    <div className='px-1.5 md:px-2.5 pb-1.5 space-y-1.5'>
+      {successMessage && (
+        <div
+          role='status'
+          className='border-2 border-secondary/40 bg-secondary/10 px-2 py-1.5 flex items-center justify-between gap-2'
+        >
+          <div className='flex items-start gap-1.5 min-w-0'>
+            <CheckCircle2 className='h-3.5 w-3.5 text-secondary shrink-0 mt-0.5' />
+            <div className='min-w-0'>
+              <p className='text-[10px] font-black uppercase tracking-widest text-secondary'>
+                Completed
+              </p>
+              <p className='text-[11px] font-bold text-secondary truncate'>{successMessage}</p>
+            </div>
           </div>
-          <p className='text-xs font-medium text-muted-foreground'>
-            Build a new block or weekly plan with structured questions.
-          </p>
-          <div className='flex flex-wrap gap-1.5'>
+          <button
+            onClick={() => setSuccessMessage(null)}
+            tabIndex={0}
+            aria-label='Dismiss completion message'
+            className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background shrink-0'
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {mode === 'idle' && (
+        <div className='border-2 border-border bg-primary/5 px-2 py-1.5 space-y-1.5'>
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <div className='flex items-center gap-1.5 min-w-0'>
+              <Sparkles className='h-3.5 w-3.5 text-primary shrink-0' />
+              <p className='text-[10px] font-black uppercase tracking-widest text-primary truncate'>
+                Coach guided setup
+              </p>
+            </div>
             <button
               onClick={() => beginIntake('weekly_plan')}
               tabIndex={0}
               aria-label='Start weekly plan guided setup'
-              className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background'
+              className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background ml-auto'
             >
-              New weekly plan
+              Start setup
             </button>
             <button
-              onClick={() => beginIntake('training_block')}
+              onClick={() => setIsSetupExpanded((prev) => !prev)}
+              aria-label='Toggle coach guided setup actions'
+              aria-expanded={isSetupExpanded}
               tabIndex={0}
-              aria-label='Start training block guided setup'
-              className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background'
+              className='p-1 border-2 border-border bg-background'
             >
-              New training block
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                  isSetupExpanded ? 'rotate-180' : ''
+                }`}
+              />
             </button>
           </div>
-          {successMessage && (
-            <p className='text-[11px] font-bold text-secondary'>{successMessage}</p>
+          {isSetupExpanded && (
+            <div className='space-y-1.5'>
+              <p className='text-[11px] font-medium text-muted-foreground'>
+                Build a new block or weekly plan with structured questions.
+              </p>
+              <div className='flex flex-wrap gap-1.5'>
+                <button
+                  onClick={() => beginIntake('weekly_plan_edit')}
+                  tabIndex={0}
+                  aria-label='Start weekly plan edit guided setup'
+                  className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background'
+                >
+                  Edit weekly plan
+                </button>
+                <button
+                  onClick={() => beginIntake('training_block')}
+                  tabIndex={0}
+                  aria-label='Start training block guided setup'
+                  className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background'
+                >
+                  New training block
+                </button>
+              </div>
+            </div>
           )}
           {lastSavedAt && (
             <p className='text-[10px] text-muted-foreground font-medium'>
@@ -1244,7 +1813,7 @@ const CoachGuidedIntakePanel = ({
       )}
 
       {isIntakeCollapsedWhileGenerating && (
-        <div className='border-2 border-border bg-muted/30 p-2 space-y-1.5'>
+        <div className='border-2 border-border bg-muted/30 p-1.5 space-y-1'>
           <div className='flex items-center justify-between gap-2'>
             <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
               Intake form collapsed while generating
@@ -1265,34 +1834,100 @@ const CoachGuidedIntakePanel = ({
       )}
 
       {!isIntakeCollapsedWhileGenerating && hasActiveIntake && (
-        <div
-          className={
-            isSubmitting
-              ? 'max-h-[42vh] overflow-y-auto pr-1 border-l-2 border-border/70 pl-2'
-              : ''
-          }
-        >
-          {mode === 'collecting' && intent === 'weekly_plan' && renderWeeklyStep()}
-          {mode === 'collecting' && intent === 'training_block' && renderBlockStep()}
-          {mode === 'review' && intent && (
-            <IntakeReviewCard
-              title='Coach guided setup'
-              subtitle={
-                intent === 'weekly_plan'
-                  ? 'Review weekly plan requirements before generating.'
-                  : 'Review training block requirements before generating.'
+        <div className='space-y-1.5'>
+          <button
+            onClick={() => setIsActiveIntakeExpanded((prev) => !prev)}
+            aria-label='Toggle active coach intake form'
+            aria-expanded={isActiveIntakeExpanded}
+            tabIndex={0}
+            className='w-full border-2 border-border bg-muted/20 px-2 py-1.5'
+          >
+            <div className='flex items-center justify-between gap-2'>
+              <div className='min-w-0 text-left'>
+                <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                  {intakeLabel} intake
+                </p>
+                <p className='text-[11px] font-medium text-muted-foreground truncate'>
+                  {mode === 'review'
+                    ? 'Review and generate'
+                    : `Step ${stepIndex + 1} of ${stepIds.length}`}
+                </p>
+              </div>
+              <ChevronDown
+                className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                  isActiveIntakeExpanded ? 'rotate-180' : ''
+                }`}
+              />
+            </div>
+          </button>
+
+          {isActiveIntakeExpanded && (
+            <div
+              className={
+                isSubmitting
+                  ? 'max-h-[40vh] overflow-y-auto pr-1 border-l-2 border-border/70 pl-2'
+                  : ''
               }
-              items={reviewItems}
-              generateLabel={
-                intent === 'weekly_plan'
-                  ? 'Generate weekly plan'
-                  : 'Generate training block'
-              }
-              isGenerating={isSubmitting}
-              onEdit={() => setMode('collecting')}
-              onGenerate={handleGenerate}
-              onCancel={handleCancel}
-            />
+            >
+              {intent === 'weekly_plan_edit' && isLoadingActivePlanForEdit && (
+                <div className='border-2 border-border bg-muted/30 p-1.5 text-[11px] font-medium text-muted-foreground'>
+                  Loading active weekly plan...
+                </div>
+              )}
+              {intent === 'weekly_plan_edit' &&
+                !isLoadingActivePlanForEdit &&
+                !activePlanForEdit && (
+                  <div className='border-2 border-border bg-destructive/10 p-1.5 space-y-1.5'>
+                    <p className='text-[11px] font-bold text-destructive'>
+                      No active weekly plan found to edit.
+                    </p>
+                    <button
+                      onClick={() => beginIntake('weekly_plan')}
+                      tabIndex={0}
+                      aria-label='Start new weekly plan setup'
+                      className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background'
+                    >
+                      Start new weekly plan
+                    </button>
+                  </div>
+                )}
+              {intent === 'weekly_plan_edit' &&
+                !isLoadingActivePlanForEdit &&
+                activePlanForEdit && (
+                  <div className='border-2 border-border bg-primary/5 p-1.5 text-[11px] font-medium'>
+                    Editing <span className='font-black'>{activePlanForEdit.title}</span> (
+                    {activePlanForEdit.weekStart})
+                  </div>
+                )}
+              {mode === 'collecting' && intent === 'weekly_plan' && renderWeeklyStep()}
+              {mode === 'collecting' &&
+                intent === 'weekly_plan_edit' &&
+                activePlanForEdit &&
+                renderEditStep()}
+              {mode === 'collecting' && intent === 'training_block' && renderBlockStep()}
+              {mode === 'review' && intent && (
+                <IntakeReviewCard
+                  title='Coach guided setup'
+                  subtitle={
+                    intent === 'weekly_plan'
+                      ? 'Review weekly plan requirements before generating.'
+                      : 'Review training block requirements before generating.'
+                  }
+                  items={reviewItems}
+                  generateLabel={
+                    intent === 'weekly_plan'
+                      ? 'Generate weekly plan'
+                      : intent === 'weekly_plan_edit'
+                        ? 'Apply weekly plan edits'
+                      : 'Generate training block'
+                  }
+                  isGenerating={isSubmitting}
+                  onEdit={() => setMode('collecting')}
+                  onGenerate={handleGenerate}
+                  onCancel={handleCancel}
+                />
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1305,7 +1940,7 @@ const CoachGuidedIntakePanel = ({
           phaseLabels={WEEKLY_PHASE_LABELS}
           phaseStatusMap={weeklyPlanPhaseMap}
           currentMessage={weeklyPlanCurrentMessage}
-          className='border-2 border-border bg-background p-2'
+          className='border-2 border-border bg-background p-1.5'
         />
       )}
 

@@ -366,7 +366,9 @@ export async function POST(req: Request) {
       const subject =
         guidedIntent === 'training_block'
           ? 'a new training block'
-          : 'a new weekly plan';
+          : guidedIntent === 'weekly_plan_edit'
+            ? 'an edit to your weekly plan'
+            : 'a new weekly plan';
       return new Response(
         `[Confidence: high]\nPerfect timing — I can start a guided setup for ${subject}. Use the guided card in Coach chat to answer one focused question at a time, then review and press Generate when ready.`,
         {

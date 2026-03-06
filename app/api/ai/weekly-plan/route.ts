@@ -173,6 +173,9 @@ export async function POST(req: Request) {
     optimizationPriority?: OptimizationPriority;
     orchestratorSessionId?: string;
     useMultiAgent?: boolean;
+    editSourcePlanId?: string;
+    editInstructions?: string;
+    editTargetDates?: string[];
   };
   const {
     athleteId,
@@ -187,6 +190,9 @@ export async function POST(req: Request) {
     optimizationPriority,
     orchestratorSessionId,
     useMultiAgent,
+    editSourcePlanId,
+    editInstructions,
+    editTargetDates,
   } = parsedData;
 
   if (!athleteId) {
@@ -294,6 +300,11 @@ export async function POST(req: Request) {
     let multiAgentConflicts: WeeklyAgentConflict[] = [];
     let repairApplied = false;
     let conflictSummary = 'No coach/physio conflicts detected.';
+    const isEditRequest =
+      Boolean(editInstructions && editInstructions.trim()) ||
+      Boolean(editSourcePlanId);
+    const normalizedEditInstructions = editInstructions?.trim() ?? '';
+    const normalizedEditTargetDates = (editTargetDates ?? []).filter(Boolean);
 
     const resolveOrchestratorSessionId = async (): Promise<string | null> => {
       if (orchestratorSessionId) return orchestratorSessionId;
@@ -653,15 +664,47 @@ export async function POST(req: Request) {
       console.log(`[WeeklyPlan] Could not load training block (non-blocking)`);
     }
 
-    // Step 1d: In remaining-days mode, lock past days using completed activities
+    // Step 1d: Resolve source plan context for edit/replan flows
+    const resolveSourcePlanContext = () => {
+      const explicitSourceId = editSourcePlanId ?? sourcePlanId;
+      if (explicitSourceId) {
+        return planRows.find((plan) => plan.id === explicitSourceId) ?? null;
+      }
+      const activeForWeek = planRows.find(
+        (plan) => plan.isActive && plan.weekStart === weekStart,
+      );
+      if (activeForWeek) return activeForWeek;
+      const activeAnyWeek = planRows.find((plan) => plan.isActive);
+      return activeAnyWeek ?? planRows[0] ?? null;
+    };
+
+    const sourcePlanContext = resolveSourcePlanContext();
+    if (isEditRequest && !sourcePlanContext) {
+      throw new Error('SOURCE_PLAN_NOT_FOUND_FOR_EDIT');
+    }
+
+    const sourcePlanSummary = sourcePlanContext
+      ? [
+          `Source plan: ${sourcePlanContext.title} (${sourcePlanContext.weekStart})`,
+          ...(sourcePlanContext.sessions as UnifiedSession[]).map((session) => {
+            const runPart = session.run
+              ? `run ${session.run.type}: ${session.run.description}`
+              : 'no run';
+            const physioPart = session.physio
+              ? `physio ${session.physio.type}`
+              : 'no physio';
+            return `- ${session.day} (${session.date}): ${runPart}; ${physioPart}`;
+          }),
+        ].join('\n')
+      : '';
+
+    // Step 1e: In remaining-days mode, lock past days using completed activities
     let lockedPastByDate = new Map<string, UnifiedSession>();
     let sourcePlanForReplan: typeof weeklyPlans.$inferSelect | null = null;
     let remainingDaysNote: string | null = null;
 
     if (effectiveMode === 'remaining_days') {
-      sourcePlanForReplan = sourcePlanId
-        ? planRows.find((plan) => plan.id === sourcePlanId) ?? null
-        : planRows.find((plan) => plan.weekStart === weekStart && plan.isActive) ?? planRows[0] ?? null;
+      sourcePlanForReplan = sourcePlanContext;
 
       if (!sourcePlanForReplan) {
         effectiveMode = 'full';
@@ -688,6 +731,21 @@ export async function POST(req: Request) {
     sendProgress('coach', 'Coach is drafting running sessions.');
     const generationPreferences = [
       preferences,
+      isEditRequest
+        ? 'Generation mode: guided edit of an existing weekly plan.'
+        : null,
+      isEditRequest && normalizedEditInstructions
+        ? `Edit instructions:\n${normalizedEditInstructions}`
+        : null,
+      isEditRequest && normalizedEditTargetDates.length > 0
+        ? `Edit target dates: ${normalizedEditTargetDates.join(', ')}`
+        : null,
+      isEditRequest && sourcePlanSummary
+        ? `Source plan context:\n${sourcePlanSummary}`
+        : null,
+      isEditRequest && effectiveMode === 'full'
+        ? 'Critical edit rule: keep day structure, workout intent, and session ordering unchanged unless explicitly changed by the edit instructions.'
+        : null,
       effectiveMode === 'remaining_days'
         ? `Generation mode: remaining days only. Keep past days as historical truth and regenerate only from ${todayIso} onward.`
         : null,
@@ -716,9 +774,15 @@ export async function POST(req: Request) {
       optimizationPriorityLabel,
       metricsSummary,
     });
+    const coachEditDirective = isEditRequest
+      ? `\n\n## Weekly Plan Edit Instructions\nYou are editing an existing weekly plan, not creating from scratch.\n${normalizedEditInstructions ? `Apply these requested edits exactly when safe:\n${normalizedEditInstructions}\n` : ''}${sourcePlanSummary ? `Reference source plan:\n${sourcePlanSummary}\n` : ''}${normalizedEditTargetDates.length > 0 ? `Prioritize changes to these dates: ${normalizedEditTargetDates.join(', ')}.\n` : ''}${effectiveMode === 'full' ? 'For all other days, preserve previous plan intent and minimize unnecessary changes.\n' : 'Only regenerate remaining/future days; keep past days anchored to historical truth.\n'}`
+      : '';
+    const finalCoachPrompt = isEditRequest
+      ? `${coachPrompt}${coachEditDirective}`
+      : coachPrompt;
 
     logAiTrace(trace, 'coach_prompt_built', {
-      promptHash: promptHash(coachPrompt),
+      promptHash: promptHash(finalCoachPrompt),
       mode: effectiveMode,
     });
     if (!hasRuntimeBudget()) {
@@ -727,7 +791,7 @@ export async function POST(req: Request) {
     const coachObject = await generateObjectWithRetry<CoachWeekOutput>({
       model,
       schema: coachWeekOutputSchema,
-      prompt: coachPrompt,
+      prompt: finalCoachPrompt,
       semanticCheck: validateCoachWeekOutput,
     });
     specialistTurnsUsed += 1;
@@ -755,38 +819,61 @@ export async function POST(req: Request) {
       preferences: generationPreferences || null,
       optimizationPriorityLabel,
     });
+    const physioEditDirective = isEditRequest
+      ? `\n\n## Weekly Plan Edit Instructions\nYou are editing the physio complement of an existing weekly plan.\n${normalizedEditInstructions ? `Apply these requested edits exactly when safe:\n${normalizedEditInstructions}\n` : ''}${sourcePlanSummary ? `Reference source plan:\n${sourcePlanSummary}\n` : ''}${normalizedEditTargetDates.length > 0 ? `Prioritize changes to these dates: ${normalizedEditTargetDates.join(', ')}.\n` : ''}${effectiveMode === 'full' ? 'Avoid unnecessary changes outside explicitly requested edits.\n' : 'Only adjust remaining/future days; do not rewrite past days.\n'}`
+      : '';
+    const finalPhysioPrompt = isEditRequest
+      ? `${physioPrompt}${physioEditDirective}`
+      : physioPrompt;
 
     logAiTrace(trace, 'physio_prompt_built', {
-      promptHash: promptHash(physioPrompt),
+      promptHash: promptHash(finalPhysioPrompt),
       coachSessions: coachSessions.length,
     });
     const allowMissingStrengthBeforeDate =
       effectiveMode === 'remaining_days' ? todayIso : undefined;
+    let physioSessions: PhysioWeekOutput['sessions'] = [];
+    let physioFallbackReason: 'runtime_budget' | null = null;
     if (!hasRuntimeBudget()) {
-      throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_PHYSIO');
+      physioFallbackReason = 'runtime_budget';
+      conflictSummary =
+        'Physio generation skipped due to runtime budget; coach plan was saved without complementary physio sessions.';
+      console.log(
+        '[WeeklyPlan] Runtime budget exceeded before physio. Falling back to coach-only generation.',
+      );
+      sendProgress(
+        'physio',
+        'Runtime budget was reached before physio step. Proceeding with coach-only plan.',
+        {fallback: 'coach_only'},
+      );
+      logAiTrace(trace, 'weekly_physio_skipped_runtime_budget', {
+        athleteId,
+        elapsedMs: elapsedMs(),
+        mode: effectiveMode,
+      });
+    } else {
+      const physioObject = await generateObjectWithRetry<PhysioWeekOutput>({
+        model,
+        schema: physioWeekOutputSchema,
+        prompt: finalPhysioPrompt,
+        semanticCheck: (candidate) => {
+          return validateCombinedWeekSemantics(
+            coachObject,
+            candidate,
+            {allowMissingStrengthBeforeDate},
+          );
+        },
+      });
+      specialistTurnsUsed += 1;
+      roundCount += 1;
+      physioSessions = physioObject.sessions;
+      console.log(`[WeeklyPlan] Physio produced ${physioSessions.length} sessions`);
+      sendProgress('physio', 'Physio draft ready.', {
+        sessionCount: physioSessions.length,
+      });
     }
-    const physioObject = await generateObjectWithRetry<PhysioWeekOutput>({
-      model,
-      schema: physioWeekOutputSchema,
-      prompt: physioPrompt,
-      semanticCheck: (candidate) => {
-        return validateCombinedWeekSemantics(
-          coachObject,
-          candidate,
-          {allowMissingStrengthBeforeDate},
-        );
-      },
-    });
-    specialistTurnsUsed += 1;
-    roundCount += 1;
 
-    let physioSessions = physioObject.sessions;
-    console.log(`[WeeklyPlan] Physio produced ${physioSessions.length} sessions`);
-    sendProgress('physio', 'Physio draft ready.', {
-      sessionCount: physioSessions.length,
-    });
-
-    if (multiAgentEnabled) {
+    if (multiAgentEnabled && !physioFallbackReason) {
       sendProgress('repair', 'Checking coach/physio conflicts.');
       const conflictResolution = resolveWeeklyCoachPhysioConflicts(
         coachObject,
@@ -821,7 +908,7 @@ export async function POST(req: Request) {
               `- ${conflict.date}: ${conflict.rule} (${conflict.severity}) -> ${conflict.message}`,
           )
           .join('\n');
-        const repairPrompt = `${physioPrompt}\n\n## Deterministic Conflict Feedback\nYour previous proposal caused scheduling conflicts with coach load intent.\n${conflictDigest}\n\nRepair instructions:\n- Keep the same dates.\n- Resolve all high-severity conflicts.\n- Favor mobility/warmup/cooldown over heavy strength when uncertain.\n- Keep output concise and safe-first.`;
+        const repairPrompt = `${finalPhysioPrompt}\n\n## Deterministic Conflict Feedback\nYour previous proposal caused scheduling conflicts with coach load intent.\n${conflictDigest}\n\nRepair instructions:\n- Keep the same dates.\n- Resolve all high-severity conflicts.\n- Favor mobility/warmup/cooldown over heavy strength when uncertain.\n- Keep output concise and safe-first.`;
         const repairedPhysioObject = await generateObjectWithRetry<PhysioWeekOutput>({
           model,
           schema: physioWeekOutputSchema,
@@ -1028,6 +1115,11 @@ export async function POST(req: Request) {
     markdownLines.push(
       `- Multi-agent runtime: ${multiAgentEnabled ? 'enabled' : 'disabled'} (rounds: ${roundCount}, specialist turns: ${specialistTurnsUsed}, repairs: ${repairTurnsUsed})`,
     );
+    if (physioFallbackReason) {
+      markdownLines.push(
+        '- Fallback applied: physio step skipped because the runtime budget was exceeded; this version includes coach sessions only.',
+      );
+    }
     markdownLines.push(`- Coordination summary: ${conflictSummary}`);
     for (const contributor of riskIntelligence.topContributors) {
       markdownLines.push(`- Contributor: ${contributor}`);
@@ -1232,6 +1324,7 @@ export async function POST(req: Request) {
         conflictCount: multiAgentConflicts.length,
         conflicts: multiAgentConflicts,
         summary: conflictSummary,
+        physioFallbackReason,
       },
       createdAt: now2,
     };
@@ -1267,9 +1360,17 @@ export async function POST(req: Request) {
       error instanceof Error &&
       error.message.startsWith('SOURCE_PLAN_NOT_FOUND')
     ) {
-      sendError('No source weekly plan found for remaining-days replan.', {
-        code: 'source_plan_not_found',
-        status: 400,
+      const isEditSourceMissing =
+        error.message === 'SOURCE_PLAN_NOT_FOUND_FOR_EDIT';
+      sendError(
+        isEditSourceMissing
+          ? 'No source weekly plan found for edit request.'
+          : 'No source weekly plan found for remaining-days replan.',
+        {
+        code: isEditSourceMissing
+          ? 'source_plan_not_found_for_edit'
+          : 'source_plan_not_found',
+        status: isEditSourceMissing ? 404 : 400,
       });
       controller.close();
       return;
