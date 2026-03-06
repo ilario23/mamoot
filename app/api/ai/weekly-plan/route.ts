@@ -14,7 +14,7 @@ import {
   orchestratorBlockers,
   orchestratorHandoffs,
 } from '@/db/schema';
-import {eq, desc, and, ne, isNull} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull, sql} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
 import {
@@ -277,6 +277,7 @@ export async function POST(req: Request) {
     ]);
     sendProgress('context', 'Loaded athlete context and historical plans.');
 
+    let effectiveMode: 'full' | 'remaining_days' = mode;
     const currentMonday = getCurrentMonday();
     const hasActiveCurrentWeekPlan = planRows.some(
       (plan) => plan.isActive && plan.weekStart === currentMonday,
@@ -516,12 +517,32 @@ export async function POST(req: Request) {
       console.log('[WeeklyPlan] Could not load athlete training feedback (non-blocking)');
     }
 
-    const readinessRows = await db
-      .select()
-      .from(athleteReadinessSignals)
-      .where(eq(athleteReadinessSignals.athleteId, athleteId))
-      .orderBy(desc(athleteReadinessSignals.date))
-      .limit(1);
+    const dbContextRows = await db.execute<{
+      currentDb: string;
+      currentSchema: string;
+      readinessRegclass: string | null;
+    }>(sql`
+      select
+        current_database() as "currentDb",
+        current_schema() as "currentSchema",
+        to_regclass('public.athlete_readiness_signals') as "readinessRegclass"
+    `);
+    const dbContext = dbContextRows.rows[0] ?? null;
+    const readinessTableExists = Boolean(dbContext?.readinessRegclass);
+    let readinessRows: Array<typeof athleteReadinessSignals.$inferSelect> = [];
+    if (!readinessTableExists) {
+    } else {
+      try {
+        readinessRows = await db
+          .select()
+          .from(athleteReadinessSignals)
+          .where(eq(athleteReadinessSignals.athleteId, athleteId))
+          .orderBy(desc(athleteReadinessSignals.date))
+          .limit(1);
+      } catch (error) {
+        throw error;
+      }
+    }
     const latestReadiness = readinessRows[0] ?? null;
     const riskIntelligence = calcRiskIntelligence(latestSnapshot, {
       sleepHours: latestReadiness?.sleepHours ?? null,
@@ -620,29 +641,29 @@ export async function POST(req: Request) {
     let sourcePlanForReplan: typeof weeklyPlans.$inferSelect | null = null;
     let remainingDaysNote: string | null = null;
 
-    if (mode === 'remaining_days') {
+    if (effectiveMode === 'remaining_days') {
       sourcePlanForReplan = sourcePlanId
         ? planRows.find((plan) => plan.id === sourcePlanId) ?? null
         : planRows.find((plan) => plan.weekStart === weekStart && plan.isActive) ?? planRows[0] ?? null;
 
       if (!sourcePlanForReplan) {
-        throw new Error(
-          'SOURCE_PLAN_NOT_FOUND: No source weekly plan found for remaining-days replan',
+        effectiveMode = 'full';
+        remainingDaysNote = 'No source weekly plan found for remaining-days mode. Falling back to full-week generation.';
+        console.log('[WeeklyPlan] Remaining-days requested but no source plan found. Falling back to full mode.');
+      } else {
+        const weekActivities = allActivities.filter(
+          (activity) => activity.date >= weekStart && activity.date <= weekEnd,
         );
+        const actualized = buildActualizedWeekContext({
+          weekDates,
+          sourceSessions: sourcePlanForReplan.sessions as UnifiedSession[],
+          activities: weekActivities,
+          todayIso,
+        });
+        lockedPastByDate = actualized.lockedByDate;
+        remainingDaysNote = actualized.summary;
+        console.log(`[WeeklyPlan] Remaining-days lock summary: ${actualized.summary}`);
       }
-
-      const weekActivities = allActivities.filter(
-        (activity) => activity.date >= weekStart && activity.date <= weekEnd,
-      );
-      const actualized = buildActualizedWeekContext({
-        weekDates,
-        sourceSessions: sourcePlanForReplan.sessions as UnifiedSession[],
-        activities: weekActivities,
-        todayIso,
-      });
-      lockedPastByDate = actualized.lockedByDate;
-      remainingDaysNote = actualized.summary;
-      console.log(`[WeeklyPlan] Remaining-days lock summary: ${actualized.summary}`);
     }
 
     // Step 2: Coach generates running sessions
@@ -650,7 +671,7 @@ export async function POST(req: Request) {
     sendProgress('coach', 'Coach is drafting running sessions.');
     const generationPreferences = [
       preferences,
-      mode === 'remaining_days'
+      effectiveMode === 'remaining_days'
         ? `Generation mode: remaining days only. Keep past days as historical truth and regenerate only from ${todayIso} onward.`
         : null,
       remainingDaysNote ? `Past-week actualization summary: ${remainingDaysNote}` : null,
@@ -681,7 +702,7 @@ export async function POST(req: Request) {
 
     logAiTrace(trace, 'coach_prompt_built', {
       promptHash: promptHash(coachPrompt),
-      mode,
+      mode: effectiveMode,
     });
     if (!hasRuntimeBudget()) {
       throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_COACH');
@@ -878,7 +899,7 @@ export async function POST(req: Request) {
         : null;
 
     const unifiedSessions: UnifiedSession[] = generatedSessions.map((session) => {
-      if (mode === 'remaining_days' && session.date < todayIso) {
+      if (effectiveMode === 'remaining_days' && session.date < todayIso) {
         const locked = lockedPastByDate.get(session.date);
         if (locked) {
           const activity = (activitiesByDate.get(session.date) ?? [])[0];
@@ -904,7 +925,7 @@ export async function POST(req: Request) {
       return {
         ...session,
         actualActivity:
-          mode === 'remaining_days' && activity && session.date < todayIso
+          effectiveMode === 'remaining_days' && activity && session.date < todayIso
             ? {
                 id: activity.id,
                 name: activity.name,
@@ -1146,7 +1167,7 @@ export async function POST(req: Request) {
       planId,
       weekStart,
       sessionCount: unifiedSessions.length,
-      mode,
+      mode: effectiveMode,
       multiAgentEnabled,
       roundCount,
       specialistTurnsUsed,
@@ -1171,7 +1192,7 @@ export async function POST(req: Request) {
       content,
       blockId: activeBlockId,
       weekNumber: blockWeekNumber,
-      mode,
+      mode: effectiveMode,
       sourcePlanId: sourcePlanForReplan?.id ?? null,
       risk: riskIntelligence,
       digitalTwin: twinProfile,

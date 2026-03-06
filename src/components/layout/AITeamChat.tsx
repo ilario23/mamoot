@@ -444,6 +444,7 @@ const AITeamChat = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
   const [mobileOrchestratorExpanded, setMobileOrchestratorExpanded] = useState(false);
+  const [desktopOrchestratorExpanded, setDesktopOrchestratorExpanded] = useState(false);
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
     string | null
   >(null);
@@ -1148,6 +1149,7 @@ const AITeamChat = () => {
   useEffect(() => {
     if (activePersona !== 'orchestrator') {
       setMobileOrchestratorExpanded(false);
+      setDesktopOrchestratorExpanded(false);
     }
   }, [activePersona]);
 
@@ -1535,9 +1537,45 @@ const AITeamChat = () => {
               )}
             </div>
 
-            {/* Desktop: always-visible full details */}
+            {/* Desktop: compact summary, collapsed by default */}
             <div className='hidden md:block border-b-3 border-border bg-background p-3'>
-              {renderOrchestratorDetails({denseMobile: false})}
+              <button
+                onClick={() =>
+                  setDesktopOrchestratorExpanded((prevExpanded) => !prevExpanded)
+                }
+                aria-label='Toggle orchestrator status summary'
+                aria-expanded={desktopOrchestratorExpanded}
+                tabIndex={0}
+                className='w-full border-2 border-border bg-primary/5 px-3 py-2 text-left'
+              >
+                <div className='flex items-center justify-between gap-2'>
+                  <span className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                    Orchestrator status
+                  </span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                      desktopOrchestratorExpanded ? 'rotate-180' : ''
+                    }`}
+                  />
+                </div>
+                <div className='mt-2 grid grid-cols-4 gap-1.5 text-[10px] font-bold'>
+                  <span className='border border-border/60 bg-background px-2 py-1'>
+                    Goals {activeGoalCount}
+                  </span>
+                  <span className='border border-border/60 bg-background px-2 py-1'>
+                    Queue {orchestratorNotDoneQueue.length}
+                  </span>
+                  <span className='border border-border/60 bg-background px-2 py-1'>
+                    Blockers {openBlockerCount}
+                  </span>
+                  <span className='border border-border/60 bg-background px-2 py-1'>
+                    Handoffs {pendingHandoffCount}
+                  </span>
+                </div>
+              </button>
+              {desktopOrchestratorExpanded && (
+                <div className='pt-3'>{renderOrchestratorDetails({denseMobile: false})}</div>
+              )}
             </div>
           </>
         )}

@@ -11,7 +11,7 @@ import {
   orchestratorPlanItems,
   orchestratorHandoffs,
 } from '@/db/schema';
-import {eq, desc, and, ne, isNull} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull, sql} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
 import {
@@ -687,19 +687,36 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
     console.log(`[TrainingBlock] Goal: ${goalEvent} on ${goalDate}`);
     console.log(`[TrainingBlock] Weeks: ${totalWeeks}, starts ${startDate}`);
 
-      const [settingsRows, activityRows, readinessRows] = await Promise.all([
+    const dbContextRows = await db.execute<{
+      currentDb: string;
+      currentSchema: string;
+      readinessRegclass: string | null;
+    }>(sql`
+      select
+        current_database() as "currentDb",
+        current_schema() as "currentSchema",
+        to_regclass('public.athlete_readiness_signals') as "readinessRegclass"
+    `);
+    const readinessTableExists = Boolean(dbContextRows.rows[0]?.readinessRegclass);
+
+    let settingsRows: Array<typeof userSettings.$inferSelect> = [];
+    let activityRows: Array<typeof activitiesTable.$inferSelect> = [];
+    let readinessRows: Array<typeof athleteReadinessSignals.$inferSelect> = [];
+    [settingsRows, activityRows, readinessRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
       db
         .select()
         .from(activitiesTable)
         .where(eq(activitiesTable.athleteId, athleteId))
         .orderBy(desc(activitiesTable.date)),
-        db
-          .select()
-          .from(athleteReadinessSignals)
-          .where(eq(athleteReadinessSignals.athleteId, athleteId))
-          .orderBy(desc(athleteReadinessSignals.date))
-          .limit(1),
+      readinessTableExists
+        ? db
+            .select()
+            .from(athleteReadinessSignals)
+            .where(eq(athleteReadinessSignals.athleteId, athleteId))
+            .orderBy(desc(athleteReadinessSignals.date))
+            .limit(1)
+        : Promise.resolve([] as Array<typeof athleteReadinessSignals.$inferSelect>),
     ]);
 
     const settings = settingsRows[0];
