@@ -198,7 +198,7 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
   }, []);
 
   return (
-    <div className='relative p-1.5 md:p-3 border-t-[4px] border-border bg-muted/30 overflow-hidden'>
+    <div className='relative p-2 md:p-3 border-t-[4px] border-border bg-muted/30 overflow-hidden'>
       {/* Mention pills */}
       {mentions.length > 0 && (
         <div className='flex flex-wrap gap-1.5 mb-2'>
@@ -227,14 +227,14 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
       )}
 
       {/* Input row */}
-      <div className='flex gap-2 min-w-0'>
+      <div className='flex gap-1.5 md:gap-2 min-w-0'>
         {/* @ button */}
         <button
           onClick={handleAtButtonClick}
           disabled={isStreaming}
           aria-label='Attach data with @-mention'
           tabIndex={0}
-          className='px-2 py-2 border-3 border-border bg-secondary/10 text-secondary disabled:opacity-50 shrink-0 flex items-center shadow-neo-sm transition-all hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-neo active:translate-x-0.5 active:translate-y-0.5 active:shadow-none'
+          className='px-2 py-2 md:px-2.5 md:py-2 border-3 border-border bg-secondary/10 text-secondary disabled:opacity-50 shrink-0 flex items-center shadow-neo-sm transition-all hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-neo active:translate-x-0.5 active:translate-y-0.5 active:shadow-none'
         >
           <AtSign className='h-4 w-4' />
         </button>
@@ -254,7 +254,7 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
           disabled={isStreaming}
           aria-label='Message input'
           rows={1}
-          className='flex-1 min-w-0 px-3 py-2 border-3 border-border font-medium text-sm bg-background shadow-neo-inset focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 resize-none overflow-hidden'
+          className='flex-1 min-w-0 px-2.5 md:px-3 py-2 border-3 border-border font-medium text-sm bg-background shadow-neo-inset focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 resize-none overflow-hidden'
           style={{maxHeight: '120px'}}
           onInput={(e) => {
             // Auto-resize textarea
@@ -270,7 +270,7 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
             onClick={onStop}
             aria-label='Stop generating'
             tabIndex={0}
-            className='px-4 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-border flex items-center gap-2 shrink-0 shadow-neo-sm transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-x-1 active:translate-y-1'
+            className='px-3.5 md:px-4 py-2 bg-destructive text-destructive-foreground font-black text-sm border-3 border-border flex items-center gap-1.5 md:gap-2 shrink-0 shadow-neo-sm transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-x-1 active:translate-y-1'
           >
             <Square className='h-4 w-4' />
             <span className='hidden sm:inline'>Stop</span>
@@ -281,7 +281,7 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
             disabled={!text.trim()}
             aria-label='Send message'
             tabIndex={0}
-            className='px-5 py-2 bg-primary text-primary-foreground font-black text-sm border-3 border-border flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed shrink-0 shadow-neo-sm disabled:shadow-none transition-all hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-neo active:translate-x-0.5 active:translate-y-0.5 active:shadow-none'
+            className='px-4 md:px-5 py-2 bg-primary text-primary-foreground font-black text-sm border-3 border-border flex items-center gap-1.5 md:gap-2 disabled:opacity-30 disabled:cursor-not-allowed shrink-0 shadow-neo-sm disabled:shadow-none transition-all hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-neo active:translate-x-0.5 active:translate-y-0.5 active:shadow-none'
           >
             <Send className='h-4 w-4' />
             <span className='hidden sm:inline'>Send</span>

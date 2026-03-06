@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Trash2,
   Menu,
+  ChevronDown,
   ChevronRight,
   ThumbsUp,
   ThumbsDown,
@@ -396,6 +397,7 @@ const AITeamChat = () => {
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
+  const [mobileOrchestratorExpanded, setMobileOrchestratorExpanded] = useState(false);
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
     string | null
   >(null);
@@ -868,6 +870,27 @@ const AITeamChat = () => {
     () => orchestratorPlanItems.filter((item) => item.status !== 'done'),
     [orchestratorPlanItems],
   );
+  const activeGoalCount = useMemo(
+    () => orchestratorGoals.filter((goal) => goal.status === 'active').length,
+    [orchestratorGoals],
+  );
+  const openBlockerCount = useMemo(
+    () => orchestratorBlockers.filter((blocker) => blocker.status === 'open').length,
+    [orchestratorBlockers],
+  );
+  const pendingHandoffCount = useMemo(
+    () =>
+      orchestratorHandoffs.filter(
+        (handoff) => handoff.status !== 'done' && handoff.status !== 'cancelled',
+      ).length,
+    [orchestratorHandoffs],
+  );
+
+  useEffect(() => {
+    if (activePersona !== 'orchestrator') {
+      setMobileOrchestratorExpanded(false);
+    }
+  }, [activePersona]);
 
   // ----- Sidebar content (shared between desktop and mobile drawer) -----
 
@@ -992,6 +1015,83 @@ const AITeamChat = () => {
     </div>
   );
 
+  const renderOrchestratorDetails = ({denseMobile = false}: {denseMobile?: boolean}) => (
+    <div className='space-y-2'>
+      <div
+        className={`grid ${denseMobile ? 'grid-cols-2 gap-1.5' : 'grid-cols-1 md:grid-cols-2 gap-2'}`}
+      >
+        <div className='border-2 border-border p-2 bg-primary/5'>
+          <div className='flex items-center gap-1.5 mb-1'>
+            <Target className='h-3.5 w-3.5 text-primary' />
+            <span className='text-[10px] font-black uppercase tracking-widest text-primary'>
+              Goals
+            </span>
+          </div>
+          <p className='text-xs font-medium'>
+            {activeGoalCount} active / {orchestratorGoals.length} total
+          </p>
+        </div>
+        <div className='border-2 border-border p-2 bg-secondary/5'>
+          <div className='flex items-center gap-1.5 mb-1'>
+            <ClipboardList className='h-3.5 w-3.5 text-secondary' />
+            <span className='text-[10px] font-black uppercase tracking-widest text-secondary'>
+              Not Done Queue
+            </span>
+          </div>
+          <p className='text-xs font-medium'>
+            {orchestratorNotDoneQueue.length} remaining items
+          </p>
+        </div>
+        <div className='border-2 border-border p-2 bg-destructive/5'>
+          <div className='flex items-center gap-1.5 mb-1'>
+            <AlertOctagon className='h-3.5 w-3.5 text-destructive' />
+            <span className='text-[10px] font-black uppercase tracking-widest text-destructive'>
+              Blockers
+            </span>
+          </div>
+          <p className='text-xs font-medium'>
+            {openBlockerCount} open / {orchestratorBlockers.length} total
+          </p>
+        </div>
+        <div className='border-2 border-border p-2 bg-accent/30'>
+          <div className='flex items-center gap-1.5 mb-1'>
+            <ArrowRightLeft className='h-3.5 w-3.5 text-foreground' />
+            <span className='text-[10px] font-black uppercase tracking-widest'>
+              Handoffs
+            </span>
+          </div>
+          <p className='text-xs font-medium'>
+            {pendingHandoffCount} pending / {orchestratorHandoffs.length} total
+          </p>
+        </div>
+      </div>
+      <div
+        className={`grid ${denseMobile ? 'grid-cols-1 gap-1.5' : 'grid-cols-1 md:grid-cols-2 gap-2'}`}
+      >
+        <div className='border-2 border-border p-2 bg-background'>
+          <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
+            Active Weekly Plan
+          </p>
+          <p className='text-xs font-medium truncate'>
+            {activeWeeklyPlan
+              ? `${activeWeeklyPlan.title} (${activeWeeklyPlan.weekStart})`
+              : 'None'}
+          </p>
+        </div>
+        <div className='border-2 border-border p-2 bg-background'>
+          <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
+            Active Training Block
+          </p>
+          <p className='text-xs font-medium truncate'>
+            {activeTrainingBlock
+              ? `${activeTrainingBlock.goalEvent} (${activeTrainingBlock.totalWeeks}w)`
+              : 'None'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
   // ----- Render -----
 
   return (
@@ -1000,7 +1100,7 @@ const AITeamChat = () => {
       <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
         {/* Mobile header — persona + new chat + history */}
         <div
-          className={`md:hidden px-2 py-2 border-b-3 border-border flex items-center gap-2 bg-neo-stripe ${currentPersona.color}`}
+          className={`md:hidden px-2.5 py-1.5 border-b-3 border-border flex items-center gap-2 bg-neo-stripe ${currentPersona.color}`}
         >
           <div className='flex items-center gap-1.5 flex-1 min-w-0'>
             <PersonaAvatar persona={currentPersona} size='sm' />
@@ -1058,92 +1158,56 @@ const AITeamChat = () => {
         )}
 
         {activePersona === 'orchestrator' && (
-          <div className='border-b-3 border-border bg-background p-2 md:p-3 space-y-2'>
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
-              <div className='border-2 border-border p-2 bg-primary/5'>
-                <div className='flex items-center gap-1.5 mb-1'>
-                  <Target className='h-3.5 w-3.5 text-primary' />
+          <>
+            {/* Mobile: compact summary, collapsed by default */}
+            <div className='md:hidden border-b-3 border-border bg-background p-2'>
+              <button
+                onClick={() =>
+                  setMobileOrchestratorExpanded((prevExpanded) => !prevExpanded)
+                }
+                aria-label='Toggle orchestrator status summary'
+                aria-expanded={mobileOrchestratorExpanded}
+                tabIndex={0}
+                className='w-full border-2 border-border bg-primary/5 px-2 py-1.5 text-left'
+              >
+                <div className='flex items-center justify-between gap-2'>
                   <span className='text-[10px] font-black uppercase tracking-widest text-primary'>
-                    Goals
+                    Orchestrator status
+                  </span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                      mobileOrchestratorExpanded ? 'rotate-180' : ''
+                    }`}
+                  />
+                </div>
+                <div className='mt-1.5 grid grid-cols-3 gap-1 text-[10px] font-bold'>
+                  <span className='border border-border/60 bg-background px-1.5 py-1'>
+                    Goals {activeGoalCount}
+                  </span>
+                  <span className='border border-border/60 bg-background px-1.5 py-1'>
+                    Queue {orchestratorNotDoneQueue.length}
+                  </span>
+                  <span className='border border-border/60 bg-background px-1.5 py-1'>
+                    Blockers {openBlockerCount}
                   </span>
                 </div>
-                <p className='text-xs font-medium'>
-                  {orchestratorGoals.filter((goal) => goal.status === 'active').length}{' '}
-                  active / {orchestratorGoals.length} total
-                </p>
-              </div>
-              <div className='border-2 border-border p-2 bg-secondary/5'>
-                <div className='flex items-center gap-1.5 mb-1'>
-                  <ClipboardList className='h-3.5 w-3.5 text-secondary' />
-                  <span className='text-[10px] font-black uppercase tracking-widest text-secondary'>
-                    Not Done Queue
-                  </span>
-                </div>
-                <p className='text-xs font-medium'>
-                  {orchestratorNotDoneQueue.length} remaining items
-                </p>
-              </div>
-              <div className='border-2 border-border p-2 bg-destructive/5'>
-                <div className='flex items-center gap-1.5 mb-1'>
-                  <AlertOctagon className='h-3.5 w-3.5 text-destructive' />
-                  <span className='text-[10px] font-black uppercase tracking-widest text-destructive'>
-                    Blockers
-                  </span>
-                </div>
-                <p className='text-xs font-medium'>
-                  {
-                    orchestratorBlockers.filter((blocker) => blocker.status === 'open')
-                      .length
-                  }{' '}
-                  open / {orchestratorBlockers.length} total
-                </p>
-              </div>
-              <div className='border-2 border-border p-2 bg-accent/30'>
-                <div className='flex items-center gap-1.5 mb-1'>
-                  <ArrowRightLeft className='h-3.5 w-3.5 text-foreground' />
-                  <span className='text-[10px] font-black uppercase tracking-widest'>
-                    Handoffs
-                  </span>
-                </div>
-                <p className='text-xs font-medium'>
-                  {
-                    orchestratorHandoffs.filter(
-                      (handoff) => handoff.status !== 'done' && handoff.status !== 'cancelled',
-                    ).length
-                  }{' '}
-                  pending / {orchestratorHandoffs.length} total
-                </p>
-              </div>
+              </button>
+              {mobileOrchestratorExpanded && (
+                <div className='pt-2'>{renderOrchestratorDetails({denseMobile: true})}</div>
+              )}
             </div>
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
-              <div className='border-2 border-border p-2 bg-background'>
-                <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
-                  Active Weekly Plan
-                </p>
-                <p className='text-xs font-medium truncate'>
-                  {activeWeeklyPlan
-                    ? `${activeWeeklyPlan.title} (${activeWeeklyPlan.weekStart})`
-                    : 'None'}
-                </p>
-              </div>
-              <div className='border-2 border-border p-2 bg-background'>
-                <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
-                  Active Training Block
-                </p>
-                <p className='text-xs font-medium truncate'>
-                  {activeTrainingBlock
-                    ? `${activeTrainingBlock.goalEvent} (${activeTrainingBlock.totalWeeks}w)`
-                    : 'None'}
-                </p>
-              </div>
+
+            {/* Desktop: always-visible full details */}
+            <div className='hidden md:block border-b-3 border-border bg-background p-3'>
+              {renderOrchestratorDetails({denseMobile: false})}
             </div>
-          </div>
+          </>
         )}
 
         {/* Messages */}
         <div
           ref={scrollRef}
-          className='flex-1 overflow-y-auto overflow-x-hidden p-1 md:p-3 space-y-3 md:space-y-4 bg-neo-grid'
+          className='flex-1 overflow-y-auto overflow-x-hidden p-2 md:p-3 space-y-3 md:space-y-4 bg-neo-grid'
         >
           {activeChat.messages.length === 0 && !isStreaming && (
             <div className='flex items-center justify-center h-full'>
@@ -1281,13 +1345,13 @@ const AITeamChat = () => {
             return (
               <div
                 key={msg.id}
-                className={`flex gap-2 min-w-0 ${isUser ? 'flex-row-reverse animate-slide-in-right' : 'flex-row animate-slide-in-left'} ${isRoleSwitch ? 'mt-4' : ''}`}
+                className={`flex gap-2.5 min-w-0 ${isUser ? 'flex-row-reverse animate-slide-in-right' : 'flex-row animate-slide-in-left'} ${isRoleSwitch ? 'mt-5 md:mt-4' : ''}`}
               >
                 <div
-                  className={`text-sm font-medium overflow-hidden break-words min-w-0 ${
+                  className={`text-[13px] md:text-sm font-medium overflow-hidden break-words min-w-0 ${
                     isUser
-                      ? 'p-2 md:p-3 border-3 border-border bg-accent text-accent-foreground ml-auto max-w-[90%] md:max-w-[75%] shadow-neo-sm hover:shadow-neo transition-shadow'
-                      : 'py-1 mr-auto max-w-[95%] md:max-w-[80%] text-foreground'
+                      ? 'p-2.5 md:p-3 border-3 border-border bg-accent text-accent-foreground ml-auto max-w-[94%] md:max-w-[75%] shadow-neo-sm hover:shadow-neo transition-shadow'
+                      : 'py-1 mr-auto max-w-[98%] md:max-w-[80%] text-foreground'
                   }`}
                   style={{overflowWrap: 'anywhere'}}
                 >

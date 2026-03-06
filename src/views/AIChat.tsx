@@ -26,7 +26,7 @@ const AIChat = () => {
   };
 
   return (
-    <div className='flex flex-col h-full w-[100vw] md:w-full overflow-hidden -ml-3 md:ml-0'>
+    <div className='flex flex-col h-full w-full overflow-hidden'>
       {/* Top bar: Title (desktop) + Collapsible info */}
       <div className='flex items-start gap-3 mb-0 md:mb-3 px-3 md:px-0'>
         {/* Page title — hidden on mobile */}
