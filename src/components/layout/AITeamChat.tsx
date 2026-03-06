@@ -81,6 +81,12 @@ import type {SuggestFollowUpsInput} from '@/lib/aiTools';
 import {parseAiErrorFromUnknown} from '@/lib/aiErrors';
 import WeeklyReflectionForm from '@/components/feedback/WeeklyReflectionForm';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
+import AiGenerationStatusCard from '@/components/ai/AiGenerationStatusCard';
+import {
+  parseSseChunks,
+  type AiProgressEvent,
+  type AiProgressPhase,
+} from '@/lib/aiProgress';
 
 // ----- Personas -----
 
@@ -215,6 +221,40 @@ const TOOL_LABELS: Record<string, string> = {
   // Action tools
   suggestFollowUps: 'Preparing suggestions',
 };
+
+const WEEKLY_PLAN_PROGRESS_PHASE_ORDER: AiProgressPhase[] = [
+  'context',
+  'coach',
+  'physio',
+  'repair',
+  'merge',
+  'save',
+];
+
+const WEEKLY_PLAN_PROGRESS_PHASE_LABELS: Record<AiProgressPhase, string> = {
+  context: 'Load context',
+  coach: 'Coach draft',
+  physio: 'Physio draft',
+  repair: 'Conflict check and repair',
+  merge: 'Merge sessions',
+  save: 'Persist plan',
+  done: 'Complete',
+  error: 'Error',
+};
+
+const createInitialPhaseStatusMap = (): Record<
+  AiProgressPhase,
+  'pending' | 'in_progress' | 'done' | 'error'
+> => ({
+  context: 'pending',
+  coach: 'pending',
+  physio: 'pending',
+  repair: 'pending',
+  merge: 'pending',
+  save: 'pending',
+  done: 'pending',
+  error: 'pending',
+});
 
 // ----- Collapsible tool call group -----
 
@@ -435,6 +475,18 @@ const AITeamChat = () => {
   const [negativeFeedbackDrafts, setNegativeFeedbackDrafts] = useState<
     Record<string, {reason: NegativeFeedbackReason; freeText: string; open: boolean}>
   >({});
+  const [isWeeklyPlanGenerating, setIsWeeklyPlanGenerating] = useState(false);
+  const [weeklyPlanProgress, setWeeklyPlanProgress] = useState<AiProgressEvent[]>(
+    [],
+  );
+  const [weeklyPlanCurrentMessage, setWeeklyPlanCurrentMessage] =
+    useState<string | null>(null);
+  const [weeklyPlanPhaseStatusMap, setWeeklyPlanPhaseStatusMap] = useState<
+    Record<AiProgressPhase, 'pending' | 'in_progress' | 'done' | 'error'>
+  >(createInitialPhaseStatusMap());
+  const [weeklyPlanGenerationError, setWeeklyPlanGenerationError] = useState<
+    ReturnType<typeof parseAiErrorFromUnknown> | null
+  >(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {athlete} = useStravaAuth();
@@ -532,6 +584,25 @@ const AITeamChat = () => {
     })();
   }, [activeSession?.id]);
 
+  const refreshOrchestratorSnapshot = useCallback(async () => {
+    if (!activeSession?.id || !athleteId) return;
+    const [goals, planItems, blockers, handoffs, weeklyPlan, trainingBlock] =
+      await Promise.all([
+        neonGetOrchestratorGoals(athleteId, activeSession.id),
+        neonGetOrchestratorPlanItems(athleteId, activeSession.id),
+        neonGetOrchestratorBlockers(athleteId, activeSession.id),
+        neonGetOrchestratorHandoffs(athleteId, activeSession.id),
+        neonGetActiveWeeklyPlan(athleteId),
+        neonGetActiveTrainingBlock(athleteId),
+      ]);
+    setOrchestratorGoals(goals ?? []);
+    setOrchestratorPlanItems(planItems ?? []);
+    setOrchestratorBlockers(blockers ?? []);
+    setOrchestratorHandoffs(handoffs ?? []);
+    setActiveWeeklyPlan(weeklyPlan ?? null);
+    setActiveTrainingBlock(trainingBlock ?? null);
+  }, [activeSession?.id, athleteId]);
+
   useEffect(() => {
     if (activePersona !== 'orchestrator' || !activeSession?.id || !athleteId) {
       setOrchestratorGoals([]);
@@ -542,25 +613,14 @@ const AITeamChat = () => {
       setActiveTrainingBlock(null);
       return;
     }
-
-    (async () => {
-      const [goals, planItems, blockers, handoffs, weeklyPlan, trainingBlock] =
-        await Promise.all([
-          neonGetOrchestratorGoals(athleteId, activeSession.id),
-          neonGetOrchestratorPlanItems(athleteId, activeSession.id),
-          neonGetOrchestratorBlockers(athleteId, activeSession.id),
-          neonGetOrchestratorHandoffs(athleteId, activeSession.id),
-          neonGetActiveWeeklyPlan(athleteId),
-          neonGetActiveTrainingBlock(athleteId),
-        ]);
-      setOrchestratorGoals(goals ?? []);
-      setOrchestratorPlanItems(planItems ?? []);
-      setOrchestratorBlockers(blockers ?? []);
-      setOrchestratorHandoffs(handoffs ?? []);
-      setActiveWeeklyPlan(weeklyPlan ?? null);
-      setActiveTrainingBlock(trainingBlock ?? null);
-    })();
-  }, [activePersona, activeSession?.id, athleteId, activeChat.messages.length]);
+    refreshOrchestratorSnapshot();
+  }, [
+    activePersona,
+    activeSession?.id,
+    athleteId,
+    activeChat.messages.length,
+    refreshOrchestratorSnapshot,
+  ]);
 
   // Auto-scroll on new messages and while tokens stream in
   const lastMsg = activeChat.messages[activeChat.messages.length - 1];
@@ -876,6 +936,147 @@ const AITeamChat = () => {
     [athleteId, savedTrainingFeedbackByWeek],
   );
 
+  const handleGenerateWeeklyPlanFromOrchestrator = useCallback(async () => {
+    if (!athleteId || !activeSession?.id || isWeeklyPlanGenerating) return;
+
+    setIsWeeklyPlanGenerating(true);
+    setWeeklyPlanProgress([]);
+    setWeeklyPlanCurrentMessage('Starting weekly plan generation...');
+    setWeeklyPlanPhaseStatusMap(createInitialPhaseStatusMap());
+    setWeeklyPlanGenerationError(null);
+
+    const payload = {
+      athleteId,
+      model: selectedModel,
+      orchestratorSessionId: activeSession.id,
+    };
+
+    try {
+      const response = await fetch('/api/ai/weekly-plan', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        let body: unknown = null;
+        try {
+          body = await response.json();
+        } catch {
+          body = null;
+        }
+        setWeeklyPlanGenerationError(
+          parseAiErrorFromUnknown(body, 'Failed to generate weekly plan from orchestrator'),
+        );
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        setWeeklyPlanGenerationError(
+          parseAiErrorFromUnknown(
+            null,
+            'Missing response stream while generating weekly plan',
+          ),
+        );
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let latestPhase: AiProgressPhase | null = null;
+      let streamErrored = false;
+      let completed = false;
+
+      const markPhaseInProgress = (phase: AiProgressPhase) => {
+        if (!WEEKLY_PLAN_PROGRESS_PHASE_ORDER.includes(phase)) return;
+        setWeeklyPlanPhaseStatusMap((prev) => {
+          const next = {...prev};
+          if (
+            latestPhase &&
+            latestPhase !== phase &&
+            next[latestPhase] === 'in_progress'
+          ) {
+            next[latestPhase] = 'done';
+          }
+          next[phase] = 'in_progress';
+          return next;
+        });
+        latestPhase = phase;
+      };
+
+      const markTerminalState = (state: 'done' | 'error') => {
+        setWeeklyPlanPhaseStatusMap((prev) => {
+          const next = {...prev};
+          if (latestPhase && next[latestPhase] === 'in_progress') {
+            next[latestPhase] = state;
+          }
+          next[state === 'done' ? 'done' : 'error'] = state;
+          return next;
+        });
+      };
+
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const parsed = parseSseChunks<AiProgressEvent>(buffer, '');
+        buffer = parsed.remainder;
+
+        for (const event of parsed.events) {
+          setWeeklyPlanProgress((prev) => [...prev, event]);
+          setWeeklyPlanCurrentMessage(event.message);
+
+          if (event.type === 'progress') {
+            markPhaseInProgress(event.phase);
+            continue;
+          }
+
+          if (event.type === 'error') {
+            markTerminalState('error');
+            const meta = (event.meta as {code?: string} | undefined) ?? undefined;
+            setWeeklyPlanGenerationError(
+              parseAiErrorFromUnknown(
+                {code: meta?.code, error: event.message},
+                event.message,
+              ),
+            );
+            streamErrored = true;
+            break;
+          }
+
+          if (event.type === 'done') {
+            markTerminalState('done');
+            completed = true;
+            break;
+          }
+        }
+
+        if (streamErrored || completed) break;
+      }
+
+      if (completed) {
+        await refreshOrchestratorSnapshot();
+      }
+    } catch (error) {
+      setWeeklyPlanGenerationError(
+        parseAiErrorFromUnknown(error, 'Failed to generate weekly plan from orchestrator'),
+      );
+      setWeeklyPlanPhaseStatusMap((prev) => ({
+        ...prev,
+        error: 'error',
+      }));
+    } finally {
+      setIsWeeklyPlanGenerating(false);
+    }
+  }, [
+    athleteId,
+    activeSession?.id,
+    isWeeklyPlanGenerating,
+    selectedModel,
+    refreshOrchestratorSnapshot,
+  ]);
+
   // Extract follow-up suggestions from the last assistant message's tool parts
   const followUpSuggestions = useMemo(() => {
     if (isStreaming) return [];
@@ -1075,6 +1276,40 @@ const AITeamChat = () => {
 
   const renderOrchestratorDetails = ({denseMobile = false}: {denseMobile?: boolean}) => (
     <div className='space-y-2'>
+      <div className='border-2 border-border p-2 bg-background space-y-2'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
+            Weekly plan pipeline
+          </p>
+          <button
+            onClick={handleGenerateWeeklyPlanFromOrchestrator}
+            disabled={isWeeklyPlanGenerating || !athleteId || !activeSession?.id}
+            tabIndex={0}
+            aria-label='Generate weekly plan from orchestrator'
+            className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground disabled:opacity-50 disabled:pointer-events-none'
+          >
+            {isWeeklyPlanGenerating ? (
+              <Loader2 className='h-3 w-3 animate-spin' />
+            ) : (
+              <ClipboardList className='h-3 w-3' />
+            )}
+            Generate plan
+          </button>
+        </div>
+        {(isWeeklyPlanGenerating || weeklyPlanProgress.length > 0) && (
+          <AiGenerationStatusCard
+            title='Pipeline status'
+            subtitle='Live coach and physio coordination progress.'
+            phaseOrder={WEEKLY_PLAN_PROGRESS_PHASE_ORDER}
+            phaseLabels={WEEKLY_PLAN_PROGRESS_PHASE_LABELS}
+            phaseStatusMap={weeklyPlanPhaseStatusMap}
+            currentMessage={weeklyPlanCurrentMessage}
+          />
+        )}
+        {weeklyPlanGenerationError && (
+          <AiErrorBanner error={weeklyPlanGenerationError} className='text-xs' />
+        )}
+      </div>
       <div
         className={`grid ${denseMobile ? 'grid-cols-2 gap-1.5' : 'grid-cols-1 md:grid-cols-2 gap-2'}`}
       >

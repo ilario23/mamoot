@@ -14,6 +14,11 @@ import {
 } from '@/lib/chatSync';
 import {fetchUserSettingsRow} from '@/lib/userSettingsSync';
 import {type AiClientError, parseAiErrorFromUnknown} from '@/lib/aiErrors';
+import {
+  parseSseChunks,
+  type AiProgressEvent,
+  type AiProgressPhase,
+} from '@/lib/aiProgress';
 
 const STORAGE_KEY = 'mamoot-weekly-plan-active';
 const getActiveStorageKey = (athleteId: number): string =>
@@ -54,6 +59,10 @@ export interface UseWeeklyPlanResult {
   savePreferences: () => Promise<void>;
   preferencesLoaded: boolean;
   lastError: AiClientError | null;
+  generationProgress: AiProgressEvent[];
+  currentPhase: AiProgressPhase | null;
+  phaseStatusMap: Record<AiProgressPhase, 'pending' | 'in_progress' | 'done' | 'error'>;
+  generationMessage: string | null;
   previousWeekStart: string;
   previousWeekFeedback: CachedTrainingFeedback | null;
   isLoadingPreviousWeekFeedback: boolean;
@@ -71,6 +80,28 @@ export interface UseWeeklyPlanResult {
 }
 
 const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
+const PROGRESS_PHASES: AiProgressPhase[] = [
+  'context',
+  'coach',
+  'physio',
+  'repair',
+  'merge',
+  'save',
+];
+
+const createInitialPhaseStatusMap = (): Record<
+  AiProgressPhase,
+  'pending' | 'in_progress' | 'done' | 'error'
+> => ({
+  context: 'pending',
+  coach: 'pending',
+  physio: 'pending',
+  repair: 'pending',
+  merge: 'pending',
+  save: 'pending',
+  done: 'pending',
+  error: 'pending',
+});
 
 const getCurrentMonday = (): string => {
   const now = new Date();
@@ -108,6 +139,14 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   const [preferences, setPreferences] = useState('');
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [lastError, setLastError] = useState<AiClientError | null>(null);
+  const [generationProgress, setGenerationProgress] = useState<AiProgressEvent[]>(
+    [],
+  );
+  const [currentPhase, setCurrentPhase] = useState<AiProgressPhase | null>(null);
+  const [phaseStatusMap, setPhaseStatusMap] = useState<
+    Record<AiProgressPhase, 'pending' | 'in_progress' | 'done' | 'error'>
+  >(createInitialPhaseStatusMap());
+  const [generationMessage, setGenerationMessage] = useState<string | null>(null);
   const [previousWeekFeedback, setPreviousWeekFeedback] =
     useState<CachedTrainingFeedback | null>(null);
   const [isLoadingPreviousWeekFeedback, setIsLoadingPreviousWeekFeedback] =
@@ -209,6 +248,10 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
       if (!athleteId) return null;
       setIsGenerating(true);
       setLastError(null);
+      setGenerationProgress([]);
+      setGenerationMessage('Starting weekly plan generation...');
+      setCurrentPhase('context');
+      setPhaseStatusMap(createInitialPhaseStatusMap());
 
       const prefsToSend = options?.preferences ?? (preferences || undefined);
       const payload = {
@@ -256,20 +299,139 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
           return null;
         }
 
-        const data = await res.json();
+        const contentType = res.headers.get('content-type') ?? '';
+        const traceId = res.headers.get('x-trace-id');
+        let data: unknown = null;
+
+        if (contentType.includes('text/event-stream')) {
+          const reader = res.body?.getReader();
+          if (!reader) {
+            setLastError({
+              ...parseAiErrorFromUnknown(
+                null,
+                'Missing response stream from weekly plan API',
+              ),
+              status: 0,
+              traceId,
+            });
+            return null;
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let latestPhase: AiProgressPhase | null = null;
+          let donePayload: unknown = null;
+          let streamErrored = false;
+
+          const updatePhaseProgress = (
+            event: AiProgressEvent,
+            finalState?: 'done' | 'error',
+          ) => {
+            if (finalState) {
+              setPhaseStatusMap((prev) => {
+                const next = {...prev};
+                if (latestPhase && next[latestPhase] === 'in_progress') {
+                  next[latestPhase] = finalState;
+                }
+                next[event.phase] = finalState;
+                return next;
+              });
+              return;
+            }
+
+            if (!PROGRESS_PHASES.includes(event.phase)) return;
+
+            setPhaseStatusMap((prev) => {
+              const next = {...prev};
+              if (latestPhase && latestPhase !== event.phase && next[latestPhase] === 'in_progress') {
+                next[latestPhase] = 'done';
+              }
+              next[event.phase] = 'in_progress';
+              return next;
+            });
+            latestPhase = event.phase;
+            setCurrentPhase(event.phase);
+          };
+
+          while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+            const parsed = parseSseChunks<AiProgressEvent>(buffer, '');
+            buffer = parsed.remainder;
+
+            for (const event of parsed.events) {
+              setGenerationProgress((prev) => [...prev, event]);
+              setGenerationMessage(event.message);
+
+              if (event.type === 'progress') {
+                updatePhaseProgress(event);
+                continue;
+              }
+
+              if (event.type === 'error') {
+                updatePhaseProgress(event, 'error');
+                setCurrentPhase('error');
+                const meta = (event.meta as
+                  | {code?: string; status?: number}
+                  | undefined) ?? {code: 'generation_failed', status: 500};
+                setLastError({
+                  ...parseAiErrorFromUnknown(
+                    {code: meta.code, error: event.message},
+                    event.message,
+                  ),
+                  status: meta.status ?? 500,
+                  traceId,
+                });
+                streamErrored = true;
+                break;
+              }
+
+              if (event.type === 'done') {
+                updatePhaseProgress(event, 'done');
+                setCurrentPhase('done');
+                donePayload = event.payload ?? null;
+                break;
+              }
+            }
+
+            if (streamErrored || donePayload) break;
+          }
+
+          if (streamErrored || !donePayload) {
+            return null;
+          }
+
+          data = donePayload;
+        } else {
+          data = await res.json();
+        }
+
+        const typedData = data as {
+          id: string;
+          weekStart: string;
+          title: string;
+          summary?: string | null;
+          goal?: string | null;
+          sessions: WeeklyPlan['sessions'];
+          content: string;
+          blockId?: string | null;
+          weekNumber?: number | null;
+          createdAt: number;
+        };
         const newPlan: WeeklyPlan = {
-          id: data.id,
+          id: typedData.id,
           athleteId,
-          weekStart: data.weekStart,
-          title: data.title,
-          summary: data.summary ?? null,
-          goal: data.goal ?? null,
-          sessions: data.sessions,
-          content: data.content,
+          weekStart: typedData.weekStart,
+          title: typedData.title,
+          summary: typedData.summary ?? null,
+          goal: typedData.goal ?? null,
+          sessions: typedData.sessions,
+          content: typedData.content,
           isActive: true,
-          blockId: data.blockId ?? null,
-          weekNumber: data.weekNumber ?? null,
-          createdAt: data.createdAt,
+          blockId: typedData.blockId ?? null,
+          weekNumber: typedData.weekNumber ?? null,
+          createdAt: typedData.createdAt,
         };
 
         setPlans((prev) => {
@@ -403,6 +565,10 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
     savePreferences,
     preferencesLoaded,
     lastError,
+    generationProgress,
+    currentPhase,
+    phaseStatusMap,
+    generationMessage,
     previousWeekStart,
     previousWeekFeedback,
     isLoadingPreviousWeekFeedback,

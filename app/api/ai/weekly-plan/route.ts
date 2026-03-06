@@ -62,6 +62,11 @@ import {
   summarizeConflictResolution,
   type WeeklyAgentConflict,
 } from '@/lib/multiAgentContracts';
+import {
+  encodeSseEvent,
+  type AiProgressEvent,
+  type AiProgressPhase,
+} from '@/lib/aiProgress';
 
 export const maxDuration = 120;
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
@@ -215,8 +220,47 @@ export async function POST(req: Request) {
     multiAgentConfig,
   });
   const requestStartedAt = Date.now();
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      const sendEvent = (event: AiProgressEvent) => {
+        controller.enqueue(encoder.encode(encodeSseEvent(event)));
+      };
+      const sendProgress = (
+        phase: AiProgressPhase,
+        message: string,
+        meta?: unknown,
+      ) => {
+        sendEvent({
+          type: 'progress',
+          phase,
+          message,
+          timestamp: Date.now(),
+          ...(meta !== undefined ? {meta} : {}),
+        });
+      };
+      const sendDone = (payload: unknown) => {
+        sendEvent({
+          type: 'done',
+          phase: 'done',
+          message: 'Weekly plan generation completed.',
+          timestamp: Date.now(),
+          payload,
+        });
+      };
+      const sendError = (message: string, meta?: unknown) => {
+        sendEvent({
+          type: 'error',
+          phase: 'error',
+          message,
+          timestamp: Date.now(),
+          ...(meta !== undefined ? {meta} : {}),
+        });
+      };
+      sendProgress('context', 'Request accepted. Preparing generation pipeline.');
 
-  try {
+      (async () => {
+        try {
     // Step 1: Load context
     const [settingsRows, activityRows, planRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
@@ -231,6 +275,7 @@ export async function POST(req: Request) {
         .where(eq(weeklyPlans.athleteId, athleteId))
         .orderBy(desc(weeklyPlans.createdAt)),
     ]);
+    sendProgress('context', 'Loaded athlete context and historical plans.');
 
     const currentMonday = getCurrentMonday();
     const hasActiveCurrentWeekPlan = planRows.some(
@@ -581,12 +626,8 @@ export async function POST(req: Request) {
         : planRows.find((plan) => plan.weekStart === weekStart && plan.isActive) ?? planRows[0] ?? null;
 
       if (!sourcePlanForReplan) {
-        return NextResponse.json(
-          createAiErrorPayload(
-            'source_plan_not_found',
-            'No source weekly plan found for remaining-days replan',
-          ),
-          {status: 400, headers: {'x-trace-id': trace.traceId}},
+        throw new Error(
+          'SOURCE_PLAN_NOT_FOUND: No source weekly plan found for remaining-days replan',
         );
       }
 
@@ -606,6 +647,7 @@ export async function POST(req: Request) {
 
     // Step 2: Coach generates running sessions
     console.log(`[WeeklyPlan] Step 2: Coach generateObject...`);
+    sendProgress('coach', 'Coach is drafting running sessions.');
     const generationPreferences = [
       preferences,
       mode === 'remaining_days'
@@ -655,9 +697,11 @@ export async function POST(req: Request) {
 
     const coachSessions = coachObject.sessions;
     console.log(`[WeeklyPlan] Coach produced ${coachSessions.length} sessions`);
+    sendProgress('coach', 'Coach draft ready.', {sessionCount: coachSessions.length});
 
     // Step 3: Physio generates complementary sessions
     console.log(`[WeeklyPlan] Step 3: Physio generateObject...`);
+    sendProgress('physio', 'Physio is drafting complementary work.');
     const coachSessionsSummary = coachSessions
       .map((s) => `- ${s.day} (${s.date}): ${s.type} — ${s.description}`)
       .join('\n');
@@ -693,8 +737,12 @@ export async function POST(req: Request) {
 
     let physioSessions = physioObject.sessions;
     console.log(`[WeeklyPlan] Physio produced ${physioSessions.length} sessions`);
+    sendProgress('physio', 'Physio draft ready.', {
+      sessionCount: physioSessions.length,
+    });
 
     if (multiAgentEnabled) {
+      sendProgress('repair', 'Checking coach/physio conflicts.');
       const conflictResolution = resolveWeeklyCoachPhysioConflicts(
         coachObject,
         {sessions: physioSessions},
@@ -721,6 +769,7 @@ export async function POST(req: Request) {
         hasRuntimeBudget();
 
       if (canRepair) {
+        sendProgress('repair', 'Applying automatic conflict repair.');
         const conflictDigest = conflictResolution.conflicts
           .map(
             (conflict) =>
@@ -756,10 +805,12 @@ export async function POST(req: Request) {
           repairTurnsUsed,
           elapsedMs: elapsedMs(),
         });
+        sendProgress('repair', 'Conflict repair completed.');
       }
     }
 
     // Step 4: Merge by date
+    sendProgress('merge', 'Merging coach and physio plans by date.');
     const physioByDate = new Map(physioSessions.map((s) => [s.date, s]));
 
     // Convert nullable fields (null → undefined) for the UnifiedSession interface
@@ -869,6 +920,7 @@ export async function POST(req: Request) {
 
     // Step 5: Generate title + summary
     console.log(`[WeeklyPlan] Step 4: Generate title/summary...`);
+    sendProgress('merge', 'Generating plan metadata and summary.');
     const sessionOverview = unifiedSessions
       .map((s) => {
         const parts = [s.day];
@@ -969,6 +1021,7 @@ export async function POST(req: Request) {
     const content = `${PLAN_PREFERENCES_PREFIX}${encodedPreferences}${PLAN_PREFERENCES_SUFFIX}\n${PLAN_STRATEGY_PREFIX}${strategyMetaPayload}${PLAN_STRATEGY_SUFFIX}\n${markdownContent}`;
 
     // Step 6: Save
+    sendProgress('save', 'Saving weekly plan and orchestrator records.');
     const planId = crypto.randomUUID();
     const now2 = Date.now();
 
@@ -1108,7 +1161,7 @@ export async function POST(req: Request) {
       outputTokens: null,
     });
 
-    return NextResponse.json({
+    const responsePayload = {
       id: planId,
       weekStart,
       title: metaObject.title,
@@ -1134,7 +1187,10 @@ export async function POST(req: Request) {
         summary: conflictSummary,
       },
       createdAt: now2,
-    }, {headers: {'x-trace-id': trace.traceId}});
+    };
+    sendProgress('save', 'Plan saved successfully.');
+    sendDone(responsePayload);
+    controller.close();
   } catch (error) {
     logAiTrace(trace, 'request_failed', {
       athleteId,
@@ -1150,17 +1206,43 @@ export async function POST(req: Request) {
       error instanceof Error &&
       error.message.startsWith('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED')
     ) {
-      return NextResponse.json(
-        createAiErrorPayload(
-          'multi_agent_runtime_budget_exceeded',
-          'Weekly planning exceeded the bounded runtime budget. Please retry with fewer constraints.',
-        ),
-        {status: 503, headers: {'x-trace-id': trace.traceId}},
+      sendError(
+        'Weekly planning exceeded the bounded runtime budget. Please retry with fewer constraints.',
+        {
+          code: 'multi_agent_runtime_budget_exceeded',
+          status: 503,
+        },
       );
+      controller.close();
+      return;
     }
-    return NextResponse.json(
-      createAiErrorPayload('generation_failed', 'Failed to generate weekly plan'),
-      {status: 500, headers: {'x-trace-id': trace.traceId}},
-    );
+    if (
+      error instanceof Error &&
+      error.message.startsWith('SOURCE_PLAN_NOT_FOUND')
+    ) {
+      sendError('No source weekly plan found for remaining-days replan.', {
+        code: 'source_plan_not_found',
+        status: 400,
+      });
+      controller.close();
+      return;
+    }
+    sendError('Failed to generate weekly plan.', {
+      code: 'generation_failed',
+      status: 500,
+    });
+    controller.close();
   }
+      })();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'x-trace-id': trace.traceId,
+    },
+  });
 }

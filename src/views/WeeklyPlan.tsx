@@ -24,6 +24,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {NeoLoader} from '@/components/ui/neo-loader';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
+import AiGenerationStatusCard from '@/components/ai/AiGenerationStatusCard';
 import WeeklyReflectionForm from '@/components/feedback/WeeklyReflectionForm';
 import WeeklyPlanDistribution from '@/components/weekly-plan/WeeklyPlanDistribution';
 import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
@@ -42,6 +43,7 @@ import {
   type StrategySelectionMode,
   type TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
+import type {AiProgressPhase} from '@/lib/aiProgress';
 
 const formatWeekRange = (weekStart: string): string => {
   const start = new Date(weekStart);
@@ -457,6 +459,9 @@ const WeeklyPlan = () => {
     setPreferences,
     savePreferences,
     lastError,
+    generationProgress,
+    phaseStatusMap,
+    generationMessage,
     previousWeekStart,
     previousWeekFeedback,
     isLoadingPreviousWeekFeedback,
@@ -480,6 +485,24 @@ const WeeklyPlan = () => {
     useState<TrainingStrategyPreset>('polarized_80_20');
   const [optimizationPriority, setOptimizationPriority] =
     useState<OptimizationPriority>('race_performance');
+  const generationPhaseOrder: AiProgressPhase[] = [
+    'context',
+    'coach',
+    'physio',
+    'repair',
+    'merge',
+    'save',
+  ];
+  const generationPhaseLabels: Record<AiProgressPhase, string> = {
+    context: 'Load context',
+    coach: 'Coach draft',
+    physio: 'Physio draft',
+    repair: 'Conflict check and repair',
+    merge: 'Merge sessions',
+    save: 'Persist plan',
+    done: 'Complete',
+    error: 'Error',
+  };
   const regenerateDialogRef = useRef<HTMLDivElement>(null);
   const feedbackDialogRef = useRef<HTMLDivElement>(null);
   const modalReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -567,10 +590,10 @@ const WeeklyPlan = () => {
     setTargetWeekStart(getNextMonday());
   };
 
-  const handleRegenerateSubmit = () => {
+  const handleRegenerateSubmit = async () => {
     setPreferences(regenerationPreferences);
-    savePreferences();
-    generatePlan({
+    await savePreferences();
+    const generatedPlan = await generatePlan({
       weekStartDate: targetWeekStart || undefined,
       preferences: regenerationPreferences,
       mode: regenerationMode,
@@ -579,7 +602,9 @@ const WeeklyPlan = () => {
       strategyPreset,
       optimizationPriority,
     });
-    handleCloseRegenerate();
+    if (generatedPlan) {
+      handleCloseRegenerate();
+    }
   };
 
   const handleToggleFullPlan = () => {
@@ -941,6 +966,16 @@ const WeeklyPlan = () => {
                 Cancel
               </button>
             </div>
+            {(isGenerating || generationProgress.length > 0) && (
+              <AiGenerationStatusCard
+                title='Pipeline status'
+                subtitle='Live coach and physio coordination progress.'
+                phaseOrder={generationPhaseOrder}
+                phaseLabels={generationPhaseLabels}
+                phaseStatusMap={phaseStatusMap}
+                currentMessage={generationMessage}
+              />
+            )}
           </div>
         </div>
       )}
