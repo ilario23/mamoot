@@ -6,7 +6,6 @@ import {
   Apple,
   Stethoscope,
   Loader2,
-  AlertCircle,
   Plus,
   MessageSquare,
   Trash2,
@@ -80,6 +79,8 @@ import SuggestionChips from '@/components/chat/SuggestionChips';
 import ToolCallChip from '@/components/chat/ToolCallChip';
 import type {SuggestFollowUpsInput} from '@/lib/aiTools';
 import {parseAiErrorFromUnknown} from '@/lib/aiErrors';
+import WeeklyReflectionForm from '@/components/feedback/WeeklyReflectionForm';
+import AiErrorBanner from '@/components/ai/AiErrorBanner';
 
 // ----- Personas -----
 
@@ -158,12 +159,17 @@ const PERSONA_STARTERS: Record<PersonaId, string[]> = {
   ],
 };
 
-const NEGATIVE_FEEDBACK_REASONS: ChatFeedbackReason[] = [
-  'unsafe',
-  'too_generic',
-  'not_actionable',
-  'wrong_context',
-  'other',
+type NegativeFeedbackReason = Exclude<ChatFeedbackReason, 'helpful'>;
+
+const NEGATIVE_FEEDBACK_OPTIONS: Array<{
+  id: NegativeFeedbackReason;
+  label: string;
+}> = [
+  {id: 'unsafe', label: 'Unsafe'},
+  {id: 'too_generic', label: 'Too generic'},
+  {id: 'not_actionable', label: 'Not actionable'},
+  {id: 'wrong_context', label: 'Wrong context'},
+  {id: 'other', label: 'Other'},
 ];
 
 const PersonaAvatar = ({
@@ -426,6 +432,9 @@ const AITeamChat = () => {
   >({});
   const [submittingTrainingFeedbackWeek, setSubmittingTrainingFeedbackWeek] =
     useState<string | null>(null);
+  const [negativeFeedbackDrafts, setNegativeFeedbackDrafts] = useState<
+    Record<string, {reason: NegativeFeedbackReason; freeText: string; open: boolean}>
+  >({});
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {athlete} = useStravaAuth();
@@ -748,37 +757,14 @@ const AITeamChat = () => {
     }
   }, [activeChat.error]);
 
-  const handleMessageFeedback = useCallback(
-    async (messageId: string, rating: ChatFeedbackRating) => {
+  const persistMessageFeedback = useCallback(
+    async (
+      messageId: string,
+      rating: ChatFeedbackRating,
+      reason: ChatFeedbackReason | null,
+      freeText: string | null,
+    ) => {
       if (!activeSession?.id || !athleteId) return;
-
-      let reason: ChatFeedbackReason | null =
-        rating === 'helpful' ? 'helpful' : 'too_generic';
-      let freeText: string | null = null;
-
-      if (rating === 'not_helpful' && typeof window !== 'undefined') {
-        const reasonInput = window
-          .prompt(
-            'Why was this not helpful? (unsafe | too_generic | not_actionable | wrong_context | other)',
-            'too_generic',
-          )
-          ?.trim()
-          .toLowerCase() as ChatFeedbackReason | undefined;
-
-        if (!reasonInput || !NEGATIVE_FEEDBACK_REASONS.includes(reasonInput)) {
-          reason = 'other';
-        } else {
-          reason = reasonInput;
-        }
-
-        if (reason === 'other') {
-          const freeTextInput = window
-            .prompt('Optional details for improvement', '')
-            ?.trim();
-          freeText = freeTextInput || null;
-        }
-      }
-
       const now = Date.now();
       const record: CachedChatMessageFeedback = {
         id: `${activeSession.id}:${messageId}`,
@@ -795,11 +781,57 @@ const AITeamChat = () => {
         createdAt: now,
         updatedAt: now,
       };
-
       await neonSyncChatMessageFeedback(record);
       setFeedbackByMessageId((prev) => ({...prev, [messageId]: record}));
     },
     [activeSession?.id, activePersona, athleteId, selectedModel],
+  );
+
+  const handleMessageFeedback = useCallback(
+    async (messageId: string, rating: ChatFeedbackRating) => {
+      if (rating === 'helpful') {
+        await persistMessageFeedback(messageId, 'helpful', 'helpful', null);
+        setNegativeFeedbackDrafts((prev) => {
+          const next = {...prev};
+          delete next[messageId];
+          return next;
+        });
+        return;
+      }
+
+      const existing = feedbackByMessageId[messageId];
+      const existingReason: NegativeFeedbackReason =
+        existing?.rating === 'not_helpful' && existing.reason && existing.reason !== 'helpful'
+          ? (existing.reason as NegativeFeedbackReason)
+          : 'too_generic';
+      setNegativeFeedbackDrafts((prev) => ({
+        ...prev,
+        [messageId]: {
+          reason: prev[messageId]?.reason ?? existingReason,
+          freeText: prev[messageId]?.freeText ?? existing?.freeText ?? '',
+          open: !prev[messageId]?.open,
+        },
+      }));
+    },
+    [feedbackByMessageId, persistMessageFeedback],
+  );
+
+  const handleSubmitNegativeFeedback = useCallback(
+    async (messageId: string) => {
+      const draft = negativeFeedbackDrafts[messageId];
+      if (!draft) return;
+      await persistMessageFeedback(
+        messageId,
+        'not_helpful',
+        draft.reason,
+        draft.reason === 'other' ? (draft.freeText.trim() || null) : null,
+      );
+      setNegativeFeedbackDrafts((prev) => ({
+        ...prev,
+        [messageId]: {...draft, open: false},
+      }));
+    },
+    [negativeFeedbackDrafts, persistMessageFeedback],
   );
 
   const handleSubmitTrainingFeedback = useCallback(
@@ -1152,7 +1184,7 @@ const AITeamChat = () => {
       <div className='flex-1 flex flex-col min-w-0 overflow-hidden'>
         {/* Mobile header — persona + new chat + history */}
         <div
-          className={`md:hidden px-2.5 py-1.5 border-b-3 border-border flex items-center gap-2 bg-neo-stripe ${currentPersona.color}`}
+          className={`md:hidden px-2 py-1.5 border-b-3 border-border flex items-center gap-1.5 bg-neo-stripe ${currentPersona.color}`}
         >
           <div className='flex items-center gap-1.5 flex-1 min-w-0'>
             <PersonaAvatar persona={currentPersona} size='sm' />
@@ -1176,6 +1208,25 @@ const AITeamChat = () => {
           >
             <Menu className='h-4 w-4' />
           </button>
+        </div>
+
+        <div className='md:hidden border-b-2 border-border bg-background p-1.5 grid grid-cols-4 gap-1'>
+          {personas.map((persona) => {
+            const active = activePersona === persona.id;
+            return (
+              <button
+                key={persona.id}
+                onClick={() => handlePersonaSwitch(persona.id)}
+                tabIndex={0}
+                aria-label={`Switch to ${persona.label}`}
+                className={`px-1.5 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${
+                  active ? `${persona.tintBg} ${persona.labelColor}` : 'bg-background text-muted-foreground'
+                }`}
+              >
+                {persona.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Desktop header — new chat button top-right */}
@@ -1259,7 +1310,7 @@ const AITeamChat = () => {
         {/* Messages */}
         <div
           ref={scrollRef}
-          className='flex-1 overflow-y-auto overflow-x-hidden p-2 md:p-3 space-y-3 md:space-y-4 bg-neo-grid'
+          className='flex-1 overflow-y-auto overflow-x-hidden p-1.5 md:p-3 space-y-2.5 md:space-y-4 bg-neo-grid'
         >
           {activeChat.messages.length === 0 && !isStreaming && (
             <div className='flex items-center justify-center h-full'>
@@ -1464,136 +1515,136 @@ const AITeamChat = () => {
                         </div>
                       )}
                       {requestedWeekStart && (
-                        <form
-                          onSubmit={async (event) => {
-                            event.preventDefault();
-                            const formData = new FormData(event.currentTarget);
-                            await handleSubmitTrainingFeedback(requestedWeekStart, {
-                              adherence: Number(formData.get('adherence') ?? 3),
-                              effort: Number(formData.get('effort') ?? 3),
-                              fatigue: Number(formData.get('fatigue') ?? 3),
-                              soreness: Number(formData.get('soreness') ?? 3),
-                              mood: Number(formData.get('mood') ?? 3),
-                              confidence: Number(formData.get('confidence') ?? 3),
-                              notes: String(formData.get('notes') ?? ''),
-                            });
-                          }}
-                          className='mt-2 border-2 border-border bg-muted/40 p-2.5 space-y-2'
-                        >
-                          <p className='text-xs font-black uppercase tracking-wider text-primary'>
-                            Weekly reflection ({requestedWeekStart})
-                          </p>
-                          <p className='text-xs text-muted-foreground font-medium'>
-                            {trainingFeedbackPrompt}
-                          </p>
-                          <div className='grid grid-cols-2 gap-2'>
-                            {[
-                              {
-                                name: 'adherence',
-                                label: 'Adherence',
-                                value: savedTrainingFeedback?.adherence ?? 3,
-                              },
-                              {
-                                name: 'effort',
-                                label: 'Effort',
-                                value: savedTrainingFeedback?.effort ?? 3,
-                              },
-                              {
-                                name: 'fatigue',
-                                label: 'Fatigue',
-                                value: savedTrainingFeedback?.fatigue ?? 3,
-                              },
-                              {
-                                name: 'soreness',
-                                label: 'Soreness',
-                                value: savedTrainingFeedback?.soreness ?? 3,
-                              },
-                              {
-                                name: 'mood',
-                                label: 'Mood',
-                                value: savedTrainingFeedback?.mood ?? 3,
-                              },
-                              {
-                                name: 'confidence',
-                                label: 'Confidence',
-                                value: savedTrainingFeedback?.confidence ?? 3,
-                              },
-                            ].map((field) => (
-                              <label key={field.name} className='space-y-1'>
-                                <span className='text-[10px] font-black uppercase tracking-wider text-muted-foreground'>
-                                  {field.label}
-                                </span>
-                                <select
-                                  name={field.name}
-                                  defaultValue={String(field.value)}
-                                  className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium'
-                                >
-                                  <option value='1'>1</option>
-                                  <option value='2'>2</option>
-                                  <option value='3'>3</option>
-                                  <option value='4'>4</option>
-                                  <option value='5'>5</option>
-                                </select>
-                              </label>
-                            ))}
-                          </div>
-                          <label className='space-y-1 block'>
-                            <span className='text-[10px] font-black uppercase tracking-wider text-muted-foreground'>
-                              Notes (optional)
-                            </span>
-                            <textarea
-                              name='notes'
-                              rows={2}
-                              defaultValue={savedTrainingFeedback?.notes ?? ''}
-                              className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium resize-none'
-                            />
-                          </label>
-                          <button
-                            type='submit'
-                            disabled={submittingTrainingFeedbackWeek === requestedWeekStart}
-                            tabIndex={0}
-                            aria-label='Submit weekly reflection'
-                            className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground disabled:opacity-50'
-                          >
-                            {submittingTrainingFeedbackWeek === requestedWeekStart
-                              ? 'Saving...'
-                              : savedTrainingFeedback
+                        <div className='mt-2'>
+                          <WeeklyReflectionForm
+                            weekStart={requestedWeekStart}
+                            prompt={trainingFeedbackPrompt}
+                            initialValues={savedTrainingFeedback}
+                            compact
+                            isSubmitting={
+                              submittingTrainingFeedbackWeek === requestedWeekStart
+                            }
+                            submitLabel={
+                              savedTrainingFeedback
                                 ? 'Update reflection'
-                                : 'Submit reflection'}
-                          </button>
-                        </form>
+                                : 'Submit reflection'
+                            }
+                            onSubmit={(values) =>
+                              handleSubmitTrainingFeedback(requestedWeekStart, values)
+                            }
+                          />
+                        </div>
                       )}
                       {!isUser && textContent && (
-                        <div className='flex items-center gap-1.5 mt-2'>
-                          <button
-                            onClick={() => handleMessageFeedback(msg.id, 'helpful')}
-                            aria-label='Mark response helpful'
-                            tabIndex={0}
-                            className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
-                              messageFeedback?.rating === 'helpful'
-                                ? 'bg-secondary/20 text-secondary border-secondary/40'
-                                : 'bg-background text-muted-foreground border-border hover:text-foreground'
-                            }`}
-                          >
-                            <ThumbsUp className='h-3 w-3' />
-                            Helpful
-                          </button>
-                          <button
-                            onClick={() =>
-                              handleMessageFeedback(msg.id, 'not_helpful')
-                            }
-                            aria-label='Mark response not helpful'
-                            tabIndex={0}
-                            className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
-                              messageFeedback?.rating === 'not_helpful'
-                                ? 'bg-destructive/15 text-destructive border-destructive/40'
-                                : 'bg-background text-muted-foreground border-border hover:text-foreground'
-                            }`}
-                          >
-                            <ThumbsDown className='h-3 w-3' />
-                            Not helpful
-                          </button>
-                        </div>
+                        <>
+                          <div className='flex items-center gap-1.5 mt-2'>
+                            <button
+                              onClick={() => handleMessageFeedback(msg.id, 'helpful')}
+                              aria-label='Mark response helpful'
+                              tabIndex={0}
+                              className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
+                                messageFeedback?.rating === 'helpful'
+                                  ? 'bg-secondary/20 text-secondary border-secondary/40'
+                                  : 'bg-background text-muted-foreground border-border hover:text-foreground'
+                              }`}
+                            >
+                              <ThumbsUp className='h-3 w-3' />
+                              Helpful
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleMessageFeedback(msg.id, 'not_helpful')
+                              }
+                              aria-label='Mark response not helpful'
+                              tabIndex={0}
+                              className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold border-2 transition-colors ${
+                                messageFeedback?.rating === 'not_helpful'
+                                  ? 'bg-destructive/15 text-destructive border-destructive/40'
+                                  : 'bg-background text-muted-foreground border-border hover:text-foreground'
+                              }`}
+                            >
+                              <ThumbsDown className='h-3 w-3' />
+                              Not helpful
+                            </button>
+                          </div>
+
+                          {negativeFeedbackDrafts[msg.id]?.open && (
+                            <div className='mt-2 border-2 border-border bg-muted/40 p-2.5 space-y-2'>
+                              <p className='text-[10px] font-black uppercase tracking-wider text-destructive'>
+                                Improve this response
+                              </p>
+                              <div className='flex flex-wrap gap-1.5'>
+                                {NEGATIVE_FEEDBACK_OPTIONS.map((option) => (
+                                  <button
+                                    key={option.id}
+                                    onClick={() =>
+                                      setNegativeFeedbackDrafts((prev) => ({
+                                        ...prev,
+                                        [msg.id]: {
+                                          ...prev[msg.id],
+                                          reason: option.id,
+                                        },
+                                      }))
+                                    }
+                                    tabIndex={0}
+                                    aria-label={`Feedback reason: ${option.label}`}
+                                    className={`px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 ${
+                                      negativeFeedbackDrafts[msg.id]?.reason === option.id
+                                        ? 'bg-destructive/15 text-destructive border-destructive/40'
+                                        : 'bg-background text-muted-foreground border-border hover:text-foreground'
+                                    }`}
+                                  >
+                                    {option.label}
+                                  </button>
+                                ))}
+                              </div>
+                              {negativeFeedbackDrafts[msg.id]?.reason === 'other' && (
+                                <textarea
+                                  value={negativeFeedbackDrafts[msg.id]?.freeText ?? ''}
+                                  onChange={(event) =>
+                                    setNegativeFeedbackDrafts((prev) => ({
+                                      ...prev,
+                                      [msg.id]: {
+                                        ...prev[msg.id],
+                                        freeText: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                  rows={2}
+                                  className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium resize-none'
+                                  placeholder='Optional details'
+                                  aria-label='Feedback details'
+                                />
+                              )}
+                              <div className='flex gap-1.5'>
+                                <button
+                                  onClick={() => handleSubmitNegativeFeedback(msg.id)}
+                                  tabIndex={0}
+                                  aria-label='Submit negative feedback'
+                                  className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground'
+                                >
+                                  Save feedback
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    setNegativeFeedbackDrafts((prev) => ({
+                                      ...prev,
+                                      [msg.id]: {
+                                        ...prev[msg.id],
+                                        open: false,
+                                      },
+                                    }))
+                                  }
+                                  tabIndex={0}
+                                  aria-label='Cancel negative feedback'
+                                  className='px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background hover:bg-muted'
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
                     </>
                   )}
@@ -1627,20 +1678,17 @@ const AITeamChat = () => {
 
         {/* Error display */}
         {hasError && (
-          <div className='px-3 py-2 bg-destructive/10 border-t-3 border-border text-xs text-destructive font-medium space-y-1'>
-            <div className='flex items-center gap-2'>
-              <AlertCircle className='h-3.5 w-3.5 shrink-0' />
-              <span className='truncate'>
-                {parsedChatError?.error ??
-                  activeChat.error?.message ??
-                  'Something went wrong. Please try again.'}
-              </span>
-            </div>
-            {parsedChatError && parsedChatError.recoveryActions.length > 0 && (
-              <p className='text-[11px] font-medium pl-5'>
-                Try: {parsedChatError.recoveryActions.join(' · ')}
-              </p>
-            )}
+          <div className='px-2 pb-2'>
+            <AiErrorBanner
+              error={
+                parsedChatError ??
+                parseAiErrorFromUnknown(
+                  {error: activeChat.error?.message ?? 'Something went wrong'},
+                  'Something went wrong. Please try again.',
+                )
+              }
+              className='text-xs'
+            />
           </div>
         )}
 

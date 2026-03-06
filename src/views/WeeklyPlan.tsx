@@ -1,6 +1,6 @@
 'use client';
 
-import {useState, useMemo} from 'react';
+import {useState, useMemo, useEffect, useRef, useCallback} from 'react';
 import {
   CalendarDays,
   Dumbbell,
@@ -16,13 +16,15 @@ import {
   MessageSquareText,
   Target,
   X,
-  AlertCircle,
   ClipboardCheck,
+  SlidersHorizontal,
 } from 'lucide-react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {NeoLoader} from '@/components/ui/neo-loader';
+import AiErrorBanner from '@/components/ai/AiErrorBanner';
+import WeeklyReflectionForm from '@/components/feedback/WeeklyReflectionForm';
 import WeeklyPlanDistribution from '@/components/weekly-plan/WeeklyPlanDistribution';
 import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
 import {useTrainingBlock} from '@/hooks/useTrainingBlock';
@@ -67,6 +69,17 @@ const getNextMonday = (): string => {
   currentMonday.setDate(currentMonday.getDate() + 7);
   return toIsoDate(currentMonday);
 };
+
+const isHardSessionType = (type?: string): boolean => {
+  if (!type) return false;
+  const normalized = type.toLowerCase();
+  return ['interval', 'tempo', 'threshold', 'race', 'vo2'].some((token) =>
+    normalized.includes(token),
+  );
+};
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
@@ -138,12 +151,6 @@ const stripPlanMetaFromContent = (content?: string | null): string => {
       '',
     );
 };
-
-interface FeedbackScoreField {
-  label: string;
-  value: number;
-  setValue: (value: number) => void;
-}
 
 const DayCard = ({session}: {session: UnifiedSession}) => {
   const hasRun = !!session.run;
@@ -463,6 +470,7 @@ const WeeklyPlan = () => {
   const [regenerateOpen, setRegenerateOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [regenerationMode, setRegenerationMode] = useState<'full' | 'remaining_days'>('full');
+  const [advancedRegenerationOpen, setAdvancedRegenerationOpen] = useState(false);
   const [targetWeekStart, setTargetWeekStart] = useState('');
   const [targetWeekSelection, setTargetWeekSelection] = useState<'current' | 'next'>('current');
   const [regenerationPreferences, setRegenerationPreferences] = useState('');
@@ -472,29 +480,9 @@ const WeeklyPlan = () => {
     useState<TrainingStrategyPreset>('polarized_80_20');
   const [optimizationPriority, setOptimizationPriority] =
     useState<OptimizationPriority>('race_performance');
-  const [feedbackAdherence, setFeedbackAdherence] = useState(3);
-  const [feedbackEffort, setFeedbackEffort] = useState(3);
-  const [feedbackFatigue, setFeedbackFatigue] = useState(3);
-  const [feedbackSoreness, setFeedbackSoreness] = useState(3);
-  const [feedbackMood, setFeedbackMood] = useState(3);
-  const [feedbackConfidence, setFeedbackConfidence] = useState(3);
-  const [feedbackNotes, setFeedbackNotes] = useState('');
-  const feedbackScoreFields: FeedbackScoreField[] = [
-    {
-      label: 'Adherence to plan',
-      value: feedbackAdherence,
-      setValue: setFeedbackAdherence,
-    },
-    {label: 'Perceived effort', value: feedbackEffort, setValue: setFeedbackEffort},
-    {label: 'Fatigue now', value: feedbackFatigue, setValue: setFeedbackFatigue},
-    {label: 'Soreness now', value: feedbackSoreness, setValue: setFeedbackSoreness},
-    {label: 'Mood/readiness', value: feedbackMood, setValue: setFeedbackMood},
-    {
-      label: 'Confidence',
-      value: feedbackConfidence,
-      setValue: setFeedbackConfidence,
-    },
-  ];
+  const regenerateDialogRef = useRef<HTMLDivElement>(null);
+  const feedbackDialogRef = useRef<HTMLDivElement>(null);
+  const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const activePlanPreferences = useMemo(
     () => extractPreferencesFromPlanContent(activePlan?.content),
     [activePlan?.content],
@@ -507,6 +495,23 @@ const WeeklyPlan = () => {
     () => stripPlanMetaFromContent(activePlan?.content),
     [activePlan?.content],
   );
+  const weekAtGlance = useMemo(() => {
+    if (!activePlan) return null;
+    const runDays = activePlan.sessions.filter((session) => !!session.run).length;
+    const physioDays = activePlan.sessions.filter((session) => !!session.physio).length;
+    const restDays = activePlan.sessions.filter(
+      (session) => !session.run && !session.physio,
+    ).length;
+    const hardRunDays = activePlan.sessions.filter((session) =>
+      isHardSessionType(session.run?.type),
+    ).length;
+    return {
+      runDays,
+      physioDays,
+      restDays,
+      hardRunDays,
+    };
+  }, [activePlan]);
 
   const blockBannerData = useMemo(() => {
     if (!activeBlock || !activePlan?.blockId) return null;
@@ -528,6 +533,7 @@ const WeeklyPlan = () => {
   };
 
   const handleOpenRegenerate = () => {
+    modalReturnFocusRef.current = document.activeElement as HTMLElement;
     const currentMonday = getCurrentMonday();
     const nextMonday = getNextMonday();
     const defaultSelection: 'current' | 'next' =
@@ -535,6 +541,7 @@ const WeeklyPlan = () => {
     setTargetWeekSelection(defaultSelection);
     setTargetWeekStart(defaultSelection === 'next' ? nextMonday : currentMonday);
     setRegenerationMode('full');
+    setAdvancedRegenerationOpen(false);
     setRegenerationPreferences(activePlanPreferences || preferences || '');
     setStrategySelectionMode(settings.strategySelectionMode ?? 'auto');
     setStrategyPreset(settings.strategyPreset ?? 'polarized_80_20');
@@ -543,6 +550,12 @@ const WeeklyPlan = () => {
     );
     setRegenerateOpen(true);
   };
+
+  const handleCloseRegenerate = useCallback(() => {
+    if (isGenerating) return;
+    setRegenerateOpen(false);
+    setTimeout(() => modalReturnFocusRef.current?.focus(), 0);
+  }, [isGenerating]);
 
   const handleSelectCurrentWeek = () => {
     setTargetWeekSelection('current');
@@ -566,7 +579,7 @@ const WeeklyPlan = () => {
       strategyPreset,
       optimizationPriority,
     });
-    setRegenerateOpen(false);
+    handleCloseRegenerate();
   };
 
   const handleToggleFullPlan = () => {
@@ -578,28 +591,97 @@ const WeeklyPlan = () => {
   };
 
   const handleOpenFeedback = () => {
-    setFeedbackAdherence(previousWeekFeedback?.adherence ?? 3);
-    setFeedbackEffort(previousWeekFeedback?.effort ?? 3);
-    setFeedbackFatigue(previousWeekFeedback?.fatigue ?? 3);
-    setFeedbackSoreness(previousWeekFeedback?.soreness ?? 3);
-    setFeedbackMood(previousWeekFeedback?.mood ?? 3);
-    setFeedbackConfidence(previousWeekFeedback?.confidence ?? 3);
-    setFeedbackNotes(previousWeekFeedback?.notes ?? '');
+    modalReturnFocusRef.current = document.activeElement as HTMLElement;
     setFeedbackOpen(true);
   };
 
-  const handleSubmitFeedback = async () => {
-    await submitPreviousWeekFeedback({
-      adherence: feedbackAdherence,
-      effort: feedbackEffort,
-      fatigue: feedbackFatigue,
-      soreness: feedbackSoreness,
-      mood: feedbackMood,
-      confidence: feedbackConfidence,
-      notes: feedbackNotes,
-    });
+  const handleCloseFeedback = useCallback(() => {
+    if (isSavingPreviousWeekFeedback) return;
     setFeedbackOpen(false);
-  };
+    setTimeout(() => modalReturnFocusRef.current?.focus(), 0);
+  }, [isSavingPreviousWeekFeedback]);
+
+  useEffect(() => {
+    if (!regenerateOpen || !regenerateDialogRef.current) return;
+    const container = regenerateDialogRef.current;
+    const focusables = Array.from(
+      container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    );
+    (focusables[0] ?? container).focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (isGenerating) return;
+        handleCloseRegenerate();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = Array.from(
+        container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      );
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [regenerateOpen, handleCloseRegenerate, isGenerating]);
+
+  useEffect(() => {
+    if (!feedbackOpen || !feedbackDialogRef.current) return;
+    const container = feedbackDialogRef.current;
+    const focusables = Array.from(
+      container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    );
+    (focusables[0] ?? container).focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (isSavingPreviousWeekFeedback) return;
+        handleCloseFeedback();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = Array.from(
+        container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      );
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [feedbackOpen, handleCloseFeedback, isSavingPreviousWeekFeedback]);
+
+  useEffect(() => {
+    if (!regenerateOpen && !feedbackOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+    };
+  }, [regenerateOpen, feedbackOpen]);
 
   if (isLoading) {
     return (
@@ -622,24 +704,7 @@ const WeeklyPlan = () => {
       </h1>
 
       {lastError && (
-        <div className='border-3 border-border bg-destructive/10 text-destructive shadow-neo-sm p-3 space-y-2'>
-          <div className='flex items-start gap-2'>
-            <AlertCircle className='h-4 w-4 shrink-0 mt-0.5' />
-            <div className='space-y-1'>
-              <p className='text-sm font-black'>{lastError.error}</p>
-              {lastError.recoveryActions.length > 0 && (
-                <p className='text-xs font-medium'>
-                  Try: {lastError.recoveryActions.join(' · ')}
-                </p>
-              )}
-              {lastError.traceId && (
-                <p className='text-[10px] font-bold uppercase tracking-wider'>
-                  Trace: {lastError.traceId}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
+        <AiErrorBanner error={lastError} />
       )}
 
       {/* Training block context banner */}
@@ -653,11 +718,25 @@ const WeeklyPlan = () => {
       )}
 
       {regenerateOpen && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
-          <div className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-5 space-y-4'>
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'
+          onPointerDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            handleCloseRegenerate();
+          }}
+        >
+          <div
+            ref={regenerateDialogRef}
+            role='dialog'
+            aria-modal='true'
+            aria-labelledby='weekly-plan-regenerate-title'
+            aria-busy={isGenerating}
+            tabIndex={-1}
+            className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-4 md:p-5 space-y-4'
+          >
             <div className='flex items-start justify-between gap-3'>
               <div className='space-y-1'>
-                <h3 className='font-black text-base uppercase tracking-wider'>
+                <h3 id='weekly-plan-regenerate-title' className='font-black text-base uppercase tracking-wider'>
                   Regenerate Weekly Plan
                 </h3>
                 <p className='text-xs text-muted-foreground font-medium'>
@@ -665,10 +744,11 @@ const WeeklyPlan = () => {
                 </p>
               </div>
               <button
-                onClick={() => setRegenerateOpen(false)}
+                onClick={handleCloseRegenerate}
+                disabled={isGenerating}
                 tabIndex={0}
                 aria-label='Close regenerate dialog'
-                className='p-1.5 border-2 border-border bg-background hover:bg-muted'
+                className='p-1.5 border-2 border-border bg-background hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background'
               >
                 <X className='h-3.5 w-3.5' />
               </button>
@@ -676,7 +756,47 @@ const WeeklyPlan = () => {
 
             <div className='space-y-2'>
               <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                Mode
+                Quick setup
+              </label>
+              <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
+                <button
+                  onClick={handleSelectCurrentWeek}
+                  tabIndex={0}
+                  aria-label='Use current week'
+                  className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
+                    targetWeekSelection === 'current'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-background hover:bg-muted'
+                  }`}
+                >
+                  Current Week
+                </button>
+                <button
+                  onClick={handleSelectNextWeek}
+                  tabIndex={0}
+                  aria-label='Use next week'
+                  className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
+                    targetWeekSelection === 'next'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-background hover:bg-muted'
+                  }`}
+                >
+                  Next Week
+                </button>
+              </div>
+              <div
+                aria-label='Selected target week'
+                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium'
+              >
+                {targetWeekStart
+                  ? `${formatWeekRange(targetWeekStart)} (${targetWeekStart})`
+                  : 'Select a week'}
+              </div>
+            </div>
+
+            <div className='space-y-2'>
+              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                Regeneration mode
               </label>
               <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
                 <button
@@ -701,100 +821,104 @@ const WeeklyPlan = () => {
                       : 'bg-background hover:bg-muted'
                   }`}
                 >
-                  Remaining days (uses completed activities)
+                  Remaining days only
                 </button>
               </div>
             </div>
 
-            <div className='space-y-2'>
-              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                Strategy
-              </label>
-              <select
-                value={
-                  strategySelectionMode === 'auto' ? 'auto' : strategyPreset
-                }
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === 'auto') {
-                    setStrategySelectionMode('auto');
-                    return;
-                  }
-                  setStrategySelectionMode('preset');
-                  setStrategyPreset(value as TrainingStrategyPreset);
-                }}
-                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
-                aria-label='Select strategy'
-              >
-                <option value='auto'>{AUTO_STRATEGY_LABEL}</option>
-                {Object.entries(STRATEGY_PRESET_LABELS).map(([id, label]) => (
-                  <option key={id} value={id}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <p className='text-xs text-muted-foreground font-medium'>
-                {strategySelectionMode === 'auto'
-                  ? describeAutoStrategySelection()
-                  : describeStrategyPreset(strategyPreset)}
-              </p>
-            </div>
-
-            <div className='space-y-2'>
-              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                Optimization Priority
-              </label>
-              <select
-                value={optimizationPriority}
-                onChange={(e) =>
-                  setOptimizationPriority(
-                    e.target.value as OptimizationPriority,
-                  )
-                }
-                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
-                aria-label='Select optimization priority'
-              >
-                {Object.entries(OPTIMIZATION_PRIORITY_LABELS).map(
-                  ([id, label]) => (
-                    <option key={id} value={id}>
-                      {label}
-                    </option>
-                  ),
-                )}
-              </select>
-            </div>
-
-            <div className='space-y-2'>
-              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                Target Week (Monday)
-              </label>
-              <div
-                aria-label='Selected target week'
-                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium'
-              >
-                {targetWeekStart ? `${formatWeekRange(targetWeekStart)} (${targetWeekStart})` : 'Select a week'}
-              </div>
-              <p className='text-[11px] text-muted-foreground font-medium'>
-                Choose either current or next week.
-              </p>
-            </div>
-
-            <div className='space-y-2'>
-              <label
-                htmlFor='regenerate-preferences'
-                className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'
-              >
-                Preferences
-              </label>
-              <textarea
-                id='regenerate-preferences'
-                value={regenerationPreferences}
-                onChange={(e) => setRegenerationPreferences(e.target.value)}
-                rows={3}
-                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none'
-                placeholder='Add weekly constraints/preferences for this plan generation'
+            <button
+              onClick={() => setAdvancedRegenerationOpen((prev) => !prev)}
+              tabIndex={0}
+              aria-label='Toggle advanced regeneration options'
+              className='w-full flex items-center justify-between px-3 py-2 border-2 border-border bg-muted/40 hover:bg-muted text-xs font-black uppercase tracking-wider'
+            >
+              <span className='inline-flex items-center gap-1.5'>
+                <SlidersHorizontal className='h-3.5 w-3.5' />
+                Advanced options
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${advancedRegenerationOpen ? 'rotate-180' : ''}`}
               />
-            </div>
+            </button>
+
+            {advancedRegenerationOpen && (
+              <div className='space-y-3 border-2 border-border bg-muted/30 p-3'>
+                <div className='space-y-2'>
+                  <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                    Strategy
+                  </label>
+                  <select
+                    value={
+                      strategySelectionMode === 'auto' ? 'auto' : strategyPreset
+                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === 'auto') {
+                        setStrategySelectionMode('auto');
+                        return;
+                      }
+                      setStrategySelectionMode('preset');
+                      setStrategyPreset(value as TrainingStrategyPreset);
+                    }}
+                    className='w-full bg-background border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
+                    aria-label='Select strategy'
+                  >
+                    <option value='auto'>{AUTO_STRATEGY_LABEL}</option>
+                    {Object.entries(STRATEGY_PRESET_LABELS).map(([id, label]) => (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className='text-xs text-muted-foreground font-medium'>
+                    {strategySelectionMode === 'auto'
+                      ? describeAutoStrategySelection()
+                      : describeStrategyPreset(strategyPreset)}
+                  </p>
+                </div>
+
+                <div className='space-y-2'>
+                  <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                    Optimization Priority
+                  </label>
+                  <select
+                    value={optimizationPriority}
+                    onChange={(e) =>
+                      setOptimizationPriority(
+                        e.target.value as OptimizationPriority,
+                      )
+                    }
+                    className='w-full bg-background border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
+                    aria-label='Select optimization priority'
+                  >
+                    {Object.entries(OPTIMIZATION_PRIORITY_LABELS).map(
+                      ([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+
+                <div className='space-y-2'>
+                  <label
+                    htmlFor='regenerate-preferences'
+                    className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'
+                  >
+                    Preferences
+                  </label>
+                  <textarea
+                    id='regenerate-preferences'
+                    value={regenerationPreferences}
+                    onChange={(e) => setRegenerationPreferences(e.target.value)}
+                    rows={3}
+                    className='w-full bg-background border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none'
+                    placeholder='Add weekly constraints/preferences for this plan generation'
+                  />
+                </div>
+              </div>
+            )}
 
             <div className='flex flex-wrap gap-2'>
               <button
@@ -805,31 +929,16 @@ const WeeklyPlan = () => {
                 className='inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all disabled:opacity-50 disabled:pointer-events-none'
               >
                 {isGenerating ? <NeoLoader size='sm' /> : <Sparkles className='h-3.5 w-3.5' />}
-                Generate
+                Generate Plan
               </button>
               <button
-                onClick={handleSelectCurrentWeek}
+                onClick={handleCloseRegenerate}
+                disabled={isGenerating}
                 tabIndex={0}
-                aria-label='Use current week'
-                className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
-                  targetWeekSelection === 'current'
-                    ? 'bg-primary/10 text-primary'
-                    : 'bg-background hover:bg-muted'
-                }`}
+                aria-label='Cancel plan regeneration'
+                className='px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background'
               >
-                Current Week
-              </button>
-              <button
-                onClick={handleSelectNextWeek}
-                tabIndex={0}
-                aria-label='Use next week'
-                className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
-                  targetWeekSelection === 'next'
-                    ? 'bg-primary/10 text-primary'
-                    : 'bg-background hover:bg-muted'
-                }`}
-              >
-                Next Week
+                Cancel
               </button>
             </div>
           </div>
@@ -837,11 +946,25 @@ const WeeklyPlan = () => {
       )}
 
       {feedbackOpen && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
-          <div className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-5 space-y-4'>
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'
+          onPointerDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            handleCloseFeedback();
+          }}
+        >
+          <div
+            ref={feedbackDialogRef}
+            role='dialog'
+            aria-modal='true'
+            aria-labelledby='weekly-plan-feedback-title'
+            aria-busy={isSavingPreviousWeekFeedback}
+            tabIndex={-1}
+            className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-4 md:p-5 space-y-4'
+          >
             <div className='flex items-start justify-between gap-3'>
               <div className='space-y-1'>
-                <h3 className='font-black text-base uppercase tracking-wider'>
+                <h3 id='weekly-plan-feedback-title' className='font-black text-base uppercase tracking-wider'>
                   Last Week Reflection
                 </h3>
                 <p className='text-xs text-muted-foreground font-medium'>
@@ -849,77 +972,27 @@ const WeeklyPlan = () => {
                 </p>
               </div>
               <button
-                onClick={() => setFeedbackOpen(false)}
+                onClick={handleCloseFeedback}
+                disabled={isSavingPreviousWeekFeedback}
                 tabIndex={0}
                 aria-label='Close feedback dialog'
-                className='p-1.5 border-2 border-border bg-background hover:bg-muted'
+                className='p-1.5 border-2 border-border bg-background hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background'
               >
                 <X className='h-3.5 w-3.5' />
               </button>
             </div>
-
-            <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
-              {feedbackScoreFields.map((field) => (
-                <label key={field.label} className='space-y-1'>
-                  <span className='text-[10px] uppercase tracking-wider font-black text-muted-foreground'>
-                    {field.label}
-                  </span>
-                  <select
-                    value={String(field.value)}
-                    onChange={(e) => field.setValue(Number(e.target.value))}
-                    className='w-full border-2 border-border bg-muted/50 px-2 py-1.5 text-sm font-medium'
-                  >
-                    <option value='1'>1</option>
-                    <option value='2'>2</option>
-                    <option value='3'>3</option>
-                    <option value='4'>4</option>
-                    <option value='5'>5</option>
-                  </select>
-                </label>
-              ))}
-            </div>
-
-            <div className='space-y-1'>
-              <label
-                htmlFor='weekly-feedback-notes'
-                className='text-[10px] uppercase tracking-wider font-black text-muted-foreground'
-              >
-                Notes (optional)
-              </label>
-              <textarea
-                id='weekly-feedback-notes'
-                value={feedbackNotes}
-                onChange={(e) => setFeedbackNotes(e.target.value)}
-                rows={3}
-                className='w-full border-2 border-border bg-muted/50 px-2 py-1.5 text-sm font-medium resize-none'
-                placeholder='How did training feel? What was hard/easy?'
-              />
-            </div>
-
-            <div className='flex flex-wrap gap-2'>
-              <button
-                onClick={handleSubmitFeedback}
-                disabled={isSavingPreviousWeekFeedback}
-                tabIndex={0}
-                aria-label='Submit weekly reflection'
-                className='inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all disabled:opacity-50 disabled:pointer-events-none'
-              >
-                {isSavingPreviousWeekFeedback ? (
-                  <NeoLoader size='sm' />
-                ) : (
-                  <ClipboardCheck className='h-3.5 w-3.5' />
-                )}
-                Save reflection
-              </button>
-              <button
-                onClick={() => setFeedbackOpen(false)}
-                tabIndex={0}
-                aria-label='Cancel feedback'
-                className='inline-flex items-center gap-1.5 px-4 py-2 font-black text-[10px] uppercase tracking-wider border-3 border-border bg-background hover:bg-muted'
-              >
-                Cancel
-              </button>
-            </div>
+            <WeeklyReflectionForm
+              weekStart={previousWeekStart}
+              prompt={`Share how training went for week starting ${previousWeekStart}.`}
+              initialValues={previousWeekFeedback}
+              isSubmitting={isSavingPreviousWeekFeedback}
+              submitLabel='Save reflection'
+              onSubmit={async (values) => {
+                await submitPreviousWeekFeedback(values);
+                handleCloseFeedback();
+              }}
+              onCancel={handleCloseFeedback}
+            />
           </div>
         </div>
       )}
@@ -997,6 +1070,48 @@ const WeeklyPlan = () => {
               </span>
             </div>
           </div>
+
+          {weekAtGlance && (
+            <div className='grid grid-cols-1 md:grid-cols-3 gap-3'>
+              <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-1'>
+                <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                  This week at a glance
+                </p>
+                <p className='text-sm font-medium'>
+                  {weekAtGlance.runDays} runs · {weekAtGlance.physioDays} physio ·{' '}
+                  {weekAtGlance.restDays} rest
+                </p>
+                <p className='text-xs text-muted-foreground font-medium'>
+                  Hard run days: {weekAtGlance.hardRunDays}
+                </p>
+              </div>
+              <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-1'>
+                <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                  Strategy
+                </p>
+                <p className='text-sm font-medium'>
+                  {activePlanStrategyMeta?.strategyLabel ?? 'Not specified'}
+                </p>
+                <p className='text-xs text-muted-foreground font-medium'>
+                  Priority:{' '}
+                  {activePlanStrategyMeta?.optimizationPriorityLabel ?? 'Balanced progression'}
+                </p>
+              </div>
+              <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-1'>
+                <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                  Risk and tradeoff
+                </p>
+                <p className='text-sm font-medium'>
+                  {weekAtGlance.hardRunDays >= 3
+                    ? 'Higher load week'
+                    : 'Conservative load week'}
+                </p>
+                <p className='text-xs text-muted-foreground font-medium'>
+                  Regenerate in advanced mode to bias for recovery or performance.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Preferences used to generate this plan */}
           <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>

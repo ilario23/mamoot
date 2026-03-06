@@ -2,6 +2,8 @@
 
 import dynamic from 'next/dynamic';
 import {useEffect, useState} from 'react';
+import Link from 'next/link';
+import {ClipboardList, MessageSquare} from 'lucide-react';
 import StatCards from '@/components/dashboard/StatCards';
 import CollapsibleSection from '@/components/ui/collapsible-section';
 import {NeoLoader} from '@/components/ui/neo-loader';
@@ -84,6 +86,33 @@ const Dashboard = () => {
       <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
         Dashboard
       </h1>
+
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+        <Link
+          href='/weekly-plan'
+          tabIndex={0}
+          aria-label='Open weekly plan workflow'
+          className='border-3 border-border bg-background shadow-neo-sm hover:shadow-neo p-4 space-y-1'
+        >
+          <span className='inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-primary'>
+            <ClipboardList className='h-3.5 w-3.5' />
+            Weekly loop
+          </span>
+          <p className='text-sm font-bold'>Review last week and regenerate this week</p>
+        </Link>
+        <Link
+          href='/ai-chat'
+          tabIndex={0}
+          aria-label='Open AI team chat'
+          className='border-3 border-border bg-background shadow-neo-sm hover:shadow-neo p-4 space-y-1'
+        >
+          <span className='inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-primary'>
+            <MessageSquare className='h-3.5 w-3.5' />
+            AI team
+          </span>
+          <p className='text-sm font-bold'>Ask coach, physio, and nutrition in one place</p>
+        </Link>
+      </div>
 
       {/* Row 1: Stat Cards (6 cards) — always visible, mobile toggle inside */}
       <StatCards />

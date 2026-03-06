@@ -1,6 +1,6 @@
 'use client';
 
-import {useState, useEffect} from 'react';
+import {useState, useMemo} from 'react';
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 import {Popover, PopoverTrigger, PopoverContent} from '@/components/ui/popover';
@@ -30,10 +30,6 @@ const BottomNavLink = ({item, pathname}: {item: NavItem; pathname: string}) => {
 const BottomNavGroup = ({group, pathname}: {group: NavGroup; pathname: string}) => {
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
-
   const activeChild = group.children.find((child) =>
     isItemActive(child.href, pathname),
   );
@@ -43,7 +39,7 @@ const BottomNavGroup = ({group, pathname}: {group: NavGroup; pathname: string}) 
     : 'bg-background';
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover key={pathname} open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -86,13 +82,40 @@ const BottomNavGroup = ({group, pathname}: {group: NavGroup; pathname: string}) 
 
 const BottomNav = () => {
   const pathname = usePathname();
+  const mobileEntries = useMemo(() => {
+    const directHome = navEntries.find(
+      (entry): entry is NavItem => !isNavGroup(entry) && entry.href === '/',
+    );
+    const directActivities = navEntries.find(
+      (entry): entry is NavItem =>
+        !isNavGroup(entry) && entry.href === '/activities',
+    );
+    const aiPlans = navEntries.find(
+      (entry): entry is NavGroup => isNavGroup(entry) && entry.id === 'ai-plans',
+    );
+    const more = navEntries.find(
+      (entry): entry is NavGroup => isNavGroup(entry) && entry.id === 'more',
+    );
+    const quickAiChat = aiPlans?.children.find((item) => item.href === '/ai-chat');
+    const quickWeeklyPlan = aiPlans?.children.find(
+      (item) => item.href === '/weekly-plan',
+    );
+
+    return [
+      directHome,
+      directActivities,
+      quickAiChat,
+      quickWeeklyPlan,
+      more,
+    ].filter(Boolean) as Array<NavItem | NavGroup>;
+  }, []);
 
   return (
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 flex overflow-x-auto scrollbar-hide border-t-3 border-border bg-background z-40 pb-safe"
       aria-label="Main navigation"
     >
-      {navEntries.map((entry) => {
+      {mobileEntries.map((entry) => {
         if (isNavGroup(entry)) {
           return (
             <BottomNavGroup
