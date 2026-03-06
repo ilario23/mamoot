@@ -8,6 +8,7 @@ on:
       - 'scripts/check-prompt-contracts.mjs'
       - 'scripts/check-prompt-scenarios.mjs'
       - 'scripts/ai-eval-gates.mjs'
+      - 'scripts/check-multi-agent-telemetry.mjs'
       - 'scripts/run-cohort-replay-benchmark.mjs'
       - 'scripts/prompt-behavior-scenarios.json'
       - 'docs/AI_CONTEXT.md'

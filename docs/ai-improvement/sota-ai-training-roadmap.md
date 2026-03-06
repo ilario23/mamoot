@@ -235,3 +235,5 @@ flowchart TD
 
 Note: during implementation, convert this starting set into a pinned bibliography file with exact citations (DOI/PMID/arXiv IDs) and evidence-quality grading.
 
+See also: `docs/ai-improvement/multi-agent-interaction-patterns.md` for bounded production interaction patterns chosen for this codebase.
+

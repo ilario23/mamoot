@@ -10,6 +10,7 @@ export type AiErrorCode =
   | 'adaptation_type_required'
   | 'source_plan_not_found'
   | 'source_block_not_found'
+  | 'multi_agent_runtime_budget_exceeded'
   | 'generation_failed';
 
 export interface AiErrorPayload {
@@ -37,6 +38,11 @@ const AI_ERROR_RECOVERY_ACTIONS: Record<AiErrorCode, string[]> = {
   adaptation_type_required: ['Select adaptation mode', 'Retry adaptation'],
   source_plan_not_found: ['Generate full weekly plan first', 'Retry remaining-days mode'],
   source_block_not_found: ['Create a training block first', 'Retry adaptation'],
+  multi_agent_runtime_budget_exceeded: [
+    'Retry generation',
+    'Reduce constraints and retry',
+    'Try again in a new request',
+  ],
   generation_failed: ['Retry generation', 'Try another model', 'Use x-trace-id for support'],
 };
 

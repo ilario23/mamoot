@@ -8,6 +8,11 @@ import {
   weeklyPlans,
   trainingFeedback,
   athleteReadinessSignals,
+  chatSessions,
+  orchestratorGoals,
+  orchestratorPlanItems,
+  orchestratorBlockers,
+  orchestratorHandoffs,
 } from '@/db/schema';
 import {eq, desc, and, ne, isNull} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
@@ -51,6 +56,12 @@ import {
 } from '@/lib/planSemanticValidators';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
+import {
+  resolveMultiAgentRuntimeConfig,
+  resolveWeeklyCoachPhysioConflicts,
+  summarizeConflictResolution,
+  type WeeklyAgentConflict,
+} from '@/lib/multiAgentContracts';
 
 export const maxDuration = 120;
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
@@ -155,6 +166,8 @@ export async function POST(req: Request) {
     strategySelectionMode?: StrategySelectionMode;
     strategyPreset?: TrainingStrategyPreset;
     optimizationPriority?: OptimizationPriority;
+    orchestratorSessionId?: string;
+    useMultiAgent?: boolean;
   };
   const {
     athleteId,
@@ -167,6 +180,8 @@ export async function POST(req: Request) {
     strategySelectionMode,
     strategyPreset,
     optimizationPriority,
+    orchestratorSessionId,
+    useMultiAgent,
   } = parsedData;
 
   if (!athleteId) {
@@ -178,6 +193,9 @@ export async function POST(req: Request) {
 
   const mode = generationMode ?? 'full';
   const todayIso = today ?? new Date().toISOString().slice(0, 10);
+  const multiAgentConfig = resolveMultiAgentRuntimeConfig();
+  const multiAgentEnabled =
+    multiAgentConfig.enabled && (useMultiAgent ?? true);
   const model = getModel(clientModel);
   const resolvedModel =
     clientModel && ALLOWED_MODELS[clientModel]
@@ -193,7 +211,10 @@ export async function POST(req: Request) {
     model: resolvedModel,
     persona: 'pipeline',
     sessionId: null,
+    multiAgentEnabled,
+    multiAgentConfig,
   });
+  const requestStartedAt = Date.now();
 
   try {
     // Step 1: Load context
@@ -219,6 +240,30 @@ export async function POST(req: Request) {
       ?? (hasActiveCurrentWeekPlan ? getNextMonday() : currentMonday);
     const weekEnd = getSunday(weekStart);
     const weekDates = getDatesForWeek(weekStart);
+    const elapsedMs = () => Date.now() - requestStartedAt;
+    const hasRuntimeBudget = () => elapsedMs() < multiAgentConfig.maxRuntimeMs;
+    let specialistTurnsUsed = 0;
+    let repairTurnsUsed = 0;
+    let roundCount = 0;
+    let multiAgentConflicts: WeeklyAgentConflict[] = [];
+    let repairApplied = false;
+    let conflictSummary = 'No coach/physio conflicts detected.';
+
+    const resolveOrchestratorSessionId = async (): Promise<string | null> => {
+      if (orchestratorSessionId) return orchestratorSessionId;
+      const latestOrchestratorSessions = await db
+        .select()
+        .from(chatSessions)
+        .where(
+          and(
+            eq(chatSessions.athleteId, athleteId),
+            eq(chatSessions.persona, 'orchestrator'),
+          ),
+        )
+        .orderBy(desc(chatSessions.updatedAt))
+        .limit(1);
+      return latestOrchestratorSessions[0]?.id ?? null;
+    };
 
     console.log(`\n[WeeklyPlan] ========== Generating Plan ==========`);
     console.log(`[WeeklyPlan] Athlete: ${athleteId}`);
@@ -596,12 +641,17 @@ export async function POST(req: Request) {
       promptHash: promptHash(coachPrompt),
       mode,
     });
+    if (!hasRuntimeBudget()) {
+      throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_COACH');
+    }
     const coachObject = await generateObjectWithRetry<CoachWeekOutput>({
       model,
       schema: coachWeekOutputSchema,
       prompt: coachPrompt,
       semanticCheck: validateCoachWeekOutput,
     });
+    specialistTurnsUsed += 1;
+    roundCount += 1;
 
     const coachSessions = coachObject.sessions;
     console.log(`[WeeklyPlan] Coach produced ${coachSessions.length} sessions`);
@@ -628,6 +678,9 @@ export async function POST(req: Request) {
       promptHash: promptHash(physioPrompt),
       coachSessions: coachSessions.length,
     });
+    if (!hasRuntimeBudget()) {
+      throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_PHYSIO');
+    }
     const physioObject = await generateObjectWithRetry<PhysioWeekOutput>({
       model,
       schema: physioWeekOutputSchema,
@@ -635,9 +688,76 @@ export async function POST(req: Request) {
       semanticCheck: (candidate) =>
         validateCombinedWeekSemantics(coachObject, candidate),
     });
+    specialistTurnsUsed += 1;
+    roundCount += 1;
 
-    const physioSessions = physioObject.sessions;
+    let physioSessions = physioObject.sessions;
     console.log(`[WeeklyPlan] Physio produced ${physioSessions.length} sessions`);
+
+    if (multiAgentEnabled) {
+      const conflictResolution = resolveWeeklyCoachPhysioConflicts(
+        coachObject,
+        {sessions: physioSessions},
+      );
+      multiAgentConflicts = conflictResolution.conflicts;
+      conflictSummary = summarizeConflictResolution(conflictResolution.conflicts);
+      physioSessions = conflictResolution.resolvedPhysioSessions;
+      logAiTrace(trace, 'weekly_multi_agent_conflicts_checked', {
+        athleteId,
+        conflictCount: conflictResolution.conflicts.length,
+        highSeverity: conflictResolution.conflicts.filter(
+          (conflict) => conflict.severity === 'high',
+        ).length,
+        roundCount,
+        specialistTurnsUsed,
+        repairSuggested: conflictResolution.repairSuggested,
+      });
+
+      const canRepair =
+        conflictResolution.repairSuggested &&
+        multiAgentConfig.maxRepairTurns > 0 &&
+        repairTurnsUsed < multiAgentConfig.maxRepairTurns &&
+        roundCount < multiAgentConfig.maxRounds &&
+        hasRuntimeBudget();
+
+      if (canRepair) {
+        const conflictDigest = conflictResolution.conflicts
+          .map(
+            (conflict) =>
+              `- ${conflict.date}: ${conflict.rule} (${conflict.severity}) -> ${conflict.message}`,
+          )
+          .join('\n');
+        const repairPrompt = `${physioPrompt}\n\n## Deterministic Conflict Feedback\nYour previous proposal caused scheduling conflicts with coach load intent.\n${conflictDigest}\n\nRepair instructions:\n- Keep the same dates.\n- Resolve all high-severity conflicts.\n- Favor mobility/warmup/cooldown over heavy strength when uncertain.\n- Keep output concise and safe-first.`;
+        const repairedPhysioObject = await generateObjectWithRetry<PhysioWeekOutput>({
+          model,
+          schema: physioWeekOutputSchema,
+          prompt: repairPrompt,
+          semanticCheck: (candidate) =>
+            validateCombinedWeekSemantics(coachObject, candidate),
+        });
+        repairTurnsUsed += 1;
+        roundCount += 1;
+        repairApplied = true;
+        const postRepairResolution = resolveWeeklyCoachPhysioConflicts(
+          coachObject,
+          repairedPhysioObject,
+        );
+        physioSessions = postRepairResolution.resolvedPhysioSessions;
+        multiAgentConflicts = postRepairResolution.conflicts;
+        conflictSummary = summarizeConflictResolution(postRepairResolution.conflicts);
+        logAiTrace(trace, 'weekly_multi_agent_repair_applied', {
+          athleteId,
+          conflictCountAfterRepair: postRepairResolution.conflicts.length,
+          highSeverityAfterRepair: postRepairResolution.conflicts.filter(
+            (conflict) => conflict.severity === 'high',
+          ).length,
+          roundCount,
+          specialistTurnsUsed,
+          repairTurnsUsed,
+          elapsedMs: elapsedMs(),
+        });
+      }
+    }
 
     // Step 4: Merge by date
     const physioByDate = new Map(physioSessions.map((s) => [s.date, s]));
@@ -806,8 +926,17 @@ export async function POST(req: Request) {
     markdownLines.push(
       `- Risk level: ${riskIntelligence.riskLevel} (${riskIntelligence.riskScore}/100)`,
     );
+    markdownLines.push(
+      `- Multi-agent runtime: ${multiAgentEnabled ? 'enabled' : 'disabled'} (rounds: ${roundCount}, specialist turns: ${specialistTurnsUsed}, repairs: ${repairTurnsUsed})`,
+    );
+    markdownLines.push(`- Coordination summary: ${conflictSummary}`);
     for (const contributor of riskIntelligence.topContributors) {
       markdownLines.push(`- Contributor: ${contributor}`);
+    }
+    for (const conflict of multiAgentConflicts.slice(0, 3)) {
+      markdownLines.push(
+        `- Conflict resolved: ${conflict.date} ${conflict.rule} (${conflict.severity}) -> ${conflict.action}`,
+      );
     }
     for (const action of riskIntelligence.recommendedActions) {
       markdownLines.push(`- Mitigation: ${action}`);
@@ -869,6 +998,91 @@ export async function POST(req: Request) {
         ),
       );
 
+    const resolvedOrchestratorSessionId = await resolveOrchestratorSessionId();
+    if (resolvedOrchestratorSessionId) {
+      const now3 = Date.now();
+      const summaryPayload = JSON.stringify({
+        type: 'weekly_multi_agent_summary',
+        weekStart,
+        roundCount,
+        specialistTurnsUsed,
+        repairTurnsUsed,
+        repairApplied,
+        conflictCount: multiAgentConflicts.length,
+        highSeverityConflictCount: multiAgentConflicts.filter(
+          (conflict) => conflict.severity === 'high',
+        ).length,
+        conflictSummary,
+      });
+      await db.insert(orchestratorPlanItems).values({
+        id: crypto.randomUUID(),
+        athleteId,
+        sessionId: resolvedOrchestratorSessionId,
+        title: `Weekly plan generated (${weekStart})`,
+        detail: summaryPayload,
+        status: 'done',
+        ownerPersona: 'coach',
+        dueDate: weekEnd,
+        createdAt: now3,
+        updatedAt: now3,
+      });
+
+      await db.insert(orchestratorHandoffs).values({
+        id: crypto.randomUUID(),
+        athleteId,
+        sessionId: resolvedOrchestratorSessionId,
+        targetPersona: 'physio',
+        title: `Weekly coordination review (${weekStart})`,
+        detail: summaryPayload,
+        status: repairApplied ? 'accepted' : 'done',
+        createdAt: now3,
+        updatedAt: now3,
+      });
+
+      if (multiAgentConflicts.some((conflict) => conflict.severity === 'high')) {
+        await db.insert(orchestratorBlockers).values({
+          id: crypto.randomUUID(),
+          athleteId,
+          sessionId: resolvedOrchestratorSessionId,
+          title: `High-risk conflict flagged (${weekStart})`,
+          detail: JSON.stringify({
+            type: 'weekly_multi_agent_blocker',
+            conflicts: multiAgentConflicts.filter(
+              (conflict) => conflict.severity === 'high',
+            ),
+          }),
+          status: 'open',
+          linkedPlanItemId: null,
+          createdAt: now3,
+          updatedAt: now3,
+        });
+      }
+
+      const hasActiveGoal = await db
+        .select()
+        .from(orchestratorGoals)
+        .where(
+          and(
+            eq(orchestratorGoals.athleteId, athleteId),
+            eq(orchestratorGoals.sessionId, resolvedOrchestratorSessionId),
+            eq(orchestratorGoals.status, 'active'),
+          ),
+        )
+        .limit(1);
+      if (hasActiveGoal.length === 0) {
+        await db.insert(orchestratorGoals).values({
+          id: crypto.randomUUID(),
+          athleteId,
+          sessionId: resolvedOrchestratorSessionId,
+          title: `Maintain safe progression for week ${weekStart}`,
+          detail: summaryPayload,
+          status: 'active',
+          createdAt: now3,
+          updatedAt: now3,
+        });
+      }
+    }
+
     console.log(`[WeeklyPlan] Plan saved: ${planId}`);
     console.log(`[WeeklyPlan] ========================================\n`);
     logAiTrace(trace, 'request_finished', {
@@ -880,6 +1094,16 @@ export async function POST(req: Request) {
       weekStart,
       sessionCount: unifiedSessions.length,
       mode,
+      multiAgentEnabled,
+      roundCount,
+      specialistTurnsUsed,
+      repairTurnsUsed,
+      repairApplied,
+      conflictCount: multiAgentConflicts.length,
+      highSeverityConflictCount: multiAgentConflicts.filter(
+        (conflict) => conflict.severity === 'high',
+      ).length,
+      elapsedMs: elapsedMs(),
       inputTokens: null,
       outputTokens: null,
     });
@@ -899,6 +1123,16 @@ export async function POST(req: Request) {
       risk: riskIntelligence,
       digitalTwin: twinProfile,
       counterfactualRanking,
+      multiAgent: {
+        enabled: multiAgentEnabled,
+        roundCount,
+        specialistTurnsUsed,
+        repairTurnsUsed,
+        repairApplied,
+        conflictCount: multiAgentConflicts.length,
+        conflicts: multiAgentConflicts,
+        summary: conflictSummary,
+      },
       createdAt: now2,
     }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {
@@ -912,6 +1146,18 @@ export async function POST(req: Request) {
       outputTokens: null,
     });
     console.error('[WeeklyPlan] Error:', error);
+    if (
+      error instanceof Error &&
+      error.message.startsWith('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED')
+    ) {
+      return NextResponse.json(
+        createAiErrorPayload(
+          'multi_agent_runtime_budget_exceeded',
+          'Weekly planning exceeded the bounded runtime budget. Please retry with fewer constraints.',
+        ),
+        {status: 503, headers: {'x-trace-id': trace.traceId}},
+      );
+    }
     return NextResponse.json(
       createAiErrorPayload('generation_failed', 'Failed to generate weekly plan'),
       {status: 500, headers: {'x-trace-id': trace.traceId}},

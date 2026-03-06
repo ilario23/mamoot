@@ -4,13 +4,15 @@ import process from 'node:process';
 const SCENARIOS_PATH = new URL('./prompt-behavior-scenarios.json', import.meta.url);
 
 const threshold = {
-  minScenarioCount: 8,
+  minScenarioCount: 11,
   minReliabilityScore: 0.8,
 };
 const REQUIRED_IDS = new Set([
   'all-personas-followup-tool',
   'all-personas-confidence-policy',
   'all-personas-red-flag-refusal',
+  'orchestrator-bounded-multi-agent',
+  'orchestrator-structured-handoffs',
 ]);
 
 const run = async () => {

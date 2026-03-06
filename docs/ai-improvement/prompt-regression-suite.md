@@ -6,6 +6,8 @@ This project runs two deterministic AI prompt gates:
   - Validates baseline required prompt clauses.
 - `scripts/check-prompt-scenarios.mjs`
   - Validates scenario fixtures in `scripts/prompt-behavior-scenarios.json`.
+- `scripts/check-multi-agent-telemetry.mjs`
+  - Verifies weekly-plan and training-block routes expose multi-agent telemetry fields used by rollout gates.
 
 Both run in CI via `npm run test:ai-gates`.
 

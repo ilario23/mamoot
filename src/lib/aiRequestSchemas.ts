@@ -39,6 +39,8 @@ export const weeklyPlanRequestSchema = z.object({
   strategySelectionMode: z.enum(['auto', 'preset']).optional(),
   strategyPreset: z.string().optional(),
   optimizationPriority: z.string().optional(),
+  orchestratorSessionId: z.string().optional(),
+  useMultiAgent: z.boolean().optional(),
 });
 
 export const trainingBlockRequestSchema = z.object({
@@ -64,4 +66,6 @@ export const trainingBlockRequestSchema = z.object({
   strategySelectionMode: z.enum(['auto', 'preset']).optional(),
   strategyPreset: z.string().optional(),
   optimizationPriority: z.string().optional(),
+  orchestratorSessionId: z.string().optional(),
+  useMultiAgent: z.boolean().optional(),
 });

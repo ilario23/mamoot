@@ -83,5 +83,31 @@
     "mustInclude": [
       "If user asks for diagnosis/medication or presents red-flag symptoms, refuse safely and advise urgent professional care."
     ]
+  },
+  {
+    "id": "orchestrator-bounded-multi-agent",
+    "persona": "orchestrator",
+    "description": "Orchestrator enforces bounded delegation over open-ended execution",
+    "mustInclude": [
+      "You coordinate; specialists execute.",
+      "Keep each plan item small, action-oriented, and status-driven."
+    ]
+  },
+  {
+    "id": "orchestrator-structured-handoffs",
+    "persona": "orchestrator",
+    "description": "Orchestrator should use handoff tools for specialist collaboration",
+    "mustInclude": [
+      "createOrchestratorHandoff / updateOrchestratorHandoff",
+      "clear ownership (coach, nutritionist, physio)"
+    ]
+  },
+  {
+    "id": "shared-conservative-fallback",
+    "persona": "shared",
+    "description": "All personas keep conservative fallback when confidence is low",
+    "mustInclude": [
+      "If confidence is low because data is missing or uncertain, ask one clarifying question or provide a safe fallback."
+    ]
   }
 ]

@@ -885,6 +885,32 @@ const AITeamChat = () => {
       ).length,
     [orchestratorHandoffs],
   );
+  const recentCoordinationItems = useMemo(
+    () =>
+      orchestratorPlanItems
+        .slice()
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 3)
+        .map((item) => {
+          let coordinationSummary: string | null = null;
+          if (item.detail) {
+            try {
+              const parsed = JSON.parse(item.detail) as {summary?: string; conflictSummary?: string};
+              coordinationSummary = parsed.summary ?? parsed.conflictSummary ?? null;
+            } catch {
+              coordinationSummary = null;
+            }
+          }
+          return {
+            id: item.id,
+            title: item.title,
+            status: item.status,
+            ownerPersona: item.ownerPersona ?? 'unassigned',
+            summary: coordinationSummary,
+          };
+        }),
+    [orchestratorPlanItems],
+  );
 
   useEffect(() => {
     if (activePersona !== 'orchestrator') {
@@ -1088,6 +1114,32 @@ const AITeamChat = () => {
               : 'None'}
           </p>
         </div>
+      </div>
+      <div className='border-2 border-border p-2 bg-background'>
+        <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5'>
+          Coordination timeline
+        </p>
+        {recentCoordinationItems.length === 0 ? (
+          <p className='text-xs text-muted-foreground font-medium'>
+            No coordination events yet.
+          </p>
+        ) : (
+          <div className='space-y-1.5'>
+            {recentCoordinationItems.map((item) => (
+              <div key={item.id} className='border border-border/70 bg-muted/30 px-2 py-1.5'>
+                <div className='flex items-center justify-between gap-2'>
+                  <span className='text-xs font-bold truncate'>{item.title}</span>
+                  <span className='text-[10px] font-black uppercase tracking-wider text-muted-foreground'>
+                    {item.ownerPersona} · {item.status}
+                  </span>
+                </div>
+                {item.summary && (
+                  <p className='text-[11px] text-muted-foreground mt-1'>{item.summary}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
