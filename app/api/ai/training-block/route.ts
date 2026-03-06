@@ -5,6 +5,7 @@ import {
   activities as activitiesTable,
   userSettings,
   trainingBlocks,
+  athleteReadinessSignals,
 } from '@/db/schema';
 import {eq, desc, and, ne, isNull} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
@@ -14,6 +15,7 @@ import {
   calcACWRData,
   calcAdvancedMetricsData,
   getLatestMetricsSnapshot,
+  calcRiskIntelligence,
 } from '@/utils/trainingLoad';
 import {formatPace, formatDuration, type UserSettings} from '@/lib/activityModel';
 import type {WeekOutline} from '@/lib/cacheTypes';
@@ -31,6 +33,11 @@ import {
   type StrategySelectionMode,
   type TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
+import {
+  buildAthleteDigitalTwin,
+  rankCounterfactualStrategies,
+} from '@/lib/digitalTwin';
+import {calibratePriorityFromOutcomes} from '@/lib/calibration';
 import {trainingBlockRequestSchema} from '@/lib/aiRequestSchemas';
 import {generateObjectWithRetry} from '@/lib/aiGeneration';
 import {validateTrainingBlockWeekOutlines} from '@/lib/planSemanticValidators';
@@ -76,7 +83,7 @@ const getNextMonday = (): string => {
 const weeksUntil = (startIso: string, endIso: string): number => {
   const start = new Date(startIso);
   const end = new Date(endIso);
-  return Math.max(4, Math.round((end.getTime() - start.getTime()) / (7 * 86400000)));
+  return Math.max(4, Math.ceil((end.getTime() - start.getTime()) / (7 * 86400000)));
 };
 
 const STRATEGY_NOTE_PREFIX = '[Strategy] ';
@@ -257,13 +264,19 @@ export async function POST(req: Request) {
         );
       }
 
-      const [settingsRows, activityRows] = await Promise.all([
+      const [settingsRows, activityRows, readinessRows] = await Promise.all([
         db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
         db
           .select()
           .from(activitiesTable)
           .where(eq(activitiesTable.athleteId, athleteId))
           .orderBy(desc(activitiesTable.date)),
+        db
+          .select()
+          .from(athleteReadinessSignals)
+          .where(eq(athleteReadinessSignals.athleteId, athleteId))
+          .orderBy(desc(athleteReadinessSignals.date))
+          .limit(1),
       ]);
 
       const settings = settingsRows[0];
@@ -285,12 +298,10 @@ export async function POST(req: Request) {
       const startDate = sourceBlock.startDate;
       const now = new Date();
       const start = new Date(startDate);
+      const elapsedWeeks = Math.floor((now.getTime() - start.getTime()) / (7 * 86400000));
       const currentWeek = Math.max(
         1,
-        Math.min(
-          sourceBlock.totalWeeks,
-          Math.ceil((now.getTime() - start.getTime()) / (7 * 86400000)),
-        ),
+        Math.min(sourceBlock.totalWeeks, elapsedWeeks + 1),
       );
       const effectiveWeek = Math.max(1, effectiveFromWeek ?? currentWeek);
       const eventPriority = event?.priority ?? 'B';
@@ -331,13 +342,38 @@ export async function POST(req: Request) {
         resolvedStrategyMode === 'preset'
           ? strategyPreset ?? defaultPreset
           : strategyRecommendation.strategy;
-      const strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
+      const riskIntelligence = calcRiskIntelligence(latestSnapshot, {
+        sleepHours: readinessRows[0]?.sleepHours ?? null,
+        readinessScore: readinessRows[0]?.readinessScore ?? null,
+        sessionRpe: readinessRows[0]?.sessionRpe ?? null,
+      });
+      const twinProfile = buildAthleteDigitalTwin({
+        activities: allActivities,
+        risk: riskIntelligence,
+      });
+      const counterfactualRanking = rankCounterfactualStrategies({
+        twin: twinProfile,
+        risk: riskIntelligence,
+        optimizationPriority: calibratePriorityFromOutcomes({
+          risk: riskIntelligence,
+        }).recommendedPriority,
+      });
+      const effectivePriority = calibratePriorityFromOutcomes({
+        risk: riskIntelligence,
+      }).recommendedPriority;
+      const selectedPreset =
+        resolvedStrategyMode === 'auto' && counterfactualRanking.length > 0
+          ? counterfactualRanking[0].strategy
+          : resolvedPreset;
+      const strategyLabel = STRATEGY_PRESET_LABELS[selectedPreset];
       const strategyDescription = `${describeStrategyPreset(
-        resolvedPreset,
-      )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${strategyRecommendation.rationale}` : ''}`.trim();
-      const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
+        selectedPreset,
+      )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${counterfactualRanking[0]?.rationale ?? strategyRecommendation.rationale}` : ''}`.trim();
+      const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[effectivePriority];
       const strategyRationale =
-        resolvedStrategyMode === 'auto' ? strategyRecommendation.rationale : null;
+        resolvedStrategyMode === 'auto'
+          ? counterfactualRanking[0]?.rationale ?? strategyRecommendation.rationale
+          : null;
 
       const adaptationPrompt = `You are adapting an existing running training block while preserving history.
 
@@ -350,6 +386,8 @@ ${adaptationType === 'shift_target_date' ? `- New goal date requested: ${goalDat
 - Strategy to follow: ${strategyLabel}
 - Strategy intent: ${strategyDescription}
 - Optimization priority: ${priorityLabel}
+- Digital twin archetype: ${twinProfile.archetype}
+- Risk level: ${riskIntelligence.riskLevel} (${riskIntelligence.riskScore}/100)
 
 ## Existing Block (source of truth for past weeks)
 - Goal Event: ${sourceBlock.goalEvent}
@@ -453,6 +491,9 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         isActive: true,
         createdAt: nowMs,
         updatedAt: nowMs,
+        risk: riskIntelligence,
+        digitalTwin: twinProfile,
+        counterfactualRanking,
       }, {headers: {'x-trace-id': trace.traceId}});
     }
 
@@ -461,13 +502,19 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
     console.log(`[TrainingBlock] Goal: ${goalEvent} on ${goalDate}`);
     console.log(`[TrainingBlock] Weeks: ${totalWeeks}, starts ${startDate}`);
 
-    const [settingsRows, activityRows] = await Promise.all([
+      const [settingsRows, activityRows, readinessRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
       db
         .select()
         .from(activitiesTable)
         .where(eq(activitiesTable.athleteId, athleteId))
         .orderBy(desc(activitiesTable.date)),
+        db
+          .select()
+          .from(athleteReadinessSignals)
+          .where(eq(athleteReadinessSignals.athleteId, athleteId))
+          .orderBy(desc(athleteReadinessSignals.date))
+          .limit(1),
     ]);
 
     const settings = settingsRows[0];
@@ -554,13 +601,38 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
       resolvedStrategyMode === 'preset'
         ? strategyPreset ?? defaultPreset
         : strategyRecommendation.strategy;
-    const strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
+    const riskIntelligence = calcRiskIntelligence(latestSnapshot, {
+      sleepHours: readinessRows[0]?.sleepHours ?? null,
+      readinessScore: readinessRows[0]?.readinessScore ?? null,
+      sessionRpe: readinessRows[0]?.sessionRpe ?? null,
+    });
+    const twinProfile = buildAthleteDigitalTwin({
+      activities: allActivities,
+      risk: riskIntelligence,
+    });
+    const counterfactualRanking = rankCounterfactualStrategies({
+      twin: twinProfile,
+      risk: riskIntelligence,
+      optimizationPriority: calibratePriorityFromOutcomes({
+        risk: riskIntelligence,
+      }).recommendedPriority,
+    });
+    const effectivePriority = calibratePriorityFromOutcomes({
+      risk: riskIntelligence,
+    }).recommendedPriority;
+    const selectedPreset =
+      resolvedStrategyMode === 'auto' && counterfactualRanking.length > 0
+        ? counterfactualRanking[0].strategy
+        : resolvedPreset;
+    const strategyLabel = STRATEGY_PRESET_LABELS[selectedPreset];
     const strategyDescription = `${describeStrategyPreset(
-      resolvedPreset,
-    )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${strategyRecommendation.rationale}` : ''}`.trim();
-    const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
+      selectedPreset,
+    )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${counterfactualRanking[0]?.rationale ?? strategyRecommendation.rationale}` : ''}`.trim();
+    const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[effectivePriority];
     const strategyRationale =
-      resolvedStrategyMode === 'auto' ? strategyRecommendation.rationale : null;
+      resolvedStrategyMode === 'auto'
+        ? counterfactualRanking[0]?.rationale ?? strategyRecommendation.rationale
+        : null;
 
     let prText = 'No personal records available';
     const runActivities = recentActivities
@@ -586,6 +658,8 @@ ${settings?.trainingBalance != null ? `- Training Balance: ${settings.trainingBa
 - Strategy to follow: ${strategyLabel}
 - Strategy intent: ${strategyDescription}
 - Optimization priority: ${priorityLabel}
+- Digital twin archetype: ${twinProfile.archetype}
+- Risk level: ${riskIntelligence.riskLevel} (${riskIntelligence.riskScore}/100)
 - Current avg weekly volume: ${avgWeeklyKm.toFixed(1)} km
 
 ## Recent Training (last 4 weeks)
@@ -693,6 +767,9 @@ ${injuriesText}
       isActive: true,
       createdAt: nowMs,
       updatedAt: nowMs,
+      risk: riskIntelligence,
+      digitalTwin: twinProfile,
+      counterfactualRanking,
     }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {
     logAiTrace(trace, 'request_failed', {

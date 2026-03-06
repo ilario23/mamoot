@@ -18,7 +18,7 @@ Two complementary ways for context to reach the LLM:
 
 1. **Explicit (@-mentions)**: User types `@` in the chat input, selects a data category (and optionally a specific item), and a pill/tag appears. The referenced data is fetched client-side from Neon (via API routes) and sent alongside the message. The AI sees it immediately — no tool call needed.
 
-2. **Implicit (AI tools)**: The LLM has 10 retrieval tools it can call autonomously when it decides it needs data the user didn't explicitly reference. Tools execute server-side against Neon.
+2. **Implicit (AI tools)**: The LLM has retrieval tools it can call autonomously when it decides it needs data the user didn't explicitly reference. Tools execute server-side against Neon.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -82,7 +82,7 @@ Users type `@` in the chat input to attach specific data.
 
 ## Retrieval Tools (Implicit)
 
-The LLM has 10 read-only tools that query Neon server-side.
+The LLM has read-only tools that query Neon server-side.
 
 | Tool                  | Parameters            | Description                    | Neon Source                    |
 | --------------------- | --------------------- | ------------------------------ | ------------------------------ |
@@ -95,7 +95,8 @@ The LLM has 10 read-only tools that query Neon server-side.
 | `getFitnessMetrics`   | —                     | BF, LI, IT, ACWR               | `activities` + `user_settings` |
 | `getRecentActivities` | `count?` (default 10) | Last N activities              | `activities`                   |
 | `getGearStatus`       | —                     | Shoes with mileage             | `athlete_gear`                 |
-| `getCoachPlan`        | —                     | Active training plan           | `coach_plans`                  |
+| `getWeeklyPlan`       | —                     | Active unified weekly plan     | `weekly_plans`                 |
+| `getTrainingBlock`    | —                     | Active macro training block    | `training_blocks`              |
 
 All personas get all tools. The `shareTrainingPlan` tool (Coach only) is separate.
 
@@ -150,7 +151,7 @@ System prompt = persona + tool docs + memory + name/zones (~200 tokens)
 ```
 src/lib/
 ├── aiPrompts.ts          ← System prompts with context access docs
-├── aiRetrievalTools.ts   ← 10 retrieval tool definitions (server-side)
+├── aiRetrievalTools.ts   ← Retrieval tool definitions (server-side)
 ├── aiTools.ts            ← shareTrainingPlan schema (unchanged)
 ├── aiContext.ts           ← Legacy — kept for non-chat UI use
 └── mentionTypes.ts       ← @-mention category registry

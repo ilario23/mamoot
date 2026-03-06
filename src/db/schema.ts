@@ -180,6 +180,53 @@ export const trainingFeedback = pgTable('training_feedback', {
   updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
 });
 
+// ----- Athlete Readiness Signals -----
+// Daily readiness signals (optional inputs) used for adaptation/risk scoring.
+export const athleteReadinessSignals = pgTable('athlete_readiness_signals', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  /** ISO date, e.g. "2026-03-06" */
+  date: text('date').notNull(),
+  /** Optional daily HRV signal in ms (or vendor-normalized unit) */
+  hrv: real('hrv'),
+  /** Optional sleep duration in hours */
+  sleepHours: real('sleep_hours'),
+  /** Optional resting HR for the day */
+  restingHr: integer('resting_hr'),
+  /** Optional subjective readiness score, 1-5 */
+  readinessScore: integer('readiness_score'),
+  /** Optional session RPE score, 1-10 */
+  sessionRpe: integer('session_rpe'),
+  /** Optional completion/adherence score, 0-1 */
+  adherenceScore: real('adherence_score'),
+  /** Data source (manual, wearable vendor, sync) */
+  source: text('source').notNull().default('manual'),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
+// ----- AI Telemetry Events -----
+// Durable, queryable telemetry for AI quality, reliability and experiments.
+export const aiTelemetryEvents = pgTable('ai_telemetry_events', {
+  id: text('id').primaryKey(),
+  traceId: text('trace_id').notNull(),
+  route: text('route').notNull(),
+  event: text('event').notNull(),
+  athleteId: bigint('athlete_id', {mode: 'number'}),
+  sessionId: text('session_id'),
+  model: text('model'),
+  promptHash: text('prompt_hash'),
+  promptVersion: text('prompt_version'),
+  validatorStatus: text('validator_status'),
+  repairReason: text('repair_reason'),
+  latencyMs: integer('latency_ms'),
+  inputTokens: integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  costUsd: real('cost_usd'),
+  payload: jsonb('payload'),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+});
+
 // ----- Activity Labels -----
 // Maps to CachedActivityLabel (src/lib/db.ts)
 // Rule-based workout classification labels (e.g., "Intervals: 5x1000m @ 4:10/km Z4")

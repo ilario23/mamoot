@@ -7,7 +7,10 @@ on:
       - 'src/lib/promptContracts.ts'
       - 'scripts/check-prompt-contracts.mjs'
       - 'scripts/check-prompt-scenarios.mjs'
+      - 'scripts/ai-eval-gates.mjs'
+      - 'scripts/run-cohort-replay-benchmark.mjs'
       - 'scripts/prompt-behavior-scenarios.json'
+      - 'docs/AI_CONTEXT.md'
       - 'docs/ai-improvement/persona-behavior-contract.md'
       - 'docs/ai-improvement/prompt-regression-suite.md'
       - 'app/api/ai/**'
@@ -19,7 +22,7 @@ on:
       - master
 
 jobs:
-  prompt-contracts:
+  quality-gates:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,5 +37,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
       - name: Run AI gate checks
         run: npm run test:ai-gates
+
+      - name: Run AI evaluation gates
+        run: npm run test:ai-evals
+
+      - name: Run cohort replay benchmark
+        env:
+          BASELINE_ADHERENCE: '3.0'
+          CANDIDATE_ADHERENCE: '3.0'
+          BASELINE_SAFETY_INCIDENTS: '1'
+          CANDIDATE_SAFETY_INCIDENTS: '1'
+        run: npm run test:cohort-replay

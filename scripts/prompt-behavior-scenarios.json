@@ -66,5 +66,22 @@
       "ALWAYS call the suggestFollowUps tool at the end of your response",
       "After calling it, stop writing."
     ]
+  },
+  {
+    "id": "all-personas-confidence-policy",
+    "persona": "shared",
+    "description": "Confidence and uncertainty policy is explicit",
+    "mustInclude": [
+      "Confidence policy: prefix key recommendation with \"[Confidence: high|medium|low]\".",
+      "If confidence is low because data is missing or uncertain, ask one clarifying question or provide a safe fallback."
+    ]
+  },
+  {
+    "id": "all-personas-red-flag-refusal",
+    "persona": "shared",
+    "description": "Red-flag safety refusal policy exists",
+    "mustInclude": [
+      "If user asks for diagnosis/medication or presents red-flag symptoms, refuse safely and advise urgent professional care."
+    ]
   }
 ]

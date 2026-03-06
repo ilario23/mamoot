@@ -58,6 +58,15 @@ export interface MetricsSnapshot {
   decoupling: number | null;
 }
 
+export type RiskLevel = 'low' | 'moderate' | 'high';
+
+export interface RiskIntelligence {
+  riskLevel: RiskLevel;
+  riskScore: number;
+  topContributors: string[];
+  recommendedActions: string[];
+}
+
 /** EWMA state stored for incremental resumption */
 export interface ContinuationState {
   bf: number;
@@ -597,4 +606,83 @@ export const calcStreak = (
   }
 
   return {days, weeks};
+};
+
+export const calcRiskIntelligence = (
+  snapshot: MetricsSnapshot,
+  readiness?: {
+    sleepHours?: number | null;
+    readinessScore?: number | null;
+    sessionRpe?: number | null;
+  },
+): RiskIntelligence => {
+  const contributors: Array<{label: string; points: number}> = [];
+  const actions = new Set<string>();
+
+  if (snapshot.acwr != null) {
+    if (snapshot.acwr > 1.5) {
+      contributors.push({label: `ACWR ${snapshot.acwr.toFixed(2)} (high spike)`, points: 35});
+      actions.add('Reduce high-intensity density this week.');
+    } else if (snapshot.acwr > 1.3) {
+      contributors.push({label: `ACWR ${snapshot.acwr.toFixed(2)} (elevated)`, points: 20});
+      actions.add('Cap intensity and avoid adding extra volume.');
+    }
+  }
+
+  if (snapshot.monotony != null) {
+    if (snapshot.monotony > 2.2) {
+      contributors.push({label: `Monotony ${snapshot.monotony.toFixed(2)} (very high)`, points: 25});
+      actions.add('Increase day-to-day variation with a clear easy day.');
+    } else if (snapshot.monotony > 1.8) {
+      contributors.push({label: `Monotony ${snapshot.monotony.toFixed(2)} (high)`, points: 15});
+      actions.add('Swap one moderate day for a recovery run.');
+    }
+  }
+
+  if (snapshot.rampRate != null) {
+    if (snapshot.rampRate > 15) {
+      contributors.push({label: `Ramp rate ${snapshot.rampRate.toFixed(1)}%`, points: 20});
+      actions.add('Hold weekly volume instead of progressing.');
+    } else if (snapshot.rampRate > 10) {
+      contributors.push({label: `Ramp rate ${snapshot.rampRate.toFixed(1)}% (watch)`, points: 10});
+      actions.add('Use conservative progression until fatigue stabilizes.');
+    }
+  }
+
+  if (snapshot.tsb != null && snapshot.tsb < -20) {
+    contributors.push({label: `TSB ${snapshot.tsb.toFixed(1)} (deep fatigue)`, points: 20});
+    actions.add('Insert an off-load or recovery day.');
+  }
+
+  if (readiness?.sleepHours != null && readiness.sleepHours < 6) {
+    contributors.push({label: `Sleep ${readiness.sleepHours.toFixed(1)}h (low)`, points: 10});
+    actions.add('Prioritize sleep and keep sessions aerobic.');
+  }
+  if (readiness?.readinessScore != null && readiness.readinessScore <= 2) {
+    contributors.push({label: `Readiness score ${readiness.readinessScore}/5`, points: 10});
+    actions.add('Replace hard session with low-impact recovery.');
+  }
+  if (readiness?.sessionRpe != null && readiness.sessionRpe >= 8) {
+    contributors.push({label: `Recent RPE ${readiness.sessionRpe}/10`, points: 8});
+    actions.add('Lower session load for 24-48h.');
+  }
+
+  const rawScore = contributors.reduce((sum, c) => sum + c.points, 0);
+  const riskScore = Math.min(100, rawScore);
+  const riskLevel: RiskLevel =
+    riskScore >= 60 ? 'high' : riskScore >= 30 ? 'moderate' : 'low';
+
+  if (actions.size === 0) {
+    actions.add('Maintain current plan with normal progression checks.');
+  }
+
+  return {
+    riskLevel,
+    riskScore,
+    topContributors: contributors
+      .sort((a, b) => b.points - a.points)
+      .slice(0, 3)
+      .map((item) => item.label),
+    recommendedActions: Array.from(actions).slice(0, 3),
+  };
 };

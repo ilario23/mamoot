@@ -7,6 +7,7 @@ import {
   trainingBlocks,
   weeklyPlans,
   trainingFeedback,
+  athleteReadinessSignals,
 } from '@/db/schema';
 import {eq, desc, and, ne, isNull} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
@@ -16,6 +17,7 @@ import {
   calcACWRData,
   calcAdvancedMetricsData,
   getLatestMetricsSnapshot,
+  calcRiskIntelligence,
 } from '@/utils/trainingLoad';
 import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/activityModel';
 import {buildCoachPipelinePrompt, buildPhysioPipelinePrompt} from '@/lib/weeklyPlanPrompts';
@@ -35,6 +37,12 @@ import {
   type StrategySelectionMode,
   type TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
+import {
+  buildAthleteDigitalTwin,
+  rankCounterfactualStrategies,
+  type CounterfactualOption,
+} from '@/lib/digitalTwin';
+import {calibratePriorityFromOutcomes} from '@/lib/calibration';
 import {weeklyPlanRequestSchema} from '@/lib/aiRequestSchemas';
 import {generateObjectWithRetry} from '@/lib/aiGeneration';
 import {
@@ -347,19 +355,24 @@ export async function POST(req: Request) {
       goal: settings?.goal ?? null,
       priority: resolvedPriority,
     });
-    const resolvedPreset: TrainingStrategyPreset =
+    let resolvedPreset: TrainingStrategyPreset =
       resolvedStrategyMode === 'preset'
         ? strategyPreset ?? defaultPreset
         : strategyRecommendation.strategy;
-    const strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
-    const strategyDescription = `${describeStrategyPreset(
+    let strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
+    let strategyDescription = `${describeStrategyPreset(
       resolvedPreset,
     )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${strategyRecommendation.rationale}` : ''}`.trim();
-    const optimizationPriorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
+    let optimizationPriorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
 
     // Step 1b: Build last-week review (only for new-week generation, not retries)
     let lastWeekReview: string | null = null;
     let athleteTrainingFeedback: string | null = null;
+    let latestFeedbackForTwin: {
+      adherence?: number | null;
+      fatigue?: number | null;
+      confidence?: number | null;
+    } | null = null;
     try {
       const prevPlan = planRows[0];
       if (prevPlan && prevPlan.weekStart !== weekStart) {
@@ -395,6 +408,11 @@ export async function POST(req: Request) {
         .limit(1);
       const feedback = feedbackRows[0];
       if (feedback) {
+        latestFeedbackForTwin = {
+          adherence: feedback.adherence,
+          fatigue: feedback.fatigue,
+          confidence: feedback.confidence,
+        };
         athleteTrainingFeedback = [
           `- Week: ${feedback.weekStart}`,
           `- Scores (1-5): adherence ${feedback.adherence}, effort ${feedback.effort}, fatigue ${feedback.fatigue}, soreness ${feedback.soreness}, mood ${feedback.mood}, confidence ${feedback.confidence}`,
@@ -406,6 +424,43 @@ export async function POST(req: Request) {
       }
     } catch {
       console.log('[WeeklyPlan] Could not load athlete training feedback (non-blocking)');
+    }
+
+    const readinessRows = await db
+      .select()
+      .from(athleteReadinessSignals)
+      .where(eq(athleteReadinessSignals.athleteId, athleteId))
+      .orderBy(desc(athleteReadinessSignals.date))
+      .limit(1);
+    const latestReadiness = readinessRows[0] ?? null;
+    const riskIntelligence = calcRiskIntelligence(latestSnapshot, {
+      sleepHours: latestReadiness?.sleepHours ?? null,
+      readinessScore: latestReadiness?.readinessScore ?? null,
+      sessionRpe: latestReadiness?.sessionRpe ?? null,
+    });
+    const twinProfile = buildAthleteDigitalTwin({
+      activities: allActivities,
+      recentFeedback: latestFeedbackForTwin,
+      risk: riskIntelligence,
+    });
+    const calibration = calibratePriorityFromOutcomes({
+      recentAdherence: latestFeedbackForTwin?.adherence ?? null,
+      recentFatigue: latestFeedbackForTwin?.fatigue ?? null,
+      recentConfidence: latestFeedbackForTwin?.confidence ?? null,
+      risk: riskIntelligence,
+    });
+    const calibratedPriority =
+      resolvedStrategyMode === 'auto' ? calibration.recommendedPriority : resolvedPriority;
+    optimizationPriorityLabel = OPTIMIZATION_PRIORITY_LABELS[calibratedPriority];
+    const counterfactualRanking: CounterfactualOption[] = rankCounterfactualStrategies({
+      twin: twinProfile,
+      risk: riskIntelligence,
+      optimizationPriority: calibratedPriority,
+    });
+    if (resolvedStrategyMode === 'auto' && counterfactualRanking.length > 0) {
+      resolvedPreset = counterfactualRanking[0].strategy;
+      strategyLabel = STRATEGY_PRESET_LABELS[resolvedPreset];
+      strategyDescription = `${describeStrategyPreset(resolvedPreset)} Auto-selected by digital twin ranking: ${counterfactualRanking[0].rationale}`;
     }
 
     // Step 1c: Load training block context (macro periodization)
@@ -744,6 +799,24 @@ export async function POST(req: Request) {
       markdownLines.push('');
     }
 
+    markdownLines.push('## Evidence and Risk');
+    markdownLines.push(
+      `[Confidence: ${riskIntelligence.riskLevel === 'high' ? 'medium' : 'high'}] Recommendations were grounded in your recent load metrics and profile data.`,
+    );
+    markdownLines.push(
+      `- Risk level: ${riskIntelligence.riskLevel} (${riskIntelligence.riskScore}/100)`,
+    );
+    for (const contributor of riskIntelligence.topContributors) {
+      markdownLines.push(`- Contributor: ${contributor}`);
+    }
+    for (const action of riskIntelligence.recommendedActions) {
+      markdownLines.push(`- Mitigation: ${action}`);
+    }
+    markdownLines.push(
+      '- Evidence references: NIST GenAI risk framing (2024), intensity-distribution and HRV-guided adaptation literature noted in the roadmap bibliography.',
+    );
+    markdownLines.push('');
+
     const markdownContent = markdownLines.join('\n');
     const encodedPreferences = encodeURIComponent(generationPreferences || '');
     const strategyMetaPayload = encodeURIComponent(
@@ -753,10 +826,15 @@ export async function POST(req: Request) {
         strategyLabel,
         optimizationPriority: resolvedPriority,
         optimizationPriorityLabel,
+        calibratedPriority,
+        calibrationReason: calibration.reason,
         autoRationale:
           resolvedStrategyMode === 'auto'
             ? strategyRecommendation.rationale
             : null,
+        digitalTwin: twinProfile,
+        counterfactualRanking,
+        risk: riskIntelligence,
       }),
     );
     const content = `${PLAN_PREFERENCES_PREFIX}${encodedPreferences}${PLAN_PREFERENCES_SUFFIX}\n${PLAN_STRATEGY_PREFIX}${strategyMetaPayload}${PLAN_STRATEGY_SUFFIX}\n${markdownContent}`;
@@ -818,6 +896,9 @@ export async function POST(req: Request) {
       weekNumber: blockWeekNumber,
       mode,
       sourcePlanId: sourcePlanForReplan?.id ?? null,
+      risk: riskIntelligence,
+      digitalTwin: twinProfile,
+      counterfactualRanking,
       createdAt: now2,
     }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {

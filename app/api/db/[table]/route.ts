@@ -23,6 +23,8 @@ import {
   chatMessages,
   chatMessageFeedback,
   trainingFeedback,
+  athleteReadinessSignals,
+  aiTelemetryEvents,
   trainingBlocks,
   weeklyPlans,
   orchestratorGoals,
@@ -69,6 +71,48 @@ const TRAINING_FEEDBACK_SOURCES = new Set<TrainingFeedbackSource>([
 ]);
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DB_ROUTE_ENFORCE_AUTH =
+  (process.env.DB_ROUTE_ENFORCE_AUTH ?? 'false').toLowerCase() === 'true';
+const DB_ROUTE_API_KEY = process.env.DB_ROUTE_API_KEY ?? null;
+
+const parseAthleteIdHeader = (req: NextRequest): number | null => {
+  const raw = req.headers.get('x-athlete-id');
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const hasValidApiKey = (req: NextRequest): boolean => {
+  if (!DB_ROUTE_API_KEY) return false;
+  const key = req.headers.get('x-db-api-key');
+  return key === DB_ROUTE_API_KEY;
+};
+
+const enforceDbRouteAccess = (
+  req: NextRequest,
+  requestedAthleteId: number | null,
+): NextResponse | null => {
+  if (!DB_ROUTE_ENFORCE_AUTH) return null;
+
+  if (hasValidApiKey(req)) return null;
+
+  const callerAthleteId = parseAthleteIdHeader(req);
+  if (!callerAthleteId) {
+    return NextResponse.json(
+      {error: 'DB route auth required (missing x-athlete-id or x-db-api-key)'},
+      {status: 401},
+    );
+  }
+
+  if (requestedAthleteId && callerAthleteId !== requestedAthleteId) {
+    return NextResponse.json(
+      {error: 'Forbidden athlete scope'},
+      {status: 403},
+    );
+  }
+
+  return null;
+};
 
 const validateChatMessageFeedbackRecord = (
   record: unknown,
@@ -239,6 +283,8 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
   const pk = req.nextUrl.searchParams.get('pk');
   const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
   const athleteId = athleteIdParam ? Number(athleteIdParam) : null;
+  const accessCheck = enforceDbRouteAccess(req, athleteId);
+  if (accessCheck) return accessCheck;
 
   try {
     switch (table) {
@@ -622,7 +668,7 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
             )
             .orderBy(desc(trainingFeedback.updatedAt))
             .limit(1);
-          return NextResponse.json(rows);
+          return NextResponse.json(rows[0] ?? null);
         }
         const limit = Number(req.nextUrl.searchParams.get('limit') ?? '8');
         const rows = await db
@@ -631,6 +677,56 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .where(eq(trainingFeedback.athleteId, Number(tfAthleteId)))
           .orderBy(desc(trainingFeedback.weekStart))
           .limit(Math.max(1, Math.min(52, limit)));
+        return NextResponse.json(rows);
+      }
+
+      case 'athlete-readiness-signals': {
+        const readinessAthleteId = req.nextUrl.searchParams.get('athleteId');
+        if (!readinessAthleteId) {
+          return NextResponse.json({error: 'athleteId required'}, {status: 400});
+        }
+        const date = req.nextUrl.searchParams.get('date');
+        if (date) {
+          const rows = await db
+            .select()
+            .from(athleteReadinessSignals)
+            .where(
+              and(
+                eq(athleteReadinessSignals.athleteId, Number(readinessAthleteId)),
+                eq(athleteReadinessSignals.date, date),
+              ),
+            )
+            .orderBy(desc(athleteReadinessSignals.updatedAt))
+            .limit(1);
+          return NextResponse.json(rows[0] ?? null);
+        }
+        const limit = Number(req.nextUrl.searchParams.get('limit') ?? '30');
+        const rows = await db
+          .select()
+          .from(athleteReadinessSignals)
+          .where(eq(athleteReadinessSignals.athleteId, Number(readinessAthleteId)))
+          .orderBy(desc(athleteReadinessSignals.date))
+          .limit(Math.max(1, Math.min(120, limit)));
+        return NextResponse.json(rows);
+      }
+
+      case 'ai-telemetry-events': {
+        const traceId = req.nextUrl.searchParams.get('traceId');
+        const limit = Number(req.nextUrl.searchParams.get('limit') ?? '50');
+        if (traceId) {
+          const rows = await db
+            .select()
+            .from(aiTelemetryEvents)
+            .where(eq(aiTelemetryEvents.traceId, traceId))
+            .orderBy(desc(aiTelemetryEvents.createdAt))
+            .limit(Math.max(1, Math.min(200, limit)));
+          return NextResponse.json(rows);
+        }
+        const rows = await db
+          .select()
+          .from(aiTelemetryEvents)
+          .orderBy(desc(aiTelemetryEvents.createdAt))
+          .limit(Math.max(1, Math.min(200, limit)));
         return NextResponse.json(rows);
       }
 
@@ -840,6 +936,19 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
   if (records.length === 0) {
     return NextResponse.json({success: true, count: 0});
   }
+
+  const inferredAthleteIds = records
+    .map((record) => (record as Record<string, unknown>)?.athleteId)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+  const inferredAthleteId = inferredAthleteIds.length > 0 ? inferredAthleteIds[0] : null;
+  if (inferredAthleteIds.some((value) => value !== inferredAthleteId)) {
+    return NextResponse.json(
+      {error: 'Mixed athleteId batches are not allowed'},
+      {status: 400},
+    );
+  }
+  const accessCheck = enforceDbRouteAccess(req, inferredAthleteId);
+  if (accessCheck) return accessCheck;
 
   try {
     switch (table) {
@@ -1143,6 +1252,27 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
+      case 'athlete-readiness-signals':
+        await db
+          .insert(athleteReadinessSignals)
+          .values(records)
+          .onConflictDoUpdate({
+            target: athleteReadinessSignals.id,
+            set: {
+              athleteId: sql`excluded.athlete_id`,
+              date: sql`excluded.date`,
+              hrv: sql`excluded.hrv`,
+              sleepHours: sql`excluded.sleep_hours`,
+              restingHr: sql`excluded.resting_hr`,
+              readinessScore: sql`excluded.readiness_score`,
+              sessionRpe: sql`excluded.session_rpe`,
+              adherenceScore: sql`excluded.adherence_score`,
+              source: sql`excluded.source`,
+              updatedAt: sql`excluded.updated_at`,
+            },
+          });
+        break;
+
       case 'orchestrator-goals':
         await db
           .insert(orchestratorGoals)
@@ -1262,6 +1392,10 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
 
 export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
   const {table} = await params;
+  const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
+  const requestedAthleteId = athleteIdParam ? Number(athleteIdParam) : null;
+  const accessCheck = enforceDbRouteAccess(req, requestedAthleteId);
+  if (accessCheck) return accessCheck;
 
   try {
     switch (table) {
@@ -1354,6 +1488,11 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         // PATCH /api/db/user-settings → partial update (weight, city from Strava profile)
         const body = await req.json();
         const athleteIdParam = body.athleteId;
+        const userSettingsAccess = enforceDbRouteAccess(
+          req,
+          typeof athleteIdParam === 'number' ? athleteIdParam : null,
+        );
+        if (userSettingsAccess) return userSettingsAccess;
         if (!athleteIdParam)
           return NextResponse.json(
             {error: 'athleteId required'},
@@ -1553,6 +1692,10 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
 
 export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
   const {table} = await params;
+  const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
+  const requestedAthleteId = athleteIdParam ? Number(athleteIdParam) : null;
+  const accessCheck = enforceDbRouteAccess(req, requestedAthleteId);
+  if (accessCheck) return accessCheck;
 
   try {
     switch (table) {

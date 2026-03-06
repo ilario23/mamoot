@@ -1,14 +1,17 @@
 {
   "name": "mamoot",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.0.1",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "test:prompts": "node scripts/check-prompt-contracts.mjs",
     "test:prompt-scenarios": "node scripts/check-prompt-scenarios.mjs",
+    "test:ai-evals": "node scripts/ai-eval-gates.mjs",
+    "test:cohort-replay": "node scripts/run-cohort-replay-benchmark.mjs",
     "test:ai-gates": "npm run test:prompts && npm run test:prompt-scenarios",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

@@ -40,6 +40,10 @@ import type {ResolvedMention} from '@/lib/mentionTypes';
 import {chatRequestSchema} from '@/lib/aiRequestSchemas';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
+import {
+  buildReliabilityEnvelope,
+  detectRedFlagInput,
+} from '@/lib/aiReliabilityPolicy';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -290,7 +294,7 @@ export async function POST(req: Request) {
   }
 
   // Build system prompt with minimal context + memory
-  const system = getSystemPrompt(
+  const baseSystem = getSystemPrompt(
     persona,
     athleteName,
     hrZonesText,
@@ -298,6 +302,8 @@ export async function POST(req: Request) {
     trainingBalance,
     memory ?? null,
   );
+  const reliabilityPolicy = `\n\n## Reliability Policy\n- For training-science or factual claims, cite concrete evidence from tool outputs or attached context.\n- Prefix final guidance with confidence tier: [Confidence: high|medium|low].\n- If confidence is low due to missing data, ask a clarifying question before giving specific prescriptions.\n- If the user asks for medical diagnosis, medication, or reports severe red-flag symptoms, refuse safely and recommend immediate professional care.\n- Keep critic loop bounded: produce one coherent answer; do not recurse endlessly.`;
+  const system = `${baseSystem}${reliabilityPolicy}`;
   logAiTrace(trace, 'system_prompt_built', {
     promptHash: promptHash(system),
     memoryChars: memory?.length ?? 0,
@@ -345,6 +351,47 @@ export async function POST(req: Request) {
         parts: [{type: 'text' as const, text: augmentedText}],
       };
     }
+  }
+
+  const latestUserText = processedMessages
+    .filter((message) => message.role === 'user')
+    .at(-1)
+    ?.parts?.filter((p): p is {type: 'text'; text: string} => p.type === 'text')
+    .map((p) => p.text)
+    .join('') ?? '';
+  const reliability = buildReliabilityEnvelope({
+    userText: latestUserText,
+    hasGroundingData: Boolean((explicitContext && explicitContext.length > 0) || athleteId),
+    citesNumbers: /\d/.test(latestUserText),
+  });
+  logAiTrace(trace, 'reliability_envelope', {
+    persona,
+    model: resolvedModel,
+    athleteId: athleteId ?? null,
+    sessionId: sessionId ?? null,
+    confidence: reliability.confidence,
+    citationRequired: reliability.citationRequired,
+    refusalRequired: reliability.refusalRequired,
+    rationale: reliability.rationale,
+  });
+  if (detectRedFlagInput(latestUserText) || reliability.refusalRequired) {
+    logAiTrace(trace, 'safety_refusal', {
+      persona,
+      model: resolvedModel,
+      athleteId: athleteId ?? null,
+      sessionId: sessionId ?? null,
+      reason: reliability.rationale,
+    });
+    return new Response(
+      `[Confidence: low]\nI can't safely provide diagnosis or emergency guidance in chat. Please stop training now and seek urgent medical care or contact local emergency services. I can help you prepare a short symptom summary for a clinician once you're safe.`,
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'x-trace-id': trace.traceId,
+        },
+      },
+    );
   }
 
   // Build tools — retrieval tools (all personas) + follow-up suggestions
