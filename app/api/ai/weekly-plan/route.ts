@@ -6,6 +6,7 @@ import {
   userSettings,
   trainingBlocks,
   weeklyPlans,
+  trainingFeedback,
 } from '@/db/schema';
 import {eq, desc, and, ne, isNull} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
@@ -93,6 +94,12 @@ const getCurrentMonday = (): string => {
 const getSunday = (mondayStr: string): string => {
   const d = new Date(mondayStr);
   d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+};
+
+const getPreviousMonday = (mondayStr: string): string => {
+  const d = new Date(mondayStr);
+  d.setDate(d.getDate() - 7);
   return d.toISOString().slice(0, 10);
 };
 
@@ -350,6 +357,7 @@ export async function POST(req: Request) {
 
     // Step 1b: Build last-week review (only for new-week generation, not retries)
     let lastWeekReview: string | null = null;
+    let athleteTrainingFeedback: string | null = null;
     try {
       const prevPlan = planRows[0];
       if (prevPlan && prevPlan.weekStart !== weekStart) {
@@ -368,6 +376,34 @@ export async function POST(req: Request) {
       }
     } catch {
       console.log(`[WeeklyPlan] Could not build last-week review (non-blocking)`);
+    }
+
+    try {
+      const previousWeekStart = getPreviousMonday(weekStart);
+      const feedbackRows = await db
+        .select()
+        .from(trainingFeedback)
+        .where(
+          and(
+            eq(trainingFeedback.athleteId, athleteId),
+            eq(trainingFeedback.weekStart, previousWeekStart),
+          ),
+        )
+        .orderBy(desc(trainingFeedback.updatedAt))
+        .limit(1);
+      const feedback = feedbackRows[0];
+      if (feedback) {
+        athleteTrainingFeedback = [
+          `- Week: ${feedback.weekStart}`,
+          `- Scores (1-5): adherence ${feedback.adherence}, effort ${feedback.effort}, fatigue ${feedback.fatigue}, soreness ${feedback.soreness}, mood ${feedback.mood}, confidence ${feedback.confidence}`,
+          feedback.notes ? `- Notes: ${feedback.notes}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n');
+        console.log('[WeeklyPlan] Athlete training feedback injected');
+      }
+    } catch {
+      console.log('[WeeklyPlan] Could not load athlete training feedback (non-blocking)');
     }
 
     // Step 1c: Load training block context (macro periodization)
@@ -491,6 +527,7 @@ export async function POST(req: Request) {
       personalRecords: prText,
       preferences: generationPreferences || null,
       lastWeekReview,
+      trainingFeedback: athleteTrainingFeedback,
       trainingBlockContext,
       strategyLabel,
       strategyDescription,

@@ -13,6 +13,7 @@ export const buildCoachPipelinePrompt = (context: {
   personalRecords: string;
   preferences: string | null;
   lastWeekReview: string | null;
+  trainingFeedback: string | null;
   trainingBlockContext: string | null;
   strategyLabel: string;
   strategyDescription: string;
@@ -35,6 +36,7 @@ ${context.trainingBlockContext ? `\n## Training Block Context\nThis week is part
 ## Recent Training (last 4 weeks)
 ${context.recentTraining}
 ${context.lastWeekReview ? `\n## Last Week Review\nBelow is a comparison of last week's planned sessions vs what the athlete actually did. Use this to inform progression, recovery needs, and session placement this week:\n${context.lastWeekReview}\n` : ''}
+${context.trainingFeedback ? `\n## Athlete Last Week Reflection\nUse this athlete-reported feedback about how training felt:\n${context.trainingFeedback}\n` : ''}
 ## Personal Records
 ${context.personalRecords}
 
@@ -52,6 +54,7 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 - Keep weekly load ramp conservative when monotony or strain is elevated.
 - If injuries are reported, avoid aggravating movements and reduce load.
 - If a Last Week Review is provided, factor adherence into your plan: if sessions were missed, consider whether load should stay flat or catch up; if everything was hit, consider progressing; if the week was an intentional deload (check athlete preferences), plan a return to normal or increased load.
+- If Athlete Last Week Reflection is provided, use it as a safety/load signal. High fatigue/soreness or low mood/confidence should reduce intensity/volume; strong adherence with low fatigue and good mood can support progression.
 - If a Training Block Context is provided, your plan MUST respect the volume target and intensity level. Include the specified key workouts. The week type (build/recovery/taper/etc.) should guide overall session selection.
 - Be specific with workout descriptions (e.g. "6x1000m at 4:15/km with 90s jog recovery").`;
 

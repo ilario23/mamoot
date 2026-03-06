@@ -10,6 +10,7 @@ import type {
   CachedChatSession,
   CachedChatMessage,
   CachedChatMessageFeedback,
+  CachedTrainingFeedback,
   CachedWeeklyPlan,
   CachedTrainingBlock,
   CachedOrchestratorGoal,
@@ -103,6 +104,23 @@ export const neonSyncChatMessageFeedback = async (
   records: CachedChatMessageFeedback | CachedChatMessageFeedback[],
 ): Promise<void> => {
   await postToNeon('chat-message-feedback', records);
+};
+
+export const neonGetTrainingFeedback = async (
+  athleteId: number,
+  weekStart?: string,
+): Promise<CachedTrainingFeedback[] | null> => {
+  const params = new URLSearchParams({athleteId: String(athleteId)});
+  if (weekStart) params.set('weekStart', weekStart);
+  return getFromNeon<CachedTrainingFeedback[]>(
+    `${API}/training-feedback?${params.toString()}`,
+  );
+};
+
+export const neonSyncTrainingFeedback = async (
+  records: CachedTrainingFeedback | CachedTrainingFeedback[],
+): Promise<void> => {
+  await postToNeon('training-feedback', records);
 };
 
 /** Awaitable delete of a chat session and all its data (messages, plans, memory). */

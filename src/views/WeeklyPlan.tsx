@@ -17,6 +17,7 @@ import {
   Target,
   X,
   AlertCircle,
+  ClipboardCheck,
 } from 'lucide-react';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -137,6 +138,12 @@ const stripPlanMetaFromContent = (content?: string | null): string => {
       '',
     );
 };
+
+interface FeedbackScoreField {
+  label: string;
+  value: number;
+  setValue: (value: number) => void;
+}
 
 const DayCard = ({session}: {session: UnifiedSession}) => {
   const hasRun = !!session.run;
@@ -443,12 +450,18 @@ const WeeklyPlan = () => {
     setPreferences,
     savePreferences,
     lastError,
+    previousWeekStart,
+    previousWeekFeedback,
+    isLoadingPreviousWeekFeedback,
+    isSavingPreviousWeekFeedback,
+    submitPreviousWeekFeedback,
   } = useWeeklyPlan(athleteId);
   const {activeBlock} = useTrainingBlock(athleteId);
   const {settings} = useSettings();
   const [fullPlanOpen, setFullPlanOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [regenerateOpen, setRegenerateOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [regenerationMode, setRegenerationMode] = useState<'full' | 'remaining_days'>('full');
   const [targetWeekStart, setTargetWeekStart] = useState('');
   const [targetWeekSelection, setTargetWeekSelection] = useState<'current' | 'next'>('current');
@@ -459,6 +472,29 @@ const WeeklyPlan = () => {
     useState<TrainingStrategyPreset>('polarized_80_20');
   const [optimizationPriority, setOptimizationPriority] =
     useState<OptimizationPriority>('race_performance');
+  const [feedbackAdherence, setFeedbackAdherence] = useState(3);
+  const [feedbackEffort, setFeedbackEffort] = useState(3);
+  const [feedbackFatigue, setFeedbackFatigue] = useState(3);
+  const [feedbackSoreness, setFeedbackSoreness] = useState(3);
+  const [feedbackMood, setFeedbackMood] = useState(3);
+  const [feedbackConfidence, setFeedbackConfidence] = useState(3);
+  const [feedbackNotes, setFeedbackNotes] = useState('');
+  const feedbackScoreFields: FeedbackScoreField[] = [
+    {
+      label: 'Adherence to plan',
+      value: feedbackAdherence,
+      setValue: setFeedbackAdherence,
+    },
+    {label: 'Perceived effort', value: feedbackEffort, setValue: setFeedbackEffort},
+    {label: 'Fatigue now', value: feedbackFatigue, setValue: setFeedbackFatigue},
+    {label: 'Soreness now', value: feedbackSoreness, setValue: setFeedbackSoreness},
+    {label: 'Mood/readiness', value: feedbackMood, setValue: setFeedbackMood},
+    {
+      label: 'Confidence',
+      value: feedbackConfidence,
+      setValue: setFeedbackConfidence,
+    },
+  ];
   const activePlanPreferences = useMemo(
     () => extractPreferencesFromPlanContent(activePlan?.content),
     [activePlan?.content],
@@ -539,6 +575,30 @@ const WeeklyPlan = () => {
 
   const handleToggleHistory = () => {
     setHistoryOpen((prev) => !prev);
+  };
+
+  const handleOpenFeedback = () => {
+    setFeedbackAdherence(previousWeekFeedback?.adherence ?? 3);
+    setFeedbackEffort(previousWeekFeedback?.effort ?? 3);
+    setFeedbackFatigue(previousWeekFeedback?.fatigue ?? 3);
+    setFeedbackSoreness(previousWeekFeedback?.soreness ?? 3);
+    setFeedbackMood(previousWeekFeedback?.mood ?? 3);
+    setFeedbackConfidence(previousWeekFeedback?.confidence ?? 3);
+    setFeedbackNotes(previousWeekFeedback?.notes ?? '');
+    setFeedbackOpen(true);
+  };
+
+  const handleSubmitFeedback = async () => {
+    await submitPreviousWeekFeedback({
+      adherence: feedbackAdherence,
+      effort: feedbackEffort,
+      fatigue: feedbackFatigue,
+      soreness: feedbackSoreness,
+      mood: feedbackMood,
+      confidence: feedbackConfidence,
+      notes: feedbackNotes,
+    });
+    setFeedbackOpen(false);
   };
 
   if (isLoading) {
@@ -776,6 +836,94 @@ const WeeklyPlan = () => {
         </div>
       )}
 
+      {feedbackOpen && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
+          <div className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-5 space-y-4'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='space-y-1'>
+                <h3 className='font-black text-base uppercase tracking-wider'>
+                  Last Week Reflection
+                </h3>
+                <p className='text-xs text-muted-foreground font-medium'>
+                  Share how training went for week starting {previousWeekStart}.
+                </p>
+              </div>
+              <button
+                onClick={() => setFeedbackOpen(false)}
+                tabIndex={0}
+                aria-label='Close feedback dialog'
+                className='p-1.5 border-2 border-border bg-background hover:bg-muted'
+              >
+                <X className='h-3.5 w-3.5' />
+              </button>
+            </div>
+
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+              {feedbackScoreFields.map((field) => (
+                <label key={field.label} className='space-y-1'>
+                  <span className='text-[10px] uppercase tracking-wider font-black text-muted-foreground'>
+                    {field.label}
+                  </span>
+                  <select
+                    value={String(field.value)}
+                    onChange={(e) => field.setValue(Number(e.target.value))}
+                    className='w-full border-2 border-border bg-muted/50 px-2 py-1.5 text-sm font-medium'
+                  >
+                    <option value='1'>1</option>
+                    <option value='2'>2</option>
+                    <option value='3'>3</option>
+                    <option value='4'>4</option>
+                    <option value='5'>5</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+
+            <div className='space-y-1'>
+              <label
+                htmlFor='weekly-feedback-notes'
+                className='text-[10px] uppercase tracking-wider font-black text-muted-foreground'
+              >
+                Notes (optional)
+              </label>
+              <textarea
+                id='weekly-feedback-notes'
+                value={feedbackNotes}
+                onChange={(e) => setFeedbackNotes(e.target.value)}
+                rows={3}
+                className='w-full border-2 border-border bg-muted/50 px-2 py-1.5 text-sm font-medium resize-none'
+                placeholder='How did training feel? What was hard/easy?'
+              />
+            </div>
+
+            <div className='flex flex-wrap gap-2'>
+              <button
+                onClick={handleSubmitFeedback}
+                disabled={isSavingPreviousWeekFeedback}
+                tabIndex={0}
+                aria-label='Submit weekly reflection'
+                className='inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all disabled:opacity-50 disabled:pointer-events-none'
+              >
+                {isSavingPreviousWeekFeedback ? (
+                  <NeoLoader size='sm' />
+                ) : (
+                  <ClipboardCheck className='h-3.5 w-3.5' />
+                )}
+                Save reflection
+              </button>
+              <button
+                onClick={() => setFeedbackOpen(false)}
+                tabIndex={0}
+                aria-label='Cancel feedback'
+                className='inline-flex items-center gap-1.5 px-4 py-2 font-black text-[10px] uppercase tracking-wider border-3 border-border bg-background hover:bg-muted'
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Empty state */}
       {!activePlan && (
         <EmptyState
@@ -804,19 +952,33 @@ const WeeklyPlan = () => {
                   </p>
                 )}
               </div>
-              <button
-                onClick={handleOpenRegenerate}
-                disabled={isGenerating}
-                tabIndex={0}
-                aria-label='Open regenerate plan options'
-                className='shrink-0 p-2.5 text-muted-foreground hover:text-primary hover:bg-primary/10 border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
-              >
-                {isGenerating ? (
-                  <NeoLoader size='sm' />
-                ) : (
-                  <Sparkles className='h-4 w-4' />
-                )}
-              </button>
+              <div className='flex items-center gap-2 shrink-0'>
+                <button
+                  onClick={handleOpenFeedback}
+                  disabled={isLoadingPreviousWeekFeedback}
+                  tabIndex={0}
+                  aria-label='Review last week feedback'
+                  className='inline-flex items-center gap-1.5 px-2.5 py-2 text-muted-foreground hover:text-primary hover:bg-primary/10 border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all disabled:opacity-50 disabled:pointer-events-none'
+                >
+                  <ClipboardCheck className='h-4 w-4' />
+                  <span className='hidden md:inline text-[10px] font-black uppercase tracking-wider'>
+                    Review Last Week
+                  </span>
+                </button>
+                <button
+                  onClick={handleOpenRegenerate}
+                  disabled={isGenerating}
+                  tabIndex={0}
+                  aria-label='Open regenerate plan options'
+                  className='shrink-0 p-2.5 text-muted-foreground hover:text-primary hover:bg-primary/10 border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
+                >
+                  {isGenerating ? (
+                    <NeoLoader size='sm' />
+                  ) : (
+                    <Sparkles className='h-4 w-4' />
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Week range + meta pills */}
@@ -834,6 +996,39 @@ const WeeklyPlan = () => {
                 {activePlan.sessions.filter((s) => s.run).length} runs · {activePlan.sessions.filter((s) => s.physio).length} physio
               </span>
             </div>
+          </div>
+
+          {/* Preferences used to generate this plan */}
+          <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
+            <div className='flex items-center gap-1.5'>
+              <ClipboardCheck className='h-3.5 w-3.5 text-primary' />
+              <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
+                Last Week Reflection
+              </span>
+            </div>
+            {isLoadingPreviousWeekFeedback ? (
+              <p className='text-sm font-medium text-muted-foreground'>
+                Loading...
+              </p>
+            ) : previousWeekFeedback ? (
+              <div className='space-y-1 text-sm font-medium'>
+                <p>
+                  Week: <span className='font-bold'>{previousWeekFeedback.weekStart}</span>
+                </p>
+                <p className='text-muted-foreground'>
+                  Adherence {previousWeekFeedback.adherence}/5 · Effort {previousWeekFeedback.effort}/5 · Fatigue {previousWeekFeedback.fatigue}/5 · Soreness {previousWeekFeedback.soreness}/5 · Mood {previousWeekFeedback.mood}/5 · Confidence {previousWeekFeedback.confidence}/5
+                </p>
+                {previousWeekFeedback.notes && (
+                  <p className='text-muted-foreground italic'>
+                    {previousWeekFeedback.notes}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className='text-sm font-medium text-muted-foreground'>
+                No reflection submitted yet for week starting {previousWeekStart}.
+              </p>
+            )}
           </div>
 
           {/* Preferences used to generate this plan */}

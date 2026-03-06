@@ -38,6 +38,7 @@ import type {
   CachedChatMessageFeedback,
   ChatFeedbackRating,
   ChatFeedbackReason,
+  CachedTrainingFeedback,
   CachedOrchestratorGoal,
   CachedOrchestratorPlanItem,
   CachedOrchestratorBlocker,
@@ -53,6 +54,7 @@ import {
 import {
   neonGetChatMessageFeedback,
   neonSyncChatMessageFeedback,
+  neonSyncTrainingFeedback,
   neonGetOrchestratorGoals,
   neonGetOrchestratorPlanItems,
   neonGetOrchestratorBlockers,
@@ -200,6 +202,9 @@ const TOOL_LABELS: Record<string, string> = {
   getActivityDetail: 'Analyzing activity details',
   getPersonalRecords: 'Looking at your personal records',
   getWeatherForecast: 'Checking the weather forecast',
+  getTrainingFeedback: 'Loading your training feedback',
+  requestTrainingFeedback: 'Preparing weekly reflection',
+  saveTrainingFeedback: 'Saving training feedback',
   // Action tools
   suggestFollowUps: 'Preparing suggestions',
 };
@@ -414,6 +419,11 @@ const AITeamChat = () => {
   );
   const [activeTrainingBlock, setActiveTrainingBlock] =
     useState<CachedTrainingBlock | null>(null);
+  const [savedTrainingFeedbackByWeek, setSavedTrainingFeedbackByWeek] = useState<
+    Record<string, CachedTrainingFeedback>
+  >({});
+  const [submittingTrainingFeedbackWeek, setSubmittingTrainingFeedbackWeek] =
+    useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {athlete} = useStravaAuth();
@@ -788,6 +798,48 @@ const AITeamChat = () => {
       setFeedbackByMessageId((prev) => ({...prev, [messageId]: record}));
     },
     [activeSession?.id, activePersona, athleteId, selectedModel],
+  );
+
+  const handleSubmitTrainingFeedback = useCallback(
+    async (
+      weekStart: string,
+      values: {
+        adherence: number;
+        effort: number;
+        fatigue: number;
+        soreness: number;
+        mood: number;
+        confidence: number;
+        notes?: string;
+      },
+    ) => {
+      if (!athleteId || !weekStart) return;
+      setSubmittingTrainingFeedbackWeek(weekStart);
+      try {
+        const now = Date.now();
+        const existing = savedTrainingFeedbackByWeek[weekStart];
+        const record: CachedTrainingFeedback = {
+          id: `${athleteId}:${weekStart}`,
+          athleteId,
+          weekStart,
+          adherence: values.adherence,
+          effort: values.effort,
+          fatigue: values.fatigue,
+          soreness: values.soreness,
+          mood: values.mood,
+          confidence: values.confidence,
+          notes: values.notes?.trim() ? values.notes.trim() : null,
+          source: 'coach_chat',
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+        await neonSyncTrainingFeedback(record);
+        setSavedTrainingFeedbackByWeek((prev) => ({...prev, [weekStart]: record}));
+      } finally {
+        setSubmittingTrainingFeedbackWeek(null);
+      }
+    },
+    [athleteId, savedTrainingFeedbackByWeek],
   );
 
   // Extract follow-up suggestions from the last assistant message's tool parts
@@ -1188,6 +1240,29 @@ const AITeamChat = () => {
                 };
               });
 
+            const trainingFeedbackRequestPart = (msg.parts ?? []).find(
+              (part) =>
+                part.type === 'tool-requestTrainingFeedback' &&
+                'state' in part &&
+                (part as {state: string}).state === 'output-available',
+            ) as
+              | {
+                  input?: {weekStart?: string; prompt?: string};
+                  output?: {weekStart?: string; prompt?: string};
+                }
+              | undefined;
+            const requestedWeekStart =
+              trainingFeedbackRequestPart?.output?.weekStart ??
+              trainingFeedbackRequestPart?.input?.weekStart ??
+              null;
+            const trainingFeedbackPrompt =
+              trainingFeedbackRequestPart?.output?.prompt ??
+              trainingFeedbackRequestPart?.input?.prompt ??
+              'Share how your training week felt.';
+            const savedTrainingFeedback = requestedWeekStart
+              ? savedTrainingFeedbackByWeek[requestedWeekStart]
+              : null;
+
             // Skip if no content at all (suggestFollowUps-only messages are hidden)
             if (
               !textContent &&
@@ -1271,6 +1346,106 @@ const AITeamChat = () => {
                               <span className='inline-block w-2 h-4 bg-primary animate-neo-blink ml-0.5 align-middle' />
                             )}
                         </div>
+                      )}
+                      {requestedWeekStart && (
+                        <form
+                          onSubmit={async (event) => {
+                            event.preventDefault();
+                            const formData = new FormData(event.currentTarget);
+                            await handleSubmitTrainingFeedback(requestedWeekStart, {
+                              adherence: Number(formData.get('adherence') ?? 3),
+                              effort: Number(formData.get('effort') ?? 3),
+                              fatigue: Number(formData.get('fatigue') ?? 3),
+                              soreness: Number(formData.get('soreness') ?? 3),
+                              mood: Number(formData.get('mood') ?? 3),
+                              confidence: Number(formData.get('confidence') ?? 3),
+                              notes: String(formData.get('notes') ?? ''),
+                            });
+                          }}
+                          className='mt-2 border-2 border-border bg-muted/40 p-2.5 space-y-2'
+                        >
+                          <p className='text-xs font-black uppercase tracking-wider text-primary'>
+                            Weekly reflection ({requestedWeekStart})
+                          </p>
+                          <p className='text-xs text-muted-foreground font-medium'>
+                            {trainingFeedbackPrompt}
+                          </p>
+                          <div className='grid grid-cols-2 gap-2'>
+                            {[
+                              {
+                                name: 'adherence',
+                                label: 'Adherence',
+                                value: savedTrainingFeedback?.adherence ?? 3,
+                              },
+                              {
+                                name: 'effort',
+                                label: 'Effort',
+                                value: savedTrainingFeedback?.effort ?? 3,
+                              },
+                              {
+                                name: 'fatigue',
+                                label: 'Fatigue',
+                                value: savedTrainingFeedback?.fatigue ?? 3,
+                              },
+                              {
+                                name: 'soreness',
+                                label: 'Soreness',
+                                value: savedTrainingFeedback?.soreness ?? 3,
+                              },
+                              {
+                                name: 'mood',
+                                label: 'Mood',
+                                value: savedTrainingFeedback?.mood ?? 3,
+                              },
+                              {
+                                name: 'confidence',
+                                label: 'Confidence',
+                                value: savedTrainingFeedback?.confidence ?? 3,
+                              },
+                            ].map((field) => (
+                              <label key={field.name} className='space-y-1'>
+                                <span className='text-[10px] font-black uppercase tracking-wider text-muted-foreground'>
+                                  {field.label}
+                                </span>
+                                <select
+                                  name={field.name}
+                                  defaultValue={String(field.value)}
+                                  className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium'
+                                >
+                                  <option value='1'>1</option>
+                                  <option value='2'>2</option>
+                                  <option value='3'>3</option>
+                                  <option value='4'>4</option>
+                                  <option value='5'>5</option>
+                                </select>
+                              </label>
+                            ))}
+                          </div>
+                          <label className='space-y-1 block'>
+                            <span className='text-[10px] font-black uppercase tracking-wider text-muted-foreground'>
+                              Notes (optional)
+                            </span>
+                            <textarea
+                              name='notes'
+                              rows={2}
+                              defaultValue={savedTrainingFeedback?.notes ?? ''}
+                              className='w-full border-2 border-border bg-background px-2 py-1 text-xs font-medium resize-none'
+                            />
+                          </label>
+                          <button
+                            type='submit'
+                            disabled={submittingTrainingFeedbackWeek === requestedWeekStart}
+                            tabIndex={0}
+                            aria-label='Submit weekly reflection'
+                            className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground disabled:opacity-50'
+                          >
+                            {submittingTrainingFeedbackWeek === requestedWeekStart
+                              ? 'Saving...'
+                              : savedTrainingFeedback
+                                ? 'Update reflection'
+                                : 'Submit reflection'}
+                          </button>
+                        </form>
                       )}
                       {!isUser && textContent && (
                         <div className='flex items-center gap-1.5 mt-2'>

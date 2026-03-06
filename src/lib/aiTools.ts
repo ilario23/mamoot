@@ -128,6 +128,46 @@ export const saveWeeklyPreferencesSchema = z.object({
     ),
 });
 
+// ----- Training Feedback -----
+
+export const requestTrainingFeedbackSchema = z.object({
+  weekStart: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('ISO Monday date for the training week being reviewed'),
+  prompt: z
+    .string()
+    .optional()
+    .describe('Short coach prompt asking the athlete to reflect on the week'),
+});
+
+export const saveTrainingFeedbackSchema = z.object({
+  weekStart: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .describe('ISO Monday date for the training week being reviewed'),
+  adherence: z.number().min(1).max(5),
+  effort: z.number().min(1).max(5),
+  fatigue: z.number().min(1).max(5),
+  soreness: z.number().min(1).max(5),
+  mood: z.number().min(1).max(5),
+  confidence: z.number().min(1).max(5),
+  notes: z
+    .string()
+    .optional()
+    .describe('Optional free-text summary of how training felt'),
+});
+
+export const getTrainingFeedbackSchema = z.object({
+  weekStart: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .describe('ISO Monday date for exact lookup'),
+  limit: z.number().int().min(1).max(12).optional(),
+});
+
 // ----- Update Training Block -----
 
 export const updateTrainingBlockSchema = z.object({
@@ -143,6 +183,13 @@ export const updateTrainingBlockSchema = z.object({
 });
 
 export type UpdateTrainingBlockInput = z.infer<typeof updateTrainingBlockSchema>;
+export type RequestTrainingFeedbackInput = z.infer<
+  typeof requestTrainingFeedbackSchema
+>;
+export type SaveTrainingFeedbackInput = z.infer<
+  typeof saveTrainingFeedbackSchema
+>;
+export type GetTrainingFeedbackInput = z.infer<typeof getTrainingFeedbackSchema>;
 
 export const adaptTrainingBlockSchema = z.object({
   adaptationType: z.enum([

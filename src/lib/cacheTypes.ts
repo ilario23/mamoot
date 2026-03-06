@@ -203,6 +203,34 @@ export interface CachedChatMessageFeedback {
   updatedAt: number;
 }
 
+export type TrainingFeedbackSource = 'weekly_plan_ui' | 'coach_chat';
+
+export interface CachedTrainingFeedback {
+  /** Stable ID, typically "{athleteId}:{weekStart}" */
+  id: string;
+  athleteId: number;
+  /** ISO Monday date for reviewed week */
+  weekStart: string;
+  /** 1-5 adherence to plan */
+  adherence: number;
+  /** 1-5 perceived effort */
+  effort: number;
+  /** 1-5 fatigue */
+  fatigue: number;
+  /** 1-5 soreness */
+  soreness: number;
+  /** 1-5 mood/readiness */
+  mood: number;
+  /** 1-5 confidence */
+  confidence: number;
+  /** Optional free text reflection */
+  notes: string | null;
+  /** Where submission originated */
+  source: TrainingFeedbackSource;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ----- Activity label persistence -----
 
 export interface CachedActivityLabel {

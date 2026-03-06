@@ -153,6 +153,33 @@ export const chatMessageFeedback = pgTable('chat_message_feedback', {
   updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
 });
 
+// ----- Training Feedback -----
+// Athlete reflection on how a training week went and felt.
+export const trainingFeedback = pgTable('training_feedback', {
+  id: text('id').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  /** ISO Monday date for the reviewed week, e.g. "2026-03-02" */
+  weekStart: text('week_start').notNull(),
+  /** 1-5 adherence to planned sessions */
+  adherence: integer('adherence').notNull(),
+  /** 1-5 perceived effort */
+  effort: integer('effort').notNull(),
+  /** 1-5 fatigue level */
+  fatigue: integer('fatigue').notNull(),
+  /** 1-5 soreness level */
+  soreness: integer('soreness').notNull(),
+  /** 1-5 mood/readiness */
+  mood: integer('mood').notNull(),
+  /** 1-5 confidence level */
+  confidence: integer('confidence').notNull(),
+  /** Optional free text athlete reflection */
+  notes: text('notes'),
+  /** Source surface where feedback was submitted */
+  source: text('source').notNull(),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
 // ----- Activity Labels -----
 // Maps to CachedActivityLabel (src/lib/db.ts)
 // Rule-based workout classification labels (e.g., "Intervals: 5x1000m @ 4:10/km Z4")

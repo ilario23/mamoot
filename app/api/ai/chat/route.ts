@@ -10,6 +10,9 @@ import {getSystemPrompt, isValidPersona} from '@/lib/aiPrompts';
 import {
   suggestFollowUpsSchema,
   saveWeeklyPreferencesSchema,
+  requestTrainingFeedbackSchema,
+  saveTrainingFeedbackSchema,
+  getTrainingFeedbackSchema,
   updateTrainingBlockSchema,
   orchestratorGoalSchema,
   orchestratorGoalUpdateSchema,
@@ -24,13 +27,14 @@ import {createRetrievalTools} from '@/lib/aiRetrievalTools';
 import {db} from '@/db';
 import {
   userSettings,
+  trainingFeedback,
   trainingBlocks,
   orchestratorGoals,
   orchestratorPlanItems,
   orchestratorBlockers,
   orchestratorHandoffs,
 } from '@/db/schema';
-import {eq, and, isNull} from 'drizzle-orm';
+import {eq, and, isNull, desc} from 'drizzle-orm';
 import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 import {chatRequestSchema} from '@/lib/aiRequestSchemas';
@@ -79,6 +83,23 @@ const getModel = (clientModel?: string) => {
 
   // Default: OpenAI
   return openai(modelOverride ?? 'gpt-4o-mini');
+};
+
+const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
+
+const getCurrentMondayIso = (): string => {
+  const now = new Date();
+  const day = now.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - daysSinceMonday);
+  return toIsoDate(monday);
+};
+
+const getPreviousMondayIso = (): string => {
+  const currentMonday = new Date(getCurrentMondayIso());
+  currentMonday.setDate(currentMonday.getDate() - 7);
+  return toIsoDate(currentMonday);
 };
 
 // ----- Route handler -----
@@ -361,6 +382,119 @@ export async function POST(req: Request) {
                 .set({weeklyPreferences: preferences})
                 .where(eq(userSettings.athleteId, athleteId));
               return {saved: true, preferences};
+            },
+          },
+          requestTrainingFeedback: {
+            description:
+              'Ask the athlete for end-of-week training reflection using a structured checklist (adherence, effort, fatigue, soreness, mood, confidence, notes). Use when feedback is missing after a training week.',
+            inputSchema: requestTrainingFeedbackSchema,
+            execute: async (input: {weekStart?: string; prompt?: string}) => {
+              const weekStart = input.weekStart ?? getPreviousMondayIso();
+              return {
+                requested: true,
+                weekStart,
+                prompt:
+                  input.prompt ??
+                  'How did last week of training go and feel overall?',
+                questions: [
+                  {key: 'adherence', label: 'How closely did you follow the plan? (1-5)'},
+                  {key: 'effort', label: 'How hard did the week feel? (1-5)'},
+                  {key: 'fatigue', label: 'How fatigued do you feel now? (1-5)'},
+                  {key: 'soreness', label: 'How sore are you now? (1-5)'},
+                  {key: 'mood', label: 'How is your mood/readiness? (1-5)'},
+                  {key: 'confidence', label: 'How confident do you feel? (1-5)'},
+                  {key: 'notes', label: 'Any notes about how training felt? (optional)'},
+                ],
+              };
+            },
+          },
+          saveTrainingFeedback: {
+            description:
+              'Persist athlete end-of-week training reflection scores and optional notes.',
+            inputSchema: saveTrainingFeedbackSchema,
+            execute: async (input: {
+              weekStart: string;
+              adherence: number;
+              effort: number;
+              fatigue: number;
+              soreness: number;
+              mood: number;
+              confidence: number;
+              notes?: string;
+            }) => {
+              const now = Date.now();
+              const id = `${athleteId}:${input.weekStart}`;
+              await db
+                .insert(trainingFeedback)
+                .values({
+                  id,
+                  athleteId,
+                  weekStart: input.weekStart,
+                  adherence: input.adherence,
+                  effort: input.effort,
+                  fatigue: input.fatigue,
+                  soreness: input.soreness,
+                  mood: input.mood,
+                  confidence: input.confidence,
+                  notes: input.notes ?? null,
+                  source: 'coach_chat',
+                  createdAt: now,
+                  updatedAt: now,
+                })
+                .onConflictDoUpdate({
+                  target: trainingFeedback.id,
+                  set: {
+                    adherence: input.adherence,
+                    effort: input.effort,
+                    fatigue: input.fatigue,
+                    soreness: input.soreness,
+                    mood: input.mood,
+                    confidence: input.confidence,
+                    notes: input.notes ?? null,
+                    source: 'coach_chat',
+                    updatedAt: now,
+                  },
+                });
+              return {saved: true, weekStart: input.weekStart};
+            },
+          },
+          getTrainingFeedback: {
+            description:
+              'Retrieve latest athlete training reflection feedback, optionally for a specific week.',
+            inputSchema: getTrainingFeedbackSchema,
+            execute: async (input: {weekStart?: string; limit?: number}) => {
+              const rows = await db
+                .select()
+                .from(trainingFeedback)
+                .where(
+                  and(
+                    eq(trainingFeedback.athleteId, athleteId),
+                    ...(input.weekStart
+                      ? [eq(trainingFeedback.weekStart, input.weekStart)]
+                      : []),
+                  ),
+                )
+                .orderBy(desc(trainingFeedback.weekStart))
+                .limit(input.weekStart ? 1 : (input.limit ?? 4));
+
+              if (rows.length === 0) {
+                return {feedback: 'No training feedback found for this athlete.'};
+              }
+
+              return {
+                feedback: rows.map((row) => ({
+                  weekStart: row.weekStart,
+                  adherence: row.adherence,
+                  effort: row.effort,
+                  fatigue: row.fatigue,
+                  soreness: row.soreness,
+                  mood: row.mood,
+                  confidence: row.confidence,
+                  notes: row.notes,
+                  source: row.source,
+                  updatedAt: row.updatedAt,
+                })),
+              };
             },
           },
           updateTrainingBlock: {

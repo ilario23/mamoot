@@ -1,5 +1,5 @@
 import {useState, useEffect, useCallback, useRef} from 'react';
-import type {CachedWeeklyPlan} from '@/lib/cacheTypes';
+import type {CachedWeeklyPlan, CachedTrainingFeedback} from '@/lib/cacheTypes';
 import type {
   OptimizationPriority,
   StrategySelectionMode,
@@ -9,6 +9,8 @@ import {
   neonGetWeeklyPlans,
   neonDeleteWeeklyPlan,
   neonActivateWeeklyPlan,
+  neonGetTrainingFeedback,
+  neonSyncTrainingFeedback,
 } from '@/lib/chatSync';
 import {fetchUserSettingsRow} from '@/lib/userSettingsSync';
 import {type AiClientError, parseAiErrorFromUnknown} from '@/lib/aiErrors';
@@ -52,7 +54,38 @@ export interface UseWeeklyPlanResult {
   savePreferences: () => Promise<void>;
   preferencesLoaded: boolean;
   lastError: AiClientError | null;
+  previousWeekStart: string;
+  previousWeekFeedback: CachedTrainingFeedback | null;
+  isLoadingPreviousWeekFeedback: boolean;
+  isSavingPreviousWeekFeedback: boolean;
+  submitPreviousWeekFeedback: (input: {
+    adherence: number;
+    effort: number;
+    fatigue: number;
+    soreness: number;
+    mood: number;
+    confidence: number;
+    notes?: string;
+  }) => Promise<void>;
+  refreshPreviousWeekFeedback: () => Promise<void>;
 }
+
+const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
+
+const getCurrentMonday = (): string => {
+  const now = new Date();
+  const day = now.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - daysSinceMonday);
+  return toIsoDate(monday);
+};
+
+const getPreviousMonday = (): string => {
+  const currentMonday = new Date(getCurrentMonday());
+  currentMonday.setDate(currentMonday.getDate() - 7);
+  return toIsoDate(currentMonday);
+};
 
 const writeActiveRef = (athleteId: number, plan: WeeklyPlan): void => {
   const ref: ActivePlanRef = {
@@ -75,9 +108,16 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   const [preferences, setPreferences] = useState('');
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [lastError, setLastError] = useState<AiClientError | null>(null);
+  const [previousWeekFeedback, setPreviousWeekFeedback] =
+    useState<CachedTrainingFeedback | null>(null);
+  const [isLoadingPreviousWeekFeedback, setIsLoadingPreviousWeekFeedback] =
+    useState(false);
+  const [isSavingPreviousWeekFeedback, setIsSavingPreviousWeekFeedback] =
+    useState(false);
   const hydratedAthleteRef = useRef<number | null>(null);
 
   const activePlan = plans.find((p) => p.isActive) ?? null;
+  const previousWeekStart = getPreviousMonday();
 
   const loadPlans = useCallback(async () => {
     if (!athleteId) return;
@@ -115,6 +155,17 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
     }
   }, [athleteId]);
 
+  const loadPreviousWeekFeedback = useCallback(async () => {
+    if (!athleteId) return;
+    setIsLoadingPreviousWeekFeedback(true);
+    try {
+      const rows = await neonGetTrainingFeedback(athleteId, previousWeekStart);
+      setPreviousWeekFeedback(rows?.[0] ?? null);
+    } finally {
+      setIsLoadingPreviousWeekFeedback(false);
+    }
+  }, [athleteId, previousWeekStart]);
+
   const savePreferences = useCallback(async () => {
     if (!athleteId) return;
     try {
@@ -135,12 +186,12 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
 
     const hydrate = async () => {
       setIsLoading(true);
-      await Promise.all([loadPlans(), loadPreferences()]);
+      await Promise.all([loadPlans(), loadPreferences(), loadPreviousWeekFeedback()]);
       setIsLoading(false);
     };
 
     hydrate();
-  }, [athleteId, loadPlans, loadPreferences]);
+  }, [athleteId, loadPlans, loadPreferences, loadPreviousWeekFeedback]);
 
   useEffect(() => {
     if (!athleteId) return;
@@ -296,6 +347,48 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
     await loadPlans();
   }, [loadPlans]);
 
+  const submitPreviousWeekFeedback = useCallback(
+    async (input: {
+      adherence: number;
+      effort: number;
+      fatigue: number;
+      soreness: number;
+      mood: number;
+      confidence: number;
+      notes?: string;
+    }) => {
+      if (!athleteId) return;
+      setIsSavingPreviousWeekFeedback(true);
+      const now = Date.now();
+      const record: CachedTrainingFeedback = {
+        id: `${athleteId}:${previousWeekStart}`,
+        athleteId,
+        weekStart: previousWeekStart,
+        adherence: input.adherence,
+        effort: input.effort,
+        fatigue: input.fatigue,
+        soreness: input.soreness,
+        mood: input.mood,
+        confidence: input.confidence,
+        notes: input.notes?.trim() ? input.notes.trim() : null,
+        source: 'weekly_plan_ui',
+        createdAt: previousWeekFeedback?.createdAt ?? now,
+        updatedAt: now,
+      };
+      try {
+        await neonSyncTrainingFeedback(record);
+        setPreviousWeekFeedback(record);
+      } finally {
+        setIsSavingPreviousWeekFeedback(false);
+      }
+    },
+    [athleteId, previousWeekFeedback?.createdAt, previousWeekStart],
+  );
+
+  const refreshPreviousWeekFeedback = useCallback(async () => {
+    await loadPreviousWeekFeedback();
+  }, [loadPreviousWeekFeedback]);
+
   return {
     plans,
     activePlan,
@@ -310,5 +403,11 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
     savePreferences,
     preferencesLoaded,
     lastError,
+    previousWeekStart,
+    previousWeekFeedback,
+    isLoadingPreviousWeekFeedback,
+    isSavingPreviousWeekFeedback,
+    submitPreviousWeekFeedback,
+    refreshPreviousWeekFeedback,
   };
 };
