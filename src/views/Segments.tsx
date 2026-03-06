@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { ArrowLeft, Star, Ruler, Mountain, Hash, TrendingUp, MapPin } from "lucide-react";
@@ -43,21 +43,20 @@ const Segments = () => {
   });
 
   const [period, setPeriod] = useState<TimePeriod>("4w");
-  const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(
+  const [manualSelectedSegmentId, setManualSelectedSegmentId] = useState<number | null>(
     null,
   );
+  const selectedSegmentId = useMemo(() => {
+    if (manualSelectedSegmentId !== null) return manualSelectedSegmentId;
+    const idParam = searchParams.get("id");
+    if (!idParam) return null;
+    const parsed = Number(idParam);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [manualSelectedSegmentId, searchParams]);
 
   // Fetch segment detail (polyline for map) when a segment is selected
   const { data: segmentDetail, isLoading: segmentDetailLoading } =
     useSegmentDetail(selectedSegmentId);
-
-  // Pick up deep-link ?id=... from URL (e.g. coming from activity detail)
-  useEffect(() => {
-    const idParam = searchParams.get("id");
-    if (idParam) {
-      setSelectedSegmentId(Number(idParam));
-    }
-  }, [searchParams]);
 
   // Compute grouped segments from synced efforts
   const allSegments = useMemo(
@@ -84,11 +83,11 @@ const Segments = () => {
   }, [allSegments, selectedSegmentId]);
 
   const handleSelectSegment = (segmentId: number) => {
-    setSelectedSegmentId(segmentId);
+    setManualSelectedSegmentId(segmentId);
   };
 
   const handleClearSelection = () => {
-    setSelectedSegmentId(null);
+    setManualSelectedSegmentId(null);
   };
 
   const handlePeriodChange = (p: TimePeriod) => {

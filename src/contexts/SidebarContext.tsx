@@ -21,23 +21,16 @@ interface SidebarContextValue {
 const SidebarContext = createContext<SidebarContextValue | null>(null);
 
 export const SidebarProvider = ({children}: {children: ReactNode}) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(STORAGE_KEY) === 'true';
+  });
 
-  // Hydrate from localStorage on mount
+  // Persist to localStorage on change
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'true') {
-      setIsCollapsed(true);
-    }
-    setHydrated(true);
-  }, []);
-
-  // Persist to localStorage on change (only after hydration)
-  useEffect(() => {
-    if (!hydrated) return;
+    if (typeof window === 'undefined') return;
     localStorage.setItem(STORAGE_KEY, String(isCollapsed));
-  }, [isCollapsed, hydrated]);
+  }, [isCollapsed]);
 
   const toggleSidebar = useCallback(() => {
     setIsCollapsed((prev) => !prev);

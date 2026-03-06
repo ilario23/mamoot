@@ -44,6 +44,8 @@ const ActivityList = ({activities}: ActivityListProps) => {
   const router = useRouter();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // TanStack Virtual intentionally provides non-memoizable callbacks.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: activities.length,
     getScrollElement: () => scrollContainerRef.current,

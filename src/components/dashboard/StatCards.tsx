@@ -7,7 +7,6 @@ import {
   useAdvancedMetricsData,
 } from '@/hooks/useStrava';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
-import {useSettings} from '@/contexts/SettingsContext';
 import {ChevronDown} from 'lucide-react';
 import {NeoSkeleton} from '@/components/ui/skeleton';
 import {useMemo, useState} from 'react';
@@ -24,7 +23,6 @@ const StatCards = () => {
   const {isAuthenticated} = useStravaAuth();
   const {data: activities, isLoading} = useDashboardActivities();
   const {data: stats} = useAthleteStats();
-  const {settings} = useSettings();
   const metrics = useAdvancedMetricsData();
   const isMobile = useIsMobile();
   const [showAll, setShowAll] = useState(false);
@@ -131,7 +129,7 @@ const StatCards = () => {
         accentClass: 'bg-primary',
       },
     ];
-  }, [activities, stats, settings, metrics]);
+  }, [activities, stats, metrics]);
 
   if (!isAuthenticated) {
     return (

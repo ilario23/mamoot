@@ -413,7 +413,7 @@ export const useSyncActivityDetails = (
     }));
 
     isSyncRunningRef.current = false;
-  }, [enabled, athlete?.id]); // Activities come from ref
+  }, [enabled, athlete?.id, initialBatchSize]); // Activities come from ref
 
   // Trigger sync once activities are loaded
   // Uses a stable ID string to only re-trigger when the actual list changes
@@ -431,7 +431,7 @@ export const useSyncActivityDetails = (
         cooldownTimerRef.current = null;
       }
     };
-  }, [activityIdKey, enabled, runSync]);
+  }, [activityIdKey, activities, enabled, runSync]);
 
   return state;
 };

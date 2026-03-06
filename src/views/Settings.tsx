@@ -1,6 +1,7 @@
 'use client';
 
 import {useState, useEffect, useCallback} from 'react';
+import Image from 'next/image';
 import {useTheme} from 'next-themes';
 import {useSearchParams, useRouter} from 'next/navigation';
 import {useSettings} from '@/contexts/SettingsContext';
@@ -400,9 +401,11 @@ const Settings = () => {
           <div className='flex items-center justify-between flex-wrap gap-4'>
             <div className='flex items-center gap-3'>
               {athlete.profile_medium ? (
-                <img
+                <Image
                   src={athlete.profile_medium}
                   alt={athleteDisplayName}
+                  width={40}
+                  height={40}
                   className='w-10 h-10 rounded-full border-3 border-border shadow-neo-sm object-cover'
                 />
               ) : (

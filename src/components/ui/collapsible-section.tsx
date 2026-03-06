@@ -1,6 +1,6 @@
 'use client';
 
-import {useRef, useState} from 'react';
+import {useState} from 'react';
 import {ChevronDown} from 'lucide-react';
 import {useIsMobile} from '@/hooks/use-mobile';
 
@@ -23,11 +23,8 @@ const CollapsibleSection = ({
 }: CollapsibleSectionProps) => {
   const isMobile = useIsMobile();
   const [isOpen, setIsOpen] = useState<boolean | null>(null);
-  const hasBeenOpenedRef = useRef(false);
 
   const resolvedOpen = isOpen ?? (isMobile ? defaultOpenMobile : defaultOpenDesktop);
-
-  if (resolvedOpen) hasBeenOpenedRef.current = true;
 
   const handleToggle = () => {
     setIsOpen(!resolvedOpen);
@@ -67,14 +64,12 @@ const CollapsibleSection = ({
           aria-hidden="true"
         />
       </button>
-      {hasBeenOpenedRef.current && (
-        <div
-          className="px-4 pb-4 md:px-5 md:pb-5"
-          style={{display: resolvedOpen ? undefined : 'none'}}
-        >
-          {children}
-        </div>
-      )}
+      <div
+        className="px-4 pb-4 md:px-5 md:pb-5"
+        style={{display: resolvedOpen ? undefined : 'none'}}
+      >
+        {children}
+      </div>
     </div>
   );
 };

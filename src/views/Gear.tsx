@@ -1,6 +1,5 @@
 'use client';
 
-import {useState, useCallback, useMemo} from 'react';
 import {Loader2, Bike, Footprints} from 'lucide-react';
 import {useQueryClient} from '@tanstack/react-query';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
@@ -14,44 +13,36 @@ const Gear = () => {
   const queryClient = useQueryClient();
 
   // Derive retired IDs from the DB-backed gear data
-  const retiredIds = useMemo(
-    () => new Set(gearData?.retiredGearIds ?? []),
-    [gearData?.retiredGearIds],
-  );
+  const retiredIds = new Set(gearData?.retiredGearIds ?? []);
 
-  const handleToggleRetire = useCallback(
-    async (gearId: string) => {
-      if (!athlete?.id) return;
-      await toggleRetiredGear(athlete.id, gearId);
-      // Invalidate gear query so retiredIds reflect the change
-      queryClient.invalidateQueries({queryKey: ['strava', 'gear', athlete.id]});
-    },
-    [queryClient, athlete?.id],
-  );
+  const handleToggleRetire = async (gearId: string) => {
+    if (!athlete?.id) return;
+    await toggleRetiredGear(athlete.id, gearId);
+    // Invalidate gear query so retiredIds reflect the change
+    queryClient.invalidateQueries({queryKey: ['strava', 'gear', athlete.id]});
+  };
 
   // Sort: active gear first, retired gear last
-  const sortedBikes = useMemo(() => {
-    if (!gearData?.bikes) return [];
-    return [...gearData.bikes].sort((a, b) => {
-      const aRetired = retiredIds.has(a.id) ? 1 : 0;
-      const bRetired = retiredIds.has(b.id) ? 1 : 0;
-      if (aRetired !== bRetired) return aRetired - bRetired;
-      // Primary first within each group
-      if (a.primary !== b.primary) return a.primary ? -1 : 1;
-      return b.distance - a.distance;
-    });
-  }, [gearData?.bikes, retiredIds]);
+  const sortedBikes = gearData?.bikes
+    ? [...gearData.bikes].sort((a, b) => {
+        const aRetired = retiredIds.has(a.id) ? 1 : 0;
+        const bRetired = retiredIds.has(b.id) ? 1 : 0;
+        if (aRetired !== bRetired) return aRetired - bRetired;
+        // Primary first within each group
+        if (a.primary !== b.primary) return a.primary ? -1 : 1;
+        return b.distance - a.distance;
+      })
+    : [];
 
-  const sortedShoes = useMemo(() => {
-    if (!gearData?.shoes) return [];
-    return [...gearData.shoes].sort((a, b) => {
-      const aRetired = retiredIds.has(a.id) ? 1 : 0;
-      const bRetired = retiredIds.has(b.id) ? 1 : 0;
-      if (aRetired !== bRetired) return aRetired - bRetired;
-      if (a.primary !== b.primary) return a.primary ? -1 : 1;
-      return b.distance - a.distance;
-    });
-  }, [gearData?.shoes, retiredIds]);
+  const sortedShoes = gearData?.shoes
+    ? [...gearData.shoes].sort((a, b) => {
+        const aRetired = retiredIds.has(a.id) ? 1 : 0;
+        const bRetired = retiredIds.has(b.id) ? 1 : 0;
+        if (aRetired !== bRetired) return aRetired - bRetired;
+        if (a.primary !== b.primary) return a.primary ? -1 : 1;
+        return b.distance - a.distance;
+      })
+    : [];
 
   // --- Not authenticated ---
   if (!isAuthenticated) {

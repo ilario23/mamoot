@@ -78,18 +78,39 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
     const inputRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
 
+    const resetPopupState = useCallback(() => {
+      setActiveCategory(null);
+      setSubItems([]);
+      setLoadingSubItems(false);
+      setHighlightedIndex(0);
+      setLocalSearch('');
+    }, []);
+
+    const loadSubItemsForCategory = useCallback(
+      async (category: MentionCategory, athleteId: number | null) => {
+        if (!category.hasSubItems) return;
+
+        setLoadingSubItems(true);
+        if (!athleteId) {
+          setSubItems([]);
+          setLoadingSubItems(false);
+          return;
+        }
+
+        let items: SubItem[] = [];
+        if (category.id === 'activity') {
+          items = await loadActivitySubItems(athleteId);
+        } else if (category.id === 'gear') {
+          items = await loadGearSubItems(athleteId);
+        }
+        setSubItems(items);
+        setLoadingSubItems(false);
+      },
+      [],
+    );
+
     // Effective search: localSearch in button mode, filterText in inline mode
     const effectiveSearch = triggeredByButton ? localSearch : filterText;
-
-    // Reset everything when popup closes
-    useEffect(() => {
-      if (!open) {
-        setActiveCategory(null);
-        setSubItems([]);
-        setHighlightedIndex(0);
-        setLocalSearch('');
-      }
-    }, [open]);
 
     // Focus the command input when opened via button (Level 1 only)
     useEffect(() => {
@@ -118,49 +139,19 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
       );
     }, [activeCategory, subItems, localSearch]);
 
-    // Reset highlight when items change
-    useEffect(() => {
-      setHighlightedIndex(0);
-    }, [filteredCategories.length, activeCategory, filteredSubItems.length]);
-
-    // Reset local search when switching levels
-    useEffect(() => {
-      setLocalSearch('');
-    }, [activeCategory]);
-
     // Scroll highlighted item into view
     useEffect(() => {
       const el = listRef.current?.querySelector('[data-highlighted="true"]');
       el?.scrollIntoView({block: 'nearest'});
     }, [highlightedIndex]);
 
-    // Load sub-items when a category with sub-items is selected
-    useEffect(() => {
-      if (!activeCategory?.hasSubItems) return;
-
-      setLoadingSubItems(true);
-      const loadItems = async () => {
-        let items: SubItem[] = [];
-        if (!athlete?.id) {
-          setSubItems([]);
-          setLoadingSubItems(false);
-          return;
-        }
-        if (activeCategory.id === 'activity') {
-          items = await loadActivitySubItems(athlete.id);
-        } else if (activeCategory.id === 'gear') {
-          items = await loadGearSubItems(athlete.id);
-        }
-        setSubItems(items);
-        setLoadingSubItems(false);
-      };
-      loadItems();
-    }, [activeCategory, athlete?.id]);
-
     const handleCategorySelect = useCallback(
       (category: MentionCategory) => {
         if (category.hasSubItems) {
+          setHighlightedIndex(0);
+          setLocalSearch('');
           setActiveCategory(category);
+          void loadSubItemsForCategory(category, athlete?.id ?? null);
         } else {
           onSelect({
             categoryId: category.id,
@@ -168,7 +159,7 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
           });
         }
       },
-      [onSelect],
+      [onSelect, loadSubItemsForCategory, athlete?.id],
     );
 
     const handleSubItemSelect = useCallback(
@@ -187,6 +178,8 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
     const handleBack = useCallback(() => {
       setActiveCategory(null);
       setSubItems([]);
+      setHighlightedIndex(0);
+      setLocalSearch('');
     }, []);
 
     // Number of navigable items in the current level
@@ -194,6 +187,10 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
     const itemCount = activeCategory
       ? 1 + filteredSubItems.length
       : filteredCategories.length;
+    const effectiveHighlightedIndex = Math.min(
+      highlightedIndex,
+      Math.max(itemCount - 1, 0),
+    );
 
     // Core navigation handler shared by ref (inline) and capture (button)
     const handleNavKey = useCallback(
@@ -213,7 +210,7 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
         if (key === 'ArrowRight') {
           // Level 1: drill into category with sub-items
           if (!activeCategory) {
-            const cat = filteredCategories[highlightedIndex];
+            const cat = filteredCategories[effectiveHighlightedIndex];
             if (cat?.hasSubItems) {
               handleCategorySelect(cat);
               return true;
@@ -232,14 +229,14 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
         if (key === 'Enter') {
           if (!activeCategory) {
             // Level 1: select highlighted category
-            const cat = filteredCategories[highlightedIndex];
+            const cat = filteredCategories[effectiveHighlightedIndex];
             if (cat) handleCategorySelect(cat);
           } else {
             // Level 2: index 0 = Back, 1..n = sub-items
-            if (highlightedIndex === 0) {
+            if (effectiveHighlightedIndex === 0) {
               handleBack();
             } else {
-              const item = filteredSubItems[highlightedIndex - 1];
+              const item = filteredSubItems[effectiveHighlightedIndex - 1];
               if (item) handleSubItemSelect(item);
             }
           }
@@ -251,7 +248,7 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
         activeCategory,
         filteredCategories,
         filteredSubItems,
-        highlightedIndex,
+        effectiveHighlightedIndex,
         itemCount,
         loadingSubItems,
         handleCategorySelect,
@@ -293,7 +290,15 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
       "data-[selected='true']:bg-transparent data-[selected=true]:text-inherit";
 
     return (
-      <Popover open={open} onOpenChange={(o) => !o && onClose()}>
+      <Popover
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            resetPopupState();
+            onClose();
+          }
+        }}
+      >
         <PopoverTrigger asChild>
           <span className='absolute bottom-full left-0 w-0 h-0' aria-hidden />
         </PopoverTrigger>
@@ -328,7 +333,7 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
                   <CommandGroup heading='Attach Data'>
                     {filteredCategories.map((cat, idx) => {
                       const Icon = cat.icon;
-                      const isHighlighted = idx === highlightedIndex;
+                      const isHighlighted = idx === effectiveHighlightedIndex;
                       return (
                         <CommandItem
                           key={cat.id}
@@ -369,11 +374,11 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
                   <CommandGroup>
                     <CommandItem
                       onSelect={handleBack}
-                      data-highlighted={highlightedIndex === 0}
+                      data-highlighted={effectiveHighlightedIndex === 0}
                       className={cn(
                         'flex items-center gap-1.5 cursor-pointer text-muted-foreground mb-1',
                         neutralize,
-                        highlightedIndex === 0 && highlightClass,
+                        effectiveHighlightedIndex === 0 && highlightClass,
                       )}
                     >
                       <ArrowLeft className='h-3 w-3' />
@@ -391,7 +396,7 @@ const MentionPopup = forwardRef<MentionPopupHandle, MentionPopupProps>(
 
                     {!loadingSubItems &&
                       filteredSubItems.map((item, idx) => {
-                        const isHighlighted = idx + 1 === highlightedIndex;
+                        const isHighlighted = idx + 1 === effectiveHighlightedIndex;
                         return (
                           <CommandItem
                             key={item.id}

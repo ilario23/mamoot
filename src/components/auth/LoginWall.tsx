@@ -1,6 +1,7 @@
 'use client';
 
 import {Suspense, useEffect, useRef} from 'react';
+import Image from 'next/image';
 import {useSearchParams, useRouter} from 'next/navigation';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {toast} from '@/hooks/use-toast';
@@ -82,9 +83,11 @@ const LoginWallContent = () => {
         {/* Logo */}
         <div className='flex items-center gap-3'>
           <div className='w-14 h-14 border-3 border-border shadow-neo flex items-center justify-center shrink-0 overflow-hidden bg-white'>
-            <img
+            <Image
               src='/icons/icon-192x192.png'
               alt='Mamoot logo'
+              width={56}
+              height={56}
               className='w-full h-full object-contain'
             />
           </div>

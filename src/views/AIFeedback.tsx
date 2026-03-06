@@ -1,6 +1,6 @@
 'use client';
 
-import {useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {AlertCircle, BarChart3, TrendingUp, MessageSquareWarning} from 'lucide-react';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {NeoLoader} from '@/components/ui/neo-loader';
@@ -54,7 +54,7 @@ const AIFeedback = () => {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<FeedbackDashboardData | null>(null);
 
-  useEffect(() => {
+  const loadFeedbackDashboard = useCallback(async () => {
     if (!athleteId) return;
     setIsLoading(true);
     setError(null);
@@ -66,26 +66,30 @@ const AIFeedback = () => {
     if (route) params.set('route', route);
     if (model) params.set('model', model);
 
-    fetch(`/api/ai/feedback-dashboard?${params.toString()}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          let message = 'Failed to load feedback dashboard';
-          try {
-            const body = await res.json();
-            if (typeof body?.error === 'string') message = body.error;
-          } catch {
-            // noop
-          }
-          throw new Error(message);
+    try {
+      const res = await fetch(`/api/ai/feedback-dashboard?${params.toString()}`);
+      if (!res.ok) {
+        let message = 'Failed to load feedback dashboard';
+        try {
+          const body = await res.json();
+          if (typeof body?.error === 'string') message = body.error;
+        } catch {
+          // noop
         }
-        return res.json() as Promise<FeedbackDashboardData>;
-      })
-      .then((next) => setData(next))
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Unexpected error'),
-      )
-      .finally(() => setIsLoading(false));
+        throw new Error(message);
+      }
+      const next = (await res.json()) as FeedbackDashboardData;
+      setData(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unexpected error');
+    } finally {
+      setIsLoading(false);
+    }
   }, [athleteId, days, persona, route, model]);
+
+  useEffect(() => {
+    void loadFeedbackDashboard();
+  }, [loadFeedbackDashboard]);
 
   const personaOptions = useMemo(
     () => (data?.byPersona ?? []).map((item) => item.key),

@@ -35,6 +35,8 @@ const SegmentList = ({
     [segments, debouncedQuery],
   );
 
+  // TanStack Virtual intentionally provides non-memoizable callbacks.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => scrollContainerRef.current,

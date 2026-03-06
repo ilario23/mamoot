@@ -35,15 +35,12 @@ export const useChatSessions = (
 ): UseChatSessionsResult => {
   const [sessions, setSessions] = useState<CachedChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(Boolean(athleteId));
   const loadedRef = useRef<string | null>(null);
 
   // Load sessions from Neon
   useEffect(() => {
-    if (!athleteId) {
-      setIsLoading(false);
-      return;
-    }
+    if (!athleteId) return;
 
     const key = `${athleteId}-${persona}`;
     if (loadedRef.current === key) return;
@@ -73,6 +70,7 @@ export const useChatSessions = (
   }, [athleteId, persona]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+  const isSessionLoading = athleteId ? isLoading : false;
 
   const createSession = useCallback(async (): Promise<CachedChatSession> => {
     const now = Date.now();
@@ -141,7 +139,7 @@ export const useChatSessions = (
   return {
     sessions,
     activeSession,
-    isLoading,
+    isLoading: isSessionLoading,
     createSession,
     selectSession,
     deleteSession,

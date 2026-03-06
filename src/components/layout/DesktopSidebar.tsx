@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import {usePathname} from 'next/navigation';
 import {PanelLeftClose, PanelLeftOpen} from 'lucide-react';
 import SidebarUserProfile from '@/components/layout/SidebarUserProfile';
@@ -83,9 +84,11 @@ const DesktopSidebar = () => {
           <div className='flex items-center justify-between'>
             <div className={`flex items-center gap-3 overflow-hidden ${isCollapsed ? 'justify-center w-full' : ''}`}>
               <div className='w-10 h-10 border-3 border-border shadow-neo-sm flex items-center justify-center shrink-0 transition-colors duration-300 overflow-hidden bg-white'>
-                <img
+                <Image
                   src='/icons/icon-192x192.png'
                   alt='Mamoot logo'
+                  width={40}
+                  height={40}
                   className='w-full h-full object-contain'
                 />
               </div>
