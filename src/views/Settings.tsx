@@ -50,6 +50,7 @@ const COMMON_ALLERGIES = [
   'Soy',
   'Eggs',
 ];
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? 'dev';
 
 const Settings = () => {
   const {settings, updateSettings, isLoadingSettings} = useSettings();
@@ -321,6 +322,9 @@ const Settings = () => {
       <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
         Settings
       </h1>
+      <p className='text-xs font-bold uppercase tracking-wider text-muted-foreground'>
+        Version {APP_VERSION}
+      </p>
 
       {/* Appearance */}
       <div className='border-3 border-border p-5 bg-background shadow-neo'>
