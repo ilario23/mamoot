@@ -22,6 +22,7 @@ export interface AdaptTrainingBlockOptions {
   adaptationType: TrainingBlockAdaptationType;
   sourceBlockId?: string;
   effectiveFromWeek?: number;
+  goalEvent?: string;
   event?: {
     name: string;
     date: string;

@@ -44,6 +44,7 @@ import {
   buildReliabilityEnvelope,
   detectRedFlagInput,
 } from '@/lib/aiReliabilityPolicy';
+import {detectCoachIntakeIntent} from '@/lib/coachIntake';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -359,6 +360,25 @@ export async function POST(req: Request) {
     ?.parts?.filter((p): p is {type: 'text'; text: string} => p.type === 'text')
     .map((p) => p.text)
     .join('') ?? '';
+  if (persona === 'coach') {
+    const guidedIntent = detectCoachIntakeIntent(latestUserText);
+    if (guidedIntent) {
+      const subject =
+        guidedIntent === 'training_block'
+          ? 'a new training block'
+          : 'a new weekly plan';
+      return new Response(
+        `[Confidence: high]\nPerfect timing — I can start a guided setup for ${subject}. Use the guided card in Coach chat to answer one focused question at a time, then review and press Generate when ready.`,
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'x-trace-id': trace.traceId,
+          },
+        },
+      );
+    }
+  }
   const reliability = buildReliabilityEnvelope({
     userText: latestUserText,
     hasGroundingData: Boolean((explicitContext && explicitContext.length > 0) || athleteId),

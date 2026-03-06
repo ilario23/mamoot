@@ -74,6 +74,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import ChatInput from '@/components/chat/ChatInput';
+import CoachGuidedIntakePanel from '@/components/chat/CoachGuidedIntakePanel';
 import StreamingIndicator from '@/components/chat/StreamingIndicator';
 import SuggestionChips from '@/components/chat/SuggestionChips';
 import ToolCallChip from '@/components/chat/ToolCallChip';
@@ -87,6 +88,7 @@ import {
   type AiProgressEvent,
   type AiProgressPhase,
 } from '@/lib/aiProgress';
+import {detectCoachIntakeIntent, type CoachIntakeIntent} from '@/lib/coachIntake';
 
 // ----- Personas -----
 
@@ -141,6 +143,8 @@ const personas: Persona[] = [
     tintBg: 'bg-primary/10',
   },
 ];
+
+const visiblePersonas = personas.filter((persona) => persona.id !== 'orchestrator');
 
 const PERSONA_STARTERS: Record<PersonaId, string[]> = {
   coach: [
@@ -262,6 +266,11 @@ interface ToolChipData {
   toolName: string;
   label: string;
   done: boolean;
+}
+
+interface PendingSendPayload {
+  text: string;
+  mentions: MentionReference[];
 }
 
 const ToolCallGroup = ({chips}: {chips: ToolChipData[]}) => {
@@ -440,6 +449,8 @@ const usePersistentChat = (sessionId: string | null) => {
 
 const AITeamChat = () => {
   const [activePersona, setActivePersona] = useState<PersonaId>('coach');
+  const [requestedCoachIntake, setRequestedCoachIntake] =
+    useState<CoachIntakeIntent | null>(null);
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
@@ -488,6 +499,8 @@ const AITeamChat = () => {
   const [weeklyPlanGenerationError, setWeeklyPlanGenerationError] = useState<
     ReturnType<typeof parseAiErrorFromUnknown> | null
   >(null);
+  const [pendingSendPayload, setPendingSendPayload] =
+    useState<PendingSendPayload | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const {athlete} = useStravaAuth();
@@ -515,7 +528,13 @@ const AITeamChat = () => {
   const activeSM = sessionManagers[activePersona];
   const activeSession = activeSM.activeSession;
   const currentPersona =
-    personas.find((p) => p.id === activePersona) ?? personas[0];
+    visiblePersonas.find((p) => p.id === activePersona) ?? visiblePersonas[0];
+
+  useEffect(() => {
+    if (activePersona === 'orchestrator') {
+      setActivePersona('coach');
+    }
+  }, [activePersona]);
 
   // Persistence
   const {loadMessages, persistMessage, getMemorySummary, maybeTriggerSummary} =
@@ -702,10 +721,20 @@ const AITeamChat = () => {
     async (text: string, mentions: MentionReference[]) => {
       if (!text.trim() || activeChat.status === 'streaming') return;
 
-      // Auto-create a session if none exists
+      // Auto-create a session if none exists, then replay this send once mounted.
       let session = activeSession;
       if (!session) {
-        session = await activeSM.createSession();
+        await activeSM.createSession();
+        setPendingSendPayload({text, mentions});
+        return;
+      }
+
+      if (activePersona === 'coach') {
+        const intakeIntent = detectCoachIntakeIntent(text);
+        if (intakeIntent) {
+          setRequestedCoachIntake(intakeIntent);
+          return;
+        }
       }
 
       // For long sessions, trim messages to context window
@@ -760,8 +789,17 @@ const AITeamChat = () => {
       activeSM,
       athleteId,
       resolveAll,
+      setRequestedCoachIntake,
+      setPendingSendPayload,
     ],
   );
+
+  useEffect(() => {
+    if (!pendingSendPayload || !activeSession?.id) return;
+    const payload = pendingSendPayload;
+    setPendingSendPayload(null);
+    void handleSend(payload.text, payload.mentions);
+  }, [pendingSendPayload, activeSession?.id, handleSend]);
 
   const handleNewConversation = useCallback(async () => {
     await activeSM.createSession();
@@ -1246,7 +1284,7 @@ const AITeamChat = () => {
 
       {/* Persona switcher */}
       <div className='border-t-3 border-border bg-background shrink-0'>
-        {personas.map((p) => {
+        {visiblePersonas.map((p) => {
           const isActive = activePersona === p.id;
           const sm = sessionManagers[p.id];
           const sessionCount = sm.sessions.length;
@@ -1448,7 +1486,7 @@ const AITeamChat = () => {
         </div>
 
         <div className='md:hidden border-b-2 border-border bg-background p-1.5 grid grid-cols-4 gap-1'>
-          {personas.map((persona) => {
+          {visiblePersonas.map((persona) => {
             const active = activePersona === persona.id;
             return (
               <button
@@ -1965,6 +2003,24 @@ const AITeamChat = () => {
           </div>
         )}
 
+        <CoachGuidedIntakePanel
+          activePersonaId={activePersona}
+          athleteId={athleteId}
+          selectedModel={selectedModel}
+          launchIntent={requestedCoachIntake}
+          onLaunchHandled={() => setRequestedCoachIntake(null)}
+          onWeeklyPlanCreated={async () => {
+            if (!athleteId) return;
+            const weeklyPlan = await neonGetActiveWeeklyPlan(athleteId);
+            setActiveWeeklyPlan(weeklyPlan ?? null);
+          }}
+          onTrainingBlockCreated={async () => {
+            if (!athleteId) return;
+            const trainingBlock = await neonGetActiveTrainingBlock(athleteId);
+            setActiveTrainingBlock(trainingBlock ?? null);
+          }}
+        />
+
         {/* Input with @-mention support */}
         <ChatInput
           onSend={handleSend}
@@ -1996,7 +2052,7 @@ const AITeamChat = () => {
             <div className='flex-1' />
             {/* Persona icons */}
             <div className='border-t-3 border-border w-full bg-background'>
-              {personas.map((p) => {
+              {visiblePersonas.map((p) => {
                 const isActive = activePersona === p.id;
                 return (
                   <button

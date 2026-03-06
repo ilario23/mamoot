@@ -201,8 +201,8 @@ export async function POST(req: Request) {
   const multiAgentConfig = resolveMultiAgentRuntimeConfig();
   const multiAgentEnabled =
     multiAgentConfig.enabled && (useMultiAgent ?? true);
-  const model = getModel(clientModel);
-  const resolvedModel =
+  let model = getModel(clientModel);
+  let resolvedModel =
     clientModel && ALLOWED_MODELS[clientModel]
       ? clientModel
       : (process.env.AI_MODEL ??
@@ -317,6 +317,23 @@ export async function POST(req: Request) {
     console.log(`[WeeklyPlan] Week: ${weekStart} to ${weekEnd}`);
 
     const settings = settingsRows[0];
+    const settingsModel =
+      typeof settings?.aiModel === 'string'
+        ? settings.aiModel
+        : null;
+    const effectiveClientModel =
+      clientModel ??
+      (settingsModel && ALLOWED_MODELS[settingsModel]
+        ? settingsModel
+        : undefined);
+    model = getModel(effectiveClientModel);
+    resolvedModel =
+      effectiveClientModel && ALLOWED_MODELS[effectiveClientModel]
+        ? effectiveClientModel
+        : (process.env.AI_MODEL ??
+          (process.env.AI_PROVIDER === 'anthropic'
+            ? 'claude-sonnet-4-5'
+            : 'gpt-4o-mini'));
     const preferences = clientPreferences || settings?.weeklyPreferences || null;
     const zonesRaw = settings?.zones as Record<string, [number, number]> | undefined;
     const typedZones = zonesRaw as UserSettings['zones'] | undefined;
@@ -743,6 +760,8 @@ export async function POST(req: Request) {
       promptHash: promptHash(physioPrompt),
       coachSessions: coachSessions.length,
     });
+    const allowMissingStrengthBeforeDate =
+      effectiveMode === 'remaining_days' ? todayIso : undefined;
     if (!hasRuntimeBudget()) {
       throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_PHYSIO');
     }
@@ -750,8 +769,13 @@ export async function POST(req: Request) {
       model,
       schema: physioWeekOutputSchema,
       prompt: physioPrompt,
-      semanticCheck: (candidate) =>
-        validateCombinedWeekSemantics(coachObject, candidate),
+      semanticCheck: (candidate) => {
+        return validateCombinedWeekSemantics(
+          coachObject,
+          candidate,
+          {allowMissingStrengthBeforeDate},
+        );
+      },
     });
     specialistTurnsUsed += 1;
     roundCount += 1;
@@ -803,7 +827,9 @@ export async function POST(req: Request) {
           schema: physioWeekOutputSchema,
           prompt: repairPrompt,
           semanticCheck: (candidate) =>
-            validateCombinedWeekSemantics(coachObject, candidate),
+            validateCombinedWeekSemantics(coachObject, candidate, {
+              allowMissingStrengthBeforeDate,
+            }),
         });
         repairTurnsUsed += 1;
         roundCount += 1;

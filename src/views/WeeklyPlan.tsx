@@ -23,6 +23,16 @@ import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {NeoLoader} from '@/components/ui/neo-loader';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
 import AiGenerationStatusCard from '@/components/ai/AiGenerationStatusCard';
 import WeeklyReflectionForm from '@/components/feedback/WeeklyReflectionForm';
@@ -476,6 +486,8 @@ const WeeklyPlan = () => {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [regenerationMode, setRegenerationMode] = useState<'full' | 'remaining_days'>('full');
   const [advancedRegenerationOpen, setAdvancedRegenerationOpen] = useState(false);
+  const [deletePlanConfirmId, setDeletePlanConfirmId] = useState<string | null>(null);
+  const [isDeletingPlan, setIsDeletingPlan] = useState(false);
   const [targetWeekStart, setTargetWeekStart] = useState('');
   const [targetWeekSelection, setTargetWeekSelection] = useState<'current' | 'next'>('current');
   const [regenerationPreferences, setRegenerationPreferences] = useState('');
@@ -614,6 +626,26 @@ const WeeklyPlan = () => {
   const handleToggleHistory = () => {
     setHistoryOpen((prev) => !prev);
   };
+
+  const handleDeletePlanRequest = useCallback((planId: string) => {
+    setDeletePlanConfirmId(planId);
+  }, []);
+
+  const handleDeletePlanConfirm = useCallback(async () => {
+    if (!deletePlanConfirmId || isDeletingPlan) return;
+    setIsDeletingPlan(true);
+    try {
+      await deletePlan(deletePlanConfirmId);
+      setDeletePlanConfirmId(null);
+    } finally {
+      setIsDeletingPlan(false);
+    }
+  }, [deletePlan, deletePlanConfirmId, isDeletingPlan]);
+
+  const planToDelete = useMemo(
+    () => plans.find((plan) => plan.id === deletePlanConfirmId) ?? null,
+    [deletePlanConfirmId, plans],
+  );
 
   const handleOpenFeedback = () => {
     modalReturnFocusRef.current = document.activeElement as HTMLElement;
@@ -1284,7 +1316,7 @@ const WeeklyPlan = () => {
                       plan={plan}
                       isActive={plan.id === activePlan?.id}
                       onActivate={() => activatePlan(plan.id)}
-                      onDelete={() => deletePlan(plan.id)}
+                      onDelete={() => handleDeletePlanRequest(plan.id)}
                     />
                   ))}
                 </div>
@@ -1298,6 +1330,45 @@ const WeeklyPlan = () => {
           />
         </>
       )}
+
+      <AlertDialog
+        open={!!deletePlanConfirmId}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingPlan) setDeletePlanConfirmId(null);
+        }}
+      >
+        <AlertDialogContent className='border-3 border-border max-w-[320px] p-4 gap-3'>
+          <AlertDialogHeader>
+            <AlertDialogTitle className='font-black text-base'>
+              Delete weekly plan?
+            </AlertDialogTitle>
+            <AlertDialogDescription className='text-sm text-muted-foreground space-y-2'>
+              <span className='block'>
+                This will permanently delete
+                {planToDelete ? ` "${planToDelete.title}"` : ' this plan'}.
+              </span>
+              <span className='block font-bold text-foreground text-xs'>
+                This action cannot be undone.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={isDeletingPlan}
+              className='border-2 border-border font-bold text-xs'
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeletePlanConfirm}
+              disabled={isDeletingPlan}
+              className='bg-destructive text-destructive-foreground hover:bg-destructive/90 border-2 border-border font-black text-xs'
+            >
+              {isDeletingPlan ? 'Deleting...' : 'Delete plan'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

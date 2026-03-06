@@ -148,6 +148,7 @@ export async function POST(req: Request) {
     mode?: 'create' | 'adapt';
     goalEvent: string;
     goalDate: string;
+    requirements?: string;
     totalWeeks?: number;
     model?: string;
     adaptationType?:
@@ -173,6 +174,7 @@ export async function POST(req: Request) {
     mode,
     goalEvent,
     goalDate,
+    requirements,
     totalWeeks: clientWeeks,
     model: clientModel,
     adaptationType,
@@ -873,6 +875,9 @@ ${prText}
 
 ## Injuries
 ${injuriesText}
+
+## Athlete Requirements
+${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'}
 
 ## Instructions
 - Divide the ${totalWeeks} weeks into logical training phases (e.g. Base, Build 1, Build 2, Taper, Race Week).

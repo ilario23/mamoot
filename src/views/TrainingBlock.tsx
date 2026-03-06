@@ -19,6 +19,16 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import {NeoLoader} from '@/components/ui/neo-loader';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {useTrainingBlock} from '@/hooks/useTrainingBlock';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
@@ -455,6 +465,7 @@ const TrainingBlockView = () => {
   const [eventDate, setEventDate] = useState('');
   const [eventDistanceKm, setEventDistanceKm] = useState('');
   const [eventPriority, setEventPriority] = useState<'A' | 'B' | 'C'>('B');
+  const [goalEvent, setGoalEvent] = useState('');
   const [newGoalDate, setNewGoalDate] = useState('');
   const [strategySelectionMode, setStrategySelectionMode] =
     useState<StrategySelectionMode>(settings.strategySelectionMode ?? 'auto');
@@ -464,6 +475,10 @@ const TrainingBlockView = () => {
     useState<OptimizationPriority>(
       settings.optimizationPriority ?? 'race_performance',
     );
+  const [deleteBlockConfirmId, setDeleteBlockConfirmId] = useState<string | null>(
+    null,
+  );
+  const [isDeletingBlock, setIsDeletingBlock] = useState(false);
 
   const currentWeek = useMemo(
     () =>
@@ -503,6 +518,31 @@ const TrainingBlockView = () => {
   const handleToggleHistory = () => {
     setHistoryOpen((prev) => !prev);
   };
+
+  const handleDeleteBlockRequest = (blockId: string) => {
+    setDeleteBlockConfirmId(blockId);
+  };
+
+  const handleDeleteBlockConfirm = async () => {
+    if (!deleteBlockConfirmId || isDeletingBlock) return;
+    setIsDeletingBlock(true);
+    try {
+      await deleteBlock(deleteBlockConfirmId);
+      setDeleteBlockConfirmId(null);
+    } finally {
+      setIsDeletingBlock(false);
+    }
+  };
+
+  const blockToDelete = useMemo(
+    () => blocks.find((block) => block.id === deleteBlockConfirmId) ?? null,
+    [blocks, deleteBlockConfirmId],
+  );
+  const isAdaptationInputInvalid =
+    !goalEvent.trim()
+    || (adaptationType === 'insert_event' && (!eventName.trim() || !eventDate))
+    || (adaptationType === 'shift_target_date' && !newGoalDate);
+  const isApplyAdaptationDisabled = isGenerating || isAdaptationInputInvalid;
 
   if (isLoading) {
     return (
@@ -582,6 +622,7 @@ const TrainingBlockView = () => {
                     setEventDate('');
                     setEventDistanceKm('');
                     setEventPriority('B');
+                    setGoalEvent(activeBlock.goalEvent);
                     setNewGoalDate(activeBlock.goalDate);
                     setStrategySelectionMode(
                       settings.strategySelectionMode ?? 'auto',
@@ -607,6 +648,22 @@ const TrainingBlockView = () => {
             {editOpen && (
               <div className="space-y-3 border-t-3 border-border pt-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <label
+                      htmlFor="goal-event"
+                      className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
+                    >
+                      Goal Event
+                    </label>
+                    <input
+                      id="goal-event"
+                      type="text"
+                      value={goalEvent}
+                      onChange={(e) => setGoalEvent(e.target.value)}
+                      placeholder="e.g. Berlin Marathon"
+                      className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
                   <div>
                     <label
                       htmlFor="adaptation-type"
@@ -753,10 +810,13 @@ const TrainingBlockView = () => {
                         onChange={(e) => setEventPriority(e.target.value as 'A' | 'B' | 'C')}
                         className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
                       >
-                        <option value="B">B (default tune-up)</option>
-                        <option value="A">A</option>
-                        <option value="C">C</option>
+                        <option value="A">A - Primary race effort (high priority)</option>
+                        <option value="B">B - Secondary/tune-up race (moderate priority)</option>
+                        <option value="C">C - Low-priority or fun event (minimal disruption)</option>
                       </select>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        A = peak target event, B = important tune-up, C = training event.
+                      </p>
                     </div>
                   <div>
                     <label
@@ -798,15 +858,18 @@ const TrainingBlockView = () => {
                   <button
                     onClick={async () => {
                       if (!activeBlock) return;
+                      if (!goalEvent.trim()) return;
                       if (adaptationType === 'insert_event' && (!eventName.trim() || !eventDate)) return;
                       if (adaptationType === 'shift_target_date' && !newGoalDate) return;
-
-                      setEditOpen(false);
-                      await adaptBlock({
+                      const adaptedBlock = await adaptBlock({
                         adaptationType,
                         sourceBlockId: activeBlock.id,
                         effectiveFromWeek: effectiveFromWeek ? Number(effectiveFromWeek) : undefined,
-                        goalDate: adaptationType === 'shift_target_date' ? newGoalDate : undefined,
+                        goalEvent: goalEvent.trim(),
+                        goalDate:
+                          adaptationType === 'shift_target_date'
+                            ? newGoalDate
+                            : activeBlock.goalDate,
                         strategySelectionMode,
                         strategyPreset,
                         optimizationPriority,
@@ -819,11 +882,12 @@ const TrainingBlockView = () => {
                             }
                           : undefined,
                       });
+                      if (adaptedBlock) {
+                        setEditOpen(false);
+                      }
                     }}
                     disabled={
-                      isGenerating
-                      || (adaptationType === 'insert_event' && (!eventName.trim() || !eventDate))
-                      || (adaptationType === 'shift_target_date' && !newGoalDate)
+                      isApplyAdaptationDisabled
                     }
                     tabIndex={0}
                     aria-label="Apply block adaptation"
@@ -945,7 +1009,7 @@ const TrainingBlockView = () => {
                       block={block}
                       isActive={block.id === activeBlock?.id}
                       onActivate={() => activateBlock(block.id)}
-                      onDelete={() => deleteBlock(block.id)}
+                      onDelete={() => handleDeleteBlockRequest(block.id)}
                     />
                   ))}
                 </div>
@@ -954,6 +1018,45 @@ const TrainingBlockView = () => {
           )}
         </>
       )}
+
+      <AlertDialog
+        open={!!deleteBlockConfirmId}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingBlock) setDeleteBlockConfirmId(null);
+        }}
+      >
+        <AlertDialogContent className="border-3 border-border max-w-[320px] p-4 gap-3">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-black text-base">
+              Delete training block?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-muted-foreground space-y-2">
+              <span className="block">
+                This will permanently delete
+                {blockToDelete ? ` "${blockToDelete.goalEvent}"` : ' this block'}.
+              </span>
+              <span className="block font-bold text-foreground text-xs">
+                This action cannot be undone.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={isDeletingBlock}
+              className="border-2 border-border font-bold text-xs"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteBlockConfirm}
+              disabled={isDeletingBlock}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 border-2 border-border font-black text-xs"
+            >
+              {isDeletingBlock ? 'Deleting...' : 'Delete block'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

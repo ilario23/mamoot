@@ -79,6 +79,7 @@ export const validateCoachWeekOutput = (
 export const validateCombinedWeekSemantics = (
   coach: CoachWeekOutput,
   physio: PhysioWeekOutput,
+  options?: {allowMissingStrengthBeforeDate?: string},
 ): {ok: boolean; reason?: string} => {
   const coachDates = coach.sessions.map((session) => session.date);
   const coachDateSet = new Set(coachDates);
@@ -141,6 +142,12 @@ export const validateCombinedWeekSemantics = (
     if (runSession.type !== 'strength') continue;
     const physioSession = physioByDate.get(runSession.date);
     if (!physioSession) {
+      if (
+        options?.allowMissingStrengthBeforeDate &&
+        runSession.date < options.allowMissingStrengthBeforeDate
+      ) {
+        continue;
+      }
       return {
         ok: false,
         reason: `Coach strength slot missing physio session on ${runSession.date}`,

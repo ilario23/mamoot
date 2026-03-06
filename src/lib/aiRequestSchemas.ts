@@ -48,6 +48,7 @@ export const trainingBlockRequestSchema = z.object({
   mode: z.enum(['create', 'adapt']).optional(),
   goalEvent: z.string().min(1),
   goalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  requirements: z.string().optional(),
   totalWeeks: z.number().int().positive().optional(),
   model: z.string().optional(),
   adaptationType: z.enum([
