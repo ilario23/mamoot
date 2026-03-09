@@ -138,10 +138,26 @@ const PERSONA_STARTERS: Record<PersonaId, string[]> = {
     'Hydration strategy',
   ],
   physio: [
-    "Prevent runner's knee",
+    'Add data to current week plan',
     'Post-run stretch routine',
     'Hip mobility drills',
   ],
+};
+
+const STARTER_MESSAGE_OVERRIDES: Partial<
+  Record<PersonaId, Record<string, string>>
+> = {
+  physio: {
+    'Add data to current week plan':
+      'Please add physio data to my current week plan now. Use my current weekly plan context and provide concrete strength/mobility additions that fit strenght day without  effecting the other days.',
+  },
+};
+
+const getStarterMessage = (
+  persona: PersonaId,
+  starterLabel: string,
+): string => {
+  return STARTER_MESSAGE_OVERRIDES[persona]?.[starterLabel] ?? starterLabel;
 };
 
 const PersonaAvatar = ({
@@ -260,7 +276,10 @@ type PlanningToolOutput = {
   };
 };
 
-const renderPlanningToolResult = (toolName: string, output: PlanningToolOutput) => {
+const renderPlanningToolResult = (
+  toolName: string,
+  output: PlanningToolOutput,
+) => {
   const flowLabel =
     output.flow === 'weekly_plan'
       ? 'Weekly plan'
@@ -289,11 +308,17 @@ const renderPlanningToolResult = (toolName: string, output: PlanningToolOutput) 
         {title}
       </p>
       <p className='font-bold'>{flowLabel}</p>
-      {output.summary && <p className='text-muted-foreground'>{output.summary}</p>}
-      {output.warning && (
-        <p className='text-orange-600 dark:text-orange-400 font-bold'>{output.warning}</p>
+      {output.summary && (
+        <p className='text-muted-foreground'>{output.summary}</p>
       )}
-      {output.error && <p className='text-destructive font-bold'>{output.error}</p>}
+      {output.warning && (
+        <p className='text-orange-600 dark:text-orange-400 font-bold'>
+          {output.warning}
+        </p>
+      )}
+      {output.error && (
+        <p className='text-destructive font-bold'>{output.error}</p>
+      )}
       {output.missing && output.missing.length > 0 && (
         <div>
           <p className='font-black uppercase tracking-wider text-[10px] text-muted-foreground mb-1'>
@@ -321,11 +346,15 @@ const renderPlanningToolResult = (toolName: string, output: PlanningToolOutput) 
           {typeof output.result.totalWeeks === 'number' && (
             <p>Length: {output.result.totalWeeks} weeks</p>
           )}
-          {output.result.id && <p className='text-muted-foreground'>ID: {output.result.id}</p>}
+          {output.result.id && (
+            <p className='text-muted-foreground'>ID: {output.result.id}</p>
+          )}
         </div>
       )}
       {output.status && (
-        <p className='text-[11px] font-bold text-secondary'>Status: {output.status}</p>
+        <p className='text-[11px] font-bold text-secondary'>
+          Status: {output.status}
+        </p>
       )}
     </div>
   );
@@ -518,8 +547,10 @@ const AITeamChat = ({
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
-  const [mobileOrchestratorExpanded, setMobileOrchestratorExpanded] = useState(false);
-  const [desktopOrchestratorExpanded, setDesktopOrchestratorExpanded] = useState(false);
+  const [mobileOrchestratorExpanded, setMobileOrchestratorExpanded] =
+    useState(false);
+  const [desktopOrchestratorExpanded, setDesktopOrchestratorExpanded] =
+    useState(false);
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
     string | null
   >(null);
@@ -535,23 +566,22 @@ const AITeamChat = ({
   const [orchestratorHandoffs, setOrchestratorHandoffs] = useState<
     CachedOrchestratorHandoff[]
   >([]);
-  const [activeWeeklyPlan, setActiveWeeklyPlan] = useState<CachedWeeklyPlan | null>(
-    null,
-  );
+  const [activeWeeklyPlan, setActiveWeeklyPlan] =
+    useState<CachedWeeklyPlan | null>(null);
   const [activeTrainingBlock, setActiveTrainingBlock] =
     useState<CachedTrainingBlock | null>(null);
   const [isWeeklyPlanGenerating, setIsWeeklyPlanGenerating] = useState(false);
-  const [weeklyPlanProgress, setWeeklyPlanProgress] = useState<AiProgressEvent[]>(
-    [],
-  );
-  const [weeklyPlanCurrentMessage, setWeeklyPlanCurrentMessage] =
-    useState<string | null>(null);
+  const [weeklyPlanProgress, setWeeklyPlanProgress] = useState<
+    AiProgressEvent[]
+  >([]);
+  const [weeklyPlanCurrentMessage, setWeeklyPlanCurrentMessage] = useState<
+    string | null
+  >(null);
   const [weeklyPlanPhaseStatusMap, setWeeklyPlanPhaseStatusMap] = useState<
     Record<AiProgressPhase, 'pending' | 'in_progress' | 'done' | 'error'>
   >(createInitialPhaseStatusMap());
-  const [weeklyPlanGenerationError, setWeeklyPlanGenerationError] = useState<
-    ReturnType<typeof parseAiErrorFromUnknown> | null
-  >(null);
+  const [weeklyPlanGenerationError, setWeeklyPlanGenerationError] =
+    useState<ReturnType<typeof parseAiErrorFromUnknown> | null>(null);
   const [pendingSendPayload, setPendingSendPayload] =
     useState<PendingSendPayload | null>(null);
   const [chatInputPrefill, setChatInputPrefill] =
@@ -562,9 +592,9 @@ const AITeamChat = ({
   const activeSessionIdOnUnmountRef = useRef<string | null>(null);
   const activeSessionMessageCountOnUnmountRef = useRef(0);
   const activeChatMessageCountOnUnmountRef = useRef(0);
-  const activeDeleteSessionOnUnmountRef = useRef<((id: string) => Promise<void>) | null>(
-    null,
-  );
+  const activeDeleteSessionOnUnmountRef = useRef<
+    ((id: string) => Promise<void>) | null
+  >(null);
 
   const {athlete} = useStravaAuth();
   const {settings} = useSettings();
@@ -656,7 +686,11 @@ const AITeamChat = ({
   }, [activeSession?.id, athleteId]);
 
   useEffect(() => {
-    if ((activePersona as string) !== 'orchestrator' || !activeSession?.id || !athleteId) {
+    if (
+      (activePersona as string) !== 'orchestrator' ||
+      !activeSession?.id ||
+      !athleteId
+    ) {
       setOrchestratorGoals([]);
       setOrchestratorPlanItems([]);
       setOrchestratorBlockers([]);
@@ -866,7 +900,8 @@ const AITeamChat = ({
 
   useEffect(() => {
     activeSessionIdOnUnmountRef.current = activeSession?.id ?? null;
-    activeSessionMessageCountOnUnmountRef.current = activeSession?.messageCount ?? 0;
+    activeSessionMessageCountOnUnmountRef.current =
+      activeSession?.messageCount ?? 0;
     activeChatMessageCountOnUnmountRef.current = activeChat.messages.length;
     activeDeleteSessionOnUnmountRef.current = activeSM.deleteSession;
   }, [
@@ -972,7 +1007,10 @@ const AITeamChat = ({
           body = null;
         }
         setWeeklyPlanGenerationError(
-          parseAiErrorFromUnknown(body, 'Failed to generate weekly plan from orchestrator'),
+          parseAiErrorFromUnknown(
+            body,
+            'Failed to generate weekly plan from orchestrator',
+          ),
         );
         return;
       }
@@ -1040,7 +1078,8 @@ const AITeamChat = ({
 
           if (event.type === 'error') {
             markTerminalState('error');
-            const meta = (event.meta as {code?: string} | undefined) ?? undefined;
+            const meta =
+              (event.meta as {code?: string} | undefined) ?? undefined;
             setWeeklyPlanGenerationError(
               parseAiErrorFromUnknown(
                 {code: meta?.code, error: event.message},
@@ -1066,7 +1105,10 @@ const AITeamChat = ({
       }
     } catch (error) {
       setWeeklyPlanGenerationError(
-        parseAiErrorFromUnknown(error, 'Failed to generate weekly plan from orchestrator'),
+        parseAiErrorFromUnknown(
+          error,
+          'Failed to generate weekly plan from orchestrator',
+        ),
       );
       setWeeklyPlanPhaseStatusMap((prev) => ({
         ...prev,
@@ -1114,13 +1156,16 @@ const AITeamChat = ({
     [orchestratorGoals],
   );
   const openBlockerCount = useMemo(
-    () => orchestratorBlockers.filter((blocker) => blocker.status === 'open').length,
+    () =>
+      orchestratorBlockers.filter((blocker) => blocker.status === 'open')
+        .length,
     [orchestratorBlockers],
   );
   const pendingHandoffCount = useMemo(
     () =>
       orchestratorHandoffs.filter(
-        (handoff) => handoff.status !== 'done' && handoff.status !== 'cancelled',
+        (handoff) =>
+          handoff.status !== 'done' && handoff.status !== 'cancelled',
       ).length,
     [orchestratorHandoffs],
   );
@@ -1134,8 +1179,12 @@ const AITeamChat = ({
           let coordinationSummary: string | null = null;
           if (item.detail) {
             try {
-              const parsed = JSON.parse(item.detail) as {summary?: string; conflictSummary?: string};
-              coordinationSummary = parsed.summary ?? parsed.conflictSummary ?? null;
+              const parsed = JSON.parse(item.detail) as {
+                summary?: string;
+                conflictSummary?: string;
+              };
+              coordinationSummary =
+                parsed.summary ?? parsed.conflictSummary ?? null;
             } catch {
               coordinationSummary = null;
             }
@@ -1281,7 +1330,11 @@ const AITeamChat = ({
     </div>
   );
 
-  const renderOrchestratorDetails = ({denseMobile = false}: {denseMobile?: boolean}) => (
+  const renderOrchestratorDetails = ({
+    denseMobile = false,
+  }: {
+    denseMobile?: boolean;
+  }) => (
     <div className='space-y-2'>
       <div className='border-2 border-border p-2 bg-background space-y-2'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
@@ -1290,7 +1343,9 @@ const AITeamChat = ({
           </p>
           <button
             onClick={handleGenerateWeeklyPlanFromOrchestrator}
-            disabled={isWeeklyPlanGenerating || !athleteId || !activeSession?.id}
+            disabled={
+              isWeeklyPlanGenerating || !athleteId || !activeSession?.id
+            }
             tabIndex={0}
             aria-label='Generate weekly plan from orchestrator'
             className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground disabled:opacity-50 disabled:pointer-events-none'
@@ -1314,7 +1369,10 @@ const AITeamChat = ({
           />
         )}
         {weeklyPlanGenerationError && (
-          <AiErrorBanner error={weeklyPlanGenerationError} className='text-xs' />
+          <AiErrorBanner
+            error={weeklyPlanGenerationError}
+            className='text-xs'
+          />
         )}
       </div>
       <div
@@ -1400,15 +1458,22 @@ const AITeamChat = ({
         ) : (
           <div className='space-y-1.5'>
             {recentCoordinationItems.map((item) => (
-              <div key={item.id} className='border border-border/70 bg-muted/30 px-2 py-1.5'>
+              <div
+                key={item.id}
+                className='border border-border/70 bg-muted/30 px-2 py-1.5'
+              >
                 <div className='flex items-center justify-between gap-2'>
-                  <span className='text-xs font-bold truncate'>{item.title}</span>
+                  <span className='text-xs font-bold truncate'>
+                    {item.title}
+                  </span>
                   <span className='text-[10px] font-black uppercase tracking-wider text-muted-foreground'>
                     {item.ownerPersona} · {item.status}
                   </span>
                 </div>
                 {item.summary && (
-                  <p className='text-[11px] text-muted-foreground mt-1'>{item.summary}</p>
+                  <p className='text-[11px] text-muted-foreground mt-1'>
+                    {item.summary}
+                  </p>
                 )}
               </div>
             ))}
@@ -1462,7 +1527,9 @@ const AITeamChat = ({
                 tabIndex={0}
                 aria-label={`Switch to ${persona.label}`}
                 className={`px-1.5 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${
-                  active ? `${persona.tintBg} ${persona.labelColor}` : 'bg-background text-muted-foreground'
+                  active
+                    ? `${persona.tintBg} ${persona.labelColor}`
+                    : 'bg-background text-muted-foreground'
                 }`}
               >
                 {persona.label}
@@ -1538,7 +1605,9 @@ const AITeamChat = ({
                 </div>
               </button>
               {mobileOrchestratorExpanded && (
-                <div className='pt-2'>{renderOrchestratorDetails({denseMobile: true})}</div>
+                <div className='pt-2'>
+                  {renderOrchestratorDetails({denseMobile: true})}
+                </div>
               )}
             </div>
 
@@ -1546,7 +1615,9 @@ const AITeamChat = ({
             <div className='hidden md:block border-b-3 border-border bg-background p-3'>
               <button
                 onClick={() =>
-                  setDesktopOrchestratorExpanded((prevExpanded) => !prevExpanded)
+                  setDesktopOrchestratorExpanded(
+                    (prevExpanded) => !prevExpanded,
+                  )
                 }
                 aria-label='Toggle orchestrator status summary'
                 aria-expanded={desktopOrchestratorExpanded}
@@ -1579,7 +1650,9 @@ const AITeamChat = ({
                 </div>
               </button>
               {desktopOrchestratorExpanded && (
-                <div className='pt-3'>{renderOrchestratorDetails({denseMobile: false})}</div>
+                <div className='pt-3'>
+                  {renderOrchestratorDetails({denseMobile: false})}
+                </div>
               )}
             </div>
           </>
@@ -1627,7 +1700,12 @@ const AITeamChat = ({
                   {PERSONA_STARTERS[activePersona].map((starter, idx) => (
                     <button
                       key={starter}
-                      onClick={() => handleSend(starter, [])}
+                      onClick={() =>
+                        handleSend(
+                          getStarterMessage(activePersona, starter),
+                          [],
+                        )
+                      }
                       tabIndex={0}
                       aria-label={`Ask: ${starter}`}
                       className={`animate-fade-in-up px-3 py-1.5 text-xs font-black border-3 border-border shadow-neo-sm transition-all hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none active:translate-x-1 active:translate-y-1 cursor-pointer ${currentPersona.tintBg} ${currentPersona.labelColor}`}
@@ -1664,7 +1742,9 @@ const AITeamChat = ({
                 .map((part) => part.text)
                 .join('') ?? '';
             if (hasSuggestionTool && textContent) {
-              textContent = textContent.replace(/(\s*\[[^\]]+\])+\s*$/, '').trim();
+              textContent = textContent
+                .replace(/(\s*\[[^\]]+\])+\s*$/, '')
+                .trim();
             }
             // Strip leaked tool-call artifacts like "functions.suggestFollowUps" (+ trailing garble)
             textContent = textContent.replace(/functions\.\w+\S*/g, '').trim();
@@ -1787,7 +1867,10 @@ const AITeamChat = ({
                       )}
                       {visiblePlanningToolResults.map((result) => (
                         <div key={result.id}>
-                          {renderPlanningToolResult(result.toolName, result.output)}
+                          {renderPlanningToolResult(
+                            result.toolName,
+                            result.output,
+                          )}
                         </div>
                       ))}
                       {textContent && (

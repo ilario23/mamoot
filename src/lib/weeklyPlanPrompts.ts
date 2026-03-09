@@ -44,7 +44,8 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 ## Instructions
 - Produce exactly 7 sessions (Monday through Sunday) with ISO dates.
 - Vary session types: include easy runs, one quality session (intervals or tempo), one long run, and appropriate rest days.
-- HR-zone language MUST follow a 6-zone model (Z1-Z6) for all weekly plan outputs.
+- Use HR zones (6-zone model: Z1-Z6) as the PRIMARY intensity target for run sessions.
+- Include targetZone and targetZoneId for every run session; use targetPace only as secondary guidance when useful.
 - For rest/strength days, use type "rest" or "strength" and describe what the day is for.
 - Honor the training balance: lower values (closer to 20) = more running days; higher values (closer to 80) = fewer runs, more rest/strength days.
 - Coach owns strength slot allocation: intentionally create 1-3 explicit "strength" days across the week (typically on rest or low-run-load days).
@@ -63,6 +64,7 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 - If TSB is strongly negative (< -12), bias toward recovery/low-intensity placement.
 - Keep weekly load ramp conservative when monotony or strain is elevated.
 - If injuries are reported, avoid aggravating movements and reduce load.
+- If climate constraints are mentioned in preferences/context (heat, humidity, wind, rain, altitude), adapt targets and structure (e.g., lower zone caps, shorter quality reps, safer timing, hydration emphasis).
 - If a Last Week Review is provided, factor adherence into your plan: if sessions were missed, consider whether load should stay flat or catch up; if everything was hit, consider progressing; if the week was an intentional deload (check athlete preferences), plan a return to normal or increased load.
 - If a Training Block Context is provided, your plan MUST respect the volume target and intensity level. Include the specified key workouts. The week type (build/recovery/taper/etc.) should guide overall session selection.
 - Be specific with workout descriptions (e.g. "6x1000m at 4:15/km with 90s jog recovery").`;

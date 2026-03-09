@@ -640,7 +640,7 @@ export const createRetrievalTools = (athleteId: number) => ({
   // ---- 8. Recent Activities (with workout labels) ----
   getRecentActivities: tool({
     description:
-      'Get a list of the most recent activities with IDs, workout labels, distance, duration, elevation, HR (avg/max), and stop time. Use the activity ID with getActivityDetail for per-km splits and deeper analysis.',
+      'Get a list of the most recent activities with IDs, workout labels, distance, duration, elevation, HR (avg/max), and stop time. Use the activity ID with getActivityDetail for per-km splits, deeper analysis, and activity location coordinates.',
     inputSchema: z.object({
       count: z
         .number()
@@ -1041,7 +1041,7 @@ export const createRetrievalTools = (athleteId: number) => ({
   // ---- 12. Activity Detail (per-km splits, laps, best efforts, workout label, gear) ----
   getActivityDetail: tool({
     description:
-      'Get detailed breakdown for a specific activity: per-km splits (pace, HR, elevation), laps, best efforts with PR flags, full workout label phases, and gear used. Use the activity ID from getRecentActivities.',
+      'Get detailed breakdown for a specific activity: per-km splits (pace, HR, elevation), laps, best efforts with PR flags, full workout label phases, gear used, and start/end coordinates when available. Use the activity ID from getRecentActivities.',
     inputSchema: z.object({
       activityId: z
         .number()
@@ -1086,6 +1086,33 @@ export const createRetrievalTools = (athleteId: number) => ({
       lines.push(
         `Distance: ${distKm.toFixed(1)} km | Time: ${formatDuration(detail.moving_time)} | Pace: ${formatPace(avgPace)}/km${hrStr ? ` | ${hrStr}` : ''} | Elev +${Math.round(detail.total_elevation_gain)}m`,
       );
+
+      const hasStartCoords =
+        Array.isArray(detail.start_latlng) &&
+        detail.start_latlng.length === 2 &&
+        typeof detail.start_latlng[0] === 'number' &&
+        typeof detail.start_latlng[1] === 'number' &&
+        Number.isFinite(detail.start_latlng[0]) &&
+        Number.isFinite(detail.start_latlng[1]);
+      const hasEndCoords =
+        Array.isArray(detail.end_latlng) &&
+        detail.end_latlng.length === 2 &&
+        typeof detail.end_latlng[0] === 'number' &&
+        typeof detail.end_latlng[1] === 'number' &&
+        Number.isFinite(detail.end_latlng[0]) &&
+        Number.isFinite(detail.end_latlng[1]);
+      if (hasStartCoords || hasEndCoords) {
+        const locationParts: string[] = [];
+        if (hasStartCoords) {
+          const [lat, lng] = detail.start_latlng;
+          locationParts.push(`Start (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+        }
+        if (hasEndCoords) {
+          const [lat, lng] = detail.end_latlng;
+          locationParts.push(`End (${lat.toFixed(5)}, ${lng.toFixed(5)})`);
+        }
+        lines.push(`Location: ${locationParts.join(' | ')}`);
+      }
 
       // Gear
       if (detail.gear?.name) {
@@ -1295,32 +1322,117 @@ export const createRetrievalTools = (athleteId: number) => ({
   // ---- 14. Weather Forecast (Open-Meteo — free, no API key) ----
   getWeatherForecast: tool({
     description:
-      'Get the weather forecast for the athlete\'s city using Open-Meteo. Returns daily temperature, apparent temperature, humidity, conditions, precipitation, and wind for up to 16 days. Use to adjust hydration and electrolyte recommendations.',
+      'Get the weather forecast using Open-Meteo. Optionally pass a city override from chat; otherwise it uses profile city, and if missing falls back to the latest activity coordinates. Returns daily temperature, apparent temperature, humidity, conditions, precipitation, and wind for up to 16 days. Use to adjust hydration and electrolyte recommendations.',
     inputSchema: z.object({
       days: z
         .number()
         .optional()
         .describe('Number of forecast days (1-16). Default 5.'),
+      city: z
+        .string()
+        .optional()
+        .describe(
+          'Optional city override from chat (e.g., "Vicenza"). If omitted, uses profile city.',
+        ),
     }),
-    execute: async ({days = 5}: {days?: number}) => {
-      // Get athlete city from user settings
+    execute: async ({days = 5, city}: {days?: number; city?: string}) => {
+      // Resolve city from explicit tool input first, then athlete profile.
       const settings = await fetchSettings(athleteId);
-      const city = (settings as Record<string, unknown> | null)?.city as string | null;
-      if (!city) {
-        return {weather: 'No city set for this athlete. Ask the athlete where they train.'};
-      }
+      const profileCity = (
+        settings as Record<string, unknown> | null
+      )?.city as string | null;
+      const resolvedCity =
+        (city ?? '').trim() || (profileCity ?? '').trim() || null;
 
       try {
-        // 1. Geocode city → lat/lon via Open-Meteo geocoding API
-        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
-        const geoRes = await fetch(geoUrl);
-        if (!geoRes.ok) {
-          return {weather: `Geocoding API error (${geoRes.status}). City: "${city}" may not be recognized.`};
-        }
-        const geoData = await geoRes.json();
-        const geo = geoData.results?.[0] as {name: string; latitude: number; longitude: number; country?: string} | undefined;
-        if (!geo) {
-          return {weather: `City "${city}" not found. Ask the athlete to update their city in settings.`};
+        let latitude: number;
+        let longitude: number;
+        let locationLabel: string;
+
+        if (resolvedCity) {
+          // 1a. Geocode city -> lat/lon via Open-Meteo geocoding API
+          const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(resolvedCity)}&count=1&language=en&format=json`;
+          const geoRes = await fetch(geoUrl);
+          if (!geoRes.ok) {
+            return {
+              weather: `Geocoding API error (${geoRes.status}). City: "${resolvedCity}" may not be recognized.`,
+            };
+          }
+          const geoData = await geoRes.json();
+          const geo = geoData.results?.[0] as
+            | {
+                name: string;
+                latitude: number;
+                longitude: number;
+                country?: string;
+              }
+            | undefined;
+          if (!geo) {
+            return {
+              weather: `City "${resolvedCity}" not found. Try a clearer city name or provide coordinates from a recent activity.`,
+            };
+          }
+          latitude = geo.latitude;
+          longitude = geo.longitude;
+          locationLabel = `${geo.name}${geo.country ? `, ${geo.country}` : ''}`;
+        } else {
+          // 1b. Fallback: use latest activity coordinates when no city is available.
+          const rows = await db
+            .select({date: activitiesTable.date, data: activitiesTable.data})
+            .from(activitiesTable)
+            .where(eq(activitiesTable.athleteId, athleteId))
+            .orderBy(desc(activitiesTable.date))
+            .limit(20);
+
+          const parseCoords = (
+            value: unknown,
+          ): {latitude: number; longitude: number} | null => {
+            if (!Array.isArray(value) || value.length !== 2) return null;
+            const lat = value[0];
+            const lon = value[1];
+            if (
+              typeof lat !== 'number' ||
+              typeof lon !== 'number' ||
+              !Number.isFinite(lat) ||
+              !Number.isFinite(lon) ||
+              lat < -90 ||
+              lat > 90 ||
+              lon < -180 ||
+              lon > 180
+            ) {
+              return null;
+            }
+            return {latitude: lat, longitude: lon};
+          };
+
+          let fallback:
+            | {date: string; latitude: number; longitude: number}
+            | null = null;
+          for (const row of rows) {
+            const raw = row.data as Record<string, unknown>;
+            const start = parseCoords(raw.start_latlng);
+            const end = parseCoords(raw.end_latlng);
+            const chosen = start ?? end;
+            if (chosen) {
+              fallback = {
+                date: row.date,
+                latitude: chosen.latitude,
+                longitude: chosen.longitude,
+              };
+              break;
+            }
+          }
+
+          if (!fallback) {
+            return {
+              weather:
+                'No city or activity coordinates available. Ask the athlete for a city, or sync an activity with GPS location data.',
+            };
+          }
+
+          latitude = fallback.latitude;
+          longitude = fallback.longitude;
+          locationLabel = `Latest activity area (${fallback.date})`;
         }
 
         // 2. Fetch daily forecast from Open-Meteo
@@ -1339,7 +1451,7 @@ export const createRetrievalTools = (athleteId: number) => ({
 
         const forecastUrl =
           `https://api.open-meteo.com/v1/forecast` +
-          `?latitude=${geo.latitude}&longitude=${geo.longitude}` +
+          `?latitude=${latitude}&longitude=${longitude}` +
           `&daily=${dailyVars}` +
           `&wind_speed_unit=ms` +
           `&timezone=auto` +
@@ -1388,8 +1500,9 @@ export const createRetrievalTools = (athleteId: number) => ({
         };
 
         // 3. Build formatted output
-        const location = `${geo.name}${geo.country ? `, ${geo.country}` : ''}`;
-        const lines = [`Weather Forecast — ${location} (${geo.latitude.toFixed(2)}, ${geo.longitude.toFixed(2)})`];
+        const lines = [
+          `Weather Forecast — ${locationLabel} (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`,
+        ];
 
         for (let i = 0; i < daily.time.length; i++) {
           const date = daily.time[i];

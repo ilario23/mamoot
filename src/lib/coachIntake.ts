@@ -121,6 +121,8 @@ export const summarizeWeeklyPlanRequirements = (
     `Run days target: ${input.runDaysPerWeek}/week.`,
     `Preferred long run day: ${input.preferredLongRunDay}.`,
     `Intensity preference: ${input.intensity}.`,
+    'Intensity targets: prioritize HR zones using the athlete 6-zone model (Z1-Z6).',
+    'Climate considerations: if weather/climate constraints are present (heat, humidity, wind, rain, altitude), adapt session intensity, duration, and hydration cues accordingly.',
     `Focus: ${input.focus}.`,
     constraints,
     input.notes.trim() ? `Notes: ${input.notes.trim()}.` : null,
@@ -141,6 +143,8 @@ export const summarizeTrainingBlockRequirements = (
     `Goal date: ${input.goalDate}.`,
     input.totalWeeks ? `Requested length: ${input.totalWeeks} weeks.` : null,
     `Run days target: ${input.runDaysPerWeek}/week.`,
+    'Weekly mileage progression rule: increase no more than 8-10% from one week to the next unless deliberate recovery/off-load logic requires lower volume.',
+    'Goal realism rule: if the requested target appears unrealistic for the current baseline/timeline, explain why and propose a realistic alternative target.',
     input.weeklyKmBackground
       ? `Current baseline: ${input.weeklyKmBackground}.`
       : null,

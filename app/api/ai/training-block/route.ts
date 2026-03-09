@@ -812,10 +812,11 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
   - keyWorkouts: 1-3 key workouts for the week (e.g. "Tempo 6km", "Long run 18km", "6x1000m intervals")
   - notes: brief coaching note
 - Follow the 3:1 or 2:1 build-to-recovery pattern (every 3-4 build weeks should be followed by a recovery/off-load week).
-- Volume should start at or near the athlete's current level (${avgWeeklyKm.toFixed(1)} km) and progress gradually (max ~10% increase per build week).
+- Volume should start at or near the athlete's current level (${avgWeeklyKm.toFixed(1)} km) and progress gradually (cap increases to roughly 8-10% per week).
 - Taper should reduce volume by 40-60% over 2-3 weeks leading to race day.
 - The last week should be type "race" with reduced volume and a shakeout run.
-- If injuries are reported, keep initial volume conservative and note injury precautions.`;
+- If injuries are reported, keep initial volume conservative and note injury precautions.
+- Perform a realism check against current baseline and available timeline. If the stated target appears unrealistic, explain why in notes and propose a realistic alternative target with adjusted progression.`;
 
     console.log(`[TrainingBlock] Generating with ${totalWeeks} weeks...`);
 

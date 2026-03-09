@@ -1,3 +1,6 @@
+export * from "./physioPlanSlots";
+export * from "./physioPlanWorkflow";
+export * from "./weeklyPlanQuickAskCollab";
 import type {MentionReference} from './mentionTypes';
 
 export type WeeklyPlanQuickAskAction =
