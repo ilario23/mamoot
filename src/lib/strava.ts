@@ -223,6 +223,8 @@ export interface StravaSummaryActivity {
     summary_polyline: string | null;
     resource_state: number;
   };
+  start_latlng?: [number, number] | null;
+  end_latlng?: [number, number] | null;
   workout_type?: number;
   gear_id?: string;
 }
