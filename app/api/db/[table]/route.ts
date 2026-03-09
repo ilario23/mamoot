@@ -21,25 +21,16 @@ import {
   userSettings,
   chatSessions,
   chatMessages,
-  trainingFeedback,
   athleteReadinessSignals,
   aiTelemetryEvents,
   trainingBlocks,
   weeklyPlans,
-  orchestratorGoals,
-  orchestratorPlanItems,
-  orchestratorBlockers,
-  orchestratorHandoffs,
 } from '@/db/schema';
 import {eq, and, sql, desc, inArray, gte, isNull} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
+import {weeklyPlanSessionSchema} from '@/lib/aiRequestSchemas';
 
 type RouteContext = {params: Promise<{table: string}>};
-type TrainingFeedbackSource = 'weekly_plan_ui' | 'coach_chat';
-const TRAINING_FEEDBACK_SOURCES = new Set<TrainingFeedbackSource>([
-  'weekly_plan_ui',
-  'coach_chat',
-]);
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DB_ROUTE_ENFORCE_AUTH =
@@ -83,77 +74,6 @@ const enforceDbRouteAccess = (
   }
 
   return null;
-};
-
-const isScore = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value >= 1 && value <= 5;
-
-const validateTrainingFeedbackRecord = (
-  record: unknown,
-): {valid: true} | {valid: false; message: string} => {
-  if (!record || typeof record !== 'object') {
-    return {valid: false, message: 'Each training feedback record must be an object'};
-  }
-
-  const r = record as Record<string, unknown>;
-  const athleteId =
-    typeof r.athleteId === 'number' && Number.isFinite(r.athleteId)
-      ? r.athleteId
-      : null;
-  const weekStart = typeof r.weekStart === 'string' ? r.weekStart : null;
-  const id = typeof r.id === 'string' ? r.id : null;
-  const source = typeof r.source === 'string' ? r.source : null;
-  const notes =
-    r.notes == null ? null : typeof r.notes === 'string' ? r.notes : null;
-
-  if (!athleteId || athleteId <= 0 || !weekStart) {
-    return {
-      valid: false,
-      message: 'training-feedback requires athleteId and weekStart',
-    };
-  }
-
-  if (!ISO_DATE_RE.test(weekStart)) {
-    return {valid: false, message: 'weekStart must be ISO date (YYYY-MM-DD)'};
-  }
-
-  const expectedId = `${athleteId}:${weekStart}`;
-  if (!id || id !== expectedId) {
-    return {
-      valid: false,
-      message: `training-feedback id must match athlete/week composite id (${expectedId})`,
-    };
-  }
-
-  if (!isScore(r.adherence)) {
-    return {valid: false, message: 'adherence must be a score from 1 to 5'};
-  }
-  if (!isScore(r.effort)) {
-    return {valid: false, message: 'effort must be a score from 1 to 5'};
-  }
-  if (!isScore(r.fatigue)) {
-    return {valid: false, message: 'fatigue must be a score from 1 to 5'};
-  }
-  if (!isScore(r.soreness)) {
-    return {valid: false, message: 'soreness must be a score from 1 to 5'};
-  }
-  if (!isScore(r.mood)) {
-    return {valid: false, message: 'mood must be a score from 1 to 5'};
-  }
-  if (!isScore(r.confidence)) {
-    return {valid: false, message: 'confidence must be a score from 1 to 5'};
-  }
-  if (!source || !TRAINING_FEEDBACK_SOURCES.has(source as TrainingFeedbackSource)) {
-    return {
-      valid: false,
-      message: 'source must be one of: weekly_plan_ui, coach_chat',
-    };
-  }
-  if (r.notes !== undefined && notes === null) {
-    return {valid: false, message: 'notes must be a string when provided'};
-  }
-
-  return {valid: true};
 };
 
 // ---- GET — Read records from Neon ----
@@ -506,39 +426,6 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         return NextResponse.json(rows);
       }
 
-      case 'training-feedback': {
-        const tfAthleteId = req.nextUrl.searchParams.get('athleteId');
-        if (!tfAthleteId) {
-          return NextResponse.json(
-            {error: 'athleteId required'},
-            {status: 400},
-          );
-        }
-        const weekStart = req.nextUrl.searchParams.get('weekStart');
-        if (weekStart) {
-          const rows = await db
-            .select()
-            .from(trainingFeedback)
-            .where(
-              and(
-                eq(trainingFeedback.athleteId, Number(tfAthleteId)),
-                eq(trainingFeedback.weekStart, weekStart),
-              ),
-            )
-            .orderBy(desc(trainingFeedback.updatedAt))
-            .limit(1);
-          return NextResponse.json(rows[0] ?? null);
-        }
-        const limit = Number(req.nextUrl.searchParams.get('limit') ?? '8');
-        const rows = await db
-          .select()
-          .from(trainingFeedback)
-          .where(eq(trainingFeedback.athleteId, Number(tfAthleteId)))
-          .orderBy(desc(trainingFeedback.weekStart))
-          .limit(Math.max(1, Math.min(52, limit)));
-        return NextResponse.json(rows);
-      }
-
       case 'athlete-readiness-signals': {
         const readinessAthleteId = req.nextUrl.searchParams.get('athleteId');
         if (!readinessAthleteId) {
@@ -586,122 +473,6 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
           .from(aiTelemetryEvents)
           .orderBy(desc(aiTelemetryEvents.createdAt))
           .limit(Math.max(1, Math.min(200, limit)));
-        return NextResponse.json(rows);
-      }
-
-      case 'orchestrator-goals': {
-        if (pk) {
-          const rows = await db
-            .select()
-            .from(orchestratorGoals)
-            .where(eq(orchestratorGoals.id, pk));
-          return NextResponse.json(rows[0] ?? null);
-        }
-        const athleteId = req.nextUrl.searchParams.get('athleteId');
-        const sessionId = req.nextUrl.searchParams.get('sessionId');
-        if (!athleteId || !sessionId) {
-          return NextResponse.json(
-            {error: 'athleteId and sessionId required'},
-            {status: 400},
-          );
-        }
-        const rows = await db
-          .select()
-          .from(orchestratorGoals)
-          .where(
-            and(
-              eq(orchestratorGoals.athleteId, Number(athleteId)),
-              eq(orchestratorGoals.sessionId, sessionId),
-            ),
-          )
-          .orderBy(desc(orchestratorGoals.updatedAt));
-        return NextResponse.json(rows);
-      }
-
-      case 'orchestrator-plan-items': {
-        if (pk) {
-          const rows = await db
-            .select()
-            .from(orchestratorPlanItems)
-            .where(eq(orchestratorPlanItems.id, pk));
-          return NextResponse.json(rows[0] ?? null);
-        }
-        const athleteId = req.nextUrl.searchParams.get('athleteId');
-        const sessionId = req.nextUrl.searchParams.get('sessionId');
-        if (!athleteId || !sessionId) {
-          return NextResponse.json(
-            {error: 'athleteId and sessionId required'},
-            {status: 400},
-          );
-        }
-        const rows = await db
-          .select()
-          .from(orchestratorPlanItems)
-          .where(
-            and(
-              eq(orchestratorPlanItems.athleteId, Number(athleteId)),
-              eq(orchestratorPlanItems.sessionId, sessionId),
-            ),
-          )
-          .orderBy(desc(orchestratorPlanItems.updatedAt));
-        return NextResponse.json(rows);
-      }
-
-      case 'orchestrator-blockers': {
-        if (pk) {
-          const rows = await db
-            .select()
-            .from(orchestratorBlockers)
-            .where(eq(orchestratorBlockers.id, pk));
-          return NextResponse.json(rows[0] ?? null);
-        }
-        const athleteId = req.nextUrl.searchParams.get('athleteId');
-        const sessionId = req.nextUrl.searchParams.get('sessionId');
-        if (!athleteId || !sessionId) {
-          return NextResponse.json(
-            {error: 'athleteId and sessionId required'},
-            {status: 400},
-          );
-        }
-        const rows = await db
-          .select()
-          .from(orchestratorBlockers)
-          .where(
-            and(
-              eq(orchestratorBlockers.athleteId, Number(athleteId)),
-              eq(orchestratorBlockers.sessionId, sessionId),
-            ),
-          )
-          .orderBy(desc(orchestratorBlockers.updatedAt));
-        return NextResponse.json(rows);
-      }
-
-      case 'orchestrator-handoffs': {
-        if (pk) {
-          const rows = await db
-            .select()
-            .from(orchestratorHandoffs)
-            .where(eq(orchestratorHandoffs.id, pk));
-          return NextResponse.json(rows[0] ?? null);
-        }
-        const athleteId = req.nextUrl.searchParams.get('athleteId');
-        const sessionId = req.nextUrl.searchParams.get('sessionId');
-        if (!athleteId || !sessionId) {
-          return NextResponse.json(
-            {error: 'athleteId and sessionId required'},
-            {status: 400},
-          );
-        }
-        const rows = await db
-          .select()
-          .from(orchestratorHandoffs)
-          .where(
-            and(
-              eq(orchestratorHandoffs.athleteId, Number(athleteId)),
-              eq(orchestratorHandoffs.sessionId, sessionId),
-            ),
-          )
-          .orderBy(desc(orchestratorHandoffs.updatedAt));
         return NextResponse.json(rows);
       }
 
@@ -1055,35 +826,6 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
           });
         break;
 
-      case 'training-feedback':
-        for (const record of records) {
-          const validation = validateTrainingFeedbackRecord(record);
-          if (validation.valid === false) {
-            return NextResponse.json(
-              {error: validation.message},
-              {status: 400},
-            );
-          }
-        }
-        await db
-          .insert(trainingFeedback)
-          .values(records)
-          .onConflictDoUpdate({
-            target: trainingFeedback.id,
-            set: {
-              adherence: sql`excluded.adherence`,
-              effort: sql`excluded.effort`,
-              fatigue: sql`excluded.fatigue`,
-              soreness: sql`excluded.soreness`,
-              mood: sql`excluded.mood`,
-              confidence: sql`excluded.confidence`,
-              notes: sql`excluded.notes`,
-              source: sql`excluded.source`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
-        break;
-
       case 'athlete-readiness-signals':
         await db
           .insert(athleteReadinessSignals)
@@ -1100,70 +842,6 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
               sessionRpe: sql`excluded.session_rpe`,
               adherenceScore: sql`excluded.adherence_score`,
               source: sql`excluded.source`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
-        break;
-
-      case 'orchestrator-goals':
-        await db
-          .insert(orchestratorGoals)
-          .values(records)
-          .onConflictDoUpdate({
-            target: orchestratorGoals.id,
-            set: {
-              title: sql`excluded.title`,
-              detail: sql`excluded.detail`,
-              status: sql`excluded.status`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
-        break;
-
-      case 'orchestrator-plan-items':
-        await db
-          .insert(orchestratorPlanItems)
-          .values(records)
-          .onConflictDoUpdate({
-            target: orchestratorPlanItems.id,
-            set: {
-              title: sql`excluded.title`,
-              detail: sql`excluded.detail`,
-              status: sql`excluded.status`,
-              ownerPersona: sql`excluded.owner_persona`,
-              dueDate: sql`excluded.due_date`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
-        break;
-
-      case 'orchestrator-blockers':
-        await db
-          .insert(orchestratorBlockers)
-          .values(records)
-          .onConflictDoUpdate({
-            target: orchestratorBlockers.id,
-            set: {
-              title: sql`excluded.title`,
-              detail: sql`excluded.detail`,
-              status: sql`excluded.status`,
-              linkedPlanItemId: sql`excluded.linked_plan_item_id`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          });
-        break;
-
-      case 'orchestrator-handoffs':
-        await db
-          .insert(orchestratorHandoffs)
-          .values(records)
-          .onConflictDoUpdate({
-            target: orchestratorHandoffs.id,
-            set: {
-              targetPersona: sql`excluded.target_persona`,
-              title: sql`excluded.title`,
-              detail: sql`excluded.detail`,
-              status: sql`excluded.status`,
               updatedAt: sql`excluded.updated_at`,
             },
           });
@@ -1231,91 +909,6 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
 
   try {
     switch (table) {
-      case 'training-feedback': {
-        const body = await req.json();
-        const athleteIdParam = req.nextUrl.searchParams.get('athleteId');
-        const weekStart = req.nextUrl.searchParams.get('weekStart');
-        if (!athleteIdParam || !weekStart) {
-          return NextResponse.json(
-            {error: 'athleteId and weekStart required'},
-            {status: 400},
-          );
-        }
-
-        if (body.adherence !== undefined && !isScore(body.adherence)) {
-          return NextResponse.json(
-            {error: 'adherence must be a score from 1 to 5'},
-            {status: 400},
-          );
-        }
-        if (body.effort !== undefined && !isScore(body.effort)) {
-          return NextResponse.json(
-            {error: 'effort must be a score from 1 to 5'},
-            {status: 400},
-          );
-        }
-        if (body.fatigue !== undefined && !isScore(body.fatigue)) {
-          return NextResponse.json(
-            {error: 'fatigue must be a score from 1 to 5'},
-            {status: 400},
-          );
-        }
-        if (body.soreness !== undefined && !isScore(body.soreness)) {
-          return NextResponse.json(
-            {error: 'soreness must be a score from 1 to 5'},
-            {status: 400},
-          );
-        }
-        if (body.mood !== undefined && !isScore(body.mood)) {
-          return NextResponse.json(
-            {error: 'mood must be a score from 1 to 5'},
-            {status: 400},
-          );
-        }
-        if (body.confidence !== undefined && !isScore(body.confidence)) {
-          return NextResponse.json(
-            {error: 'confidence must be a score from 1 to 5'},
-            {status: 400},
-          );
-        }
-        if (
-          body.source !== undefined &&
-          !TRAINING_FEEDBACK_SOURCES.has(body.source as TrainingFeedbackSource)
-        ) {
-          return NextResponse.json(
-            {error: 'source must be one of: weekly_plan_ui, coach_chat'},
-            {status: 400},
-          );
-        }
-
-        const updates: Record<string, unknown> = {
-          ...(body.adherence !== undefined ? {adherence: body.adherence} : {}),
-          ...(body.effort !== undefined ? {effort: body.effort} : {}),
-          ...(body.fatigue !== undefined ? {fatigue: body.fatigue} : {}),
-          ...(body.soreness !== undefined ? {soreness: body.soreness} : {}),
-          ...(body.mood !== undefined ? {mood: body.mood} : {}),
-          ...(body.confidence !== undefined ? {confidence: body.confidence} : {}),
-          ...(body.notes !== undefined ? {notes: body.notes} : {}),
-          ...(body.source !== undefined ? {source: body.source} : {}),
-          updatedAt: Date.now(),
-        };
-
-        if (Object.keys(updates).length === 1) {
-          return NextResponse.json({success: true, updated: 0});
-        }
-
-        await db
-          .update(trainingFeedback)
-          .set(updates)
-          .where(
-            and(
-              eq(trainingFeedback.athleteId, Number(athleteIdParam)),
-              eq(trainingFeedback.weekStart, weekStart),
-            ),
-          );
-        return NextResponse.json({success: true});
-      }
-
       case 'user-settings': {
         // PATCH /api/db/user-settings → partial update (weight, city from Strava profile)
         const body = await req.json();
@@ -1421,6 +1014,55 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
             {status: 400},
           );
 
+        let body: Record<string, unknown> = {};
+        try {
+          body = await req.json();
+        } catch {
+          body = {};
+        }
+
+        if (body.sessions !== undefined) {
+          if (!Array.isArray(body.sessions)) {
+            return NextResponse.json(
+              {error: 'sessions must be an array'},
+              {status: 400},
+            );
+          }
+          const parsedSessions = body.sessions.map((session) =>
+            weeklyPlanSessionSchema.safeParse(session),
+          );
+          const invalidIndex = parsedSessions.findIndex((result) => !result.success);
+          if (invalidIndex >= 0) {
+            const issue = parsedSessions[invalidIndex];
+            return NextResponse.json(
+              {
+                error: 'sessions contains invalid item',
+                index: invalidIndex,
+                issues: !issue.success ? issue.error.issues.map((i) => i.message) : [],
+              },
+              {status: 400},
+            );
+          }
+          const updates: Record<string, unknown> = {
+            sessions: parsedSessions.map((session) =>
+              session.success ? session.data : session,
+            ),
+          };
+          if (typeof body.content === 'string') {
+            updates.content = body.content;
+          }
+          await db
+            .update(weeklyPlans)
+            .set(updates)
+            .where(
+              and(
+                eq(weeklyPlans.id, wpPlanId),
+                eq(weeklyPlans.athleteId, Number(wpAthleteId)),
+              ),
+            );
+          return NextResponse.json({success: true});
+        }
+
         await db
           .update(weeklyPlans)
           .set({isActive: false})
@@ -1431,88 +1073,6 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
           .set({isActive: true})
           .where(eq(weeklyPlans.id, wpPlanId));
 
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-goals': {
-        const goalId = req.nextUrl.searchParams.get('id');
-        if (!goalId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        const body = await req.json();
-        await db
-          .update(orchestratorGoals)
-          .set({
-            ...(body.title !== undefined ? {title: body.title} : {}),
-            ...(body.detail !== undefined ? {detail: body.detail} : {}),
-            ...(body.status !== undefined ? {status: body.status} : {}),
-            updatedAt: Date.now(),
-          })
-          .where(eq(orchestratorGoals.id, goalId));
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-plan-items': {
-        const planItemId = req.nextUrl.searchParams.get('id');
-        if (!planItemId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        const body = await req.json();
-        await db
-          .update(orchestratorPlanItems)
-          .set({
-            ...(body.title !== undefined ? {title: body.title} : {}),
-            ...(body.detail !== undefined ? {detail: body.detail} : {}),
-            ...(body.status !== undefined ? {status: body.status} : {}),
-            ...(body.ownerPersona !== undefined
-              ? {ownerPersona: body.ownerPersona}
-              : {}),
-            ...(body.dueDate !== undefined ? {dueDate: body.dueDate} : {}),
-            updatedAt: Date.now(),
-          })
-          .where(eq(orchestratorPlanItems.id, planItemId));
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-blockers': {
-        const blockerId = req.nextUrl.searchParams.get('id');
-        if (!blockerId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        const body = await req.json();
-        await db
-          .update(orchestratorBlockers)
-          .set({
-            ...(body.title !== undefined ? {title: body.title} : {}),
-            ...(body.detail !== undefined ? {detail: body.detail} : {}),
-            ...(body.status !== undefined ? {status: body.status} : {}),
-            ...(body.linkedPlanItemId !== undefined
-              ? {linkedPlanItemId: body.linkedPlanItemId}
-              : {}),
-            updatedAt: Date.now(),
-          })
-          .where(eq(orchestratorBlockers.id, blockerId));
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-handoffs': {
-        const handoffId = req.nextUrl.searchParams.get('id');
-        if (!handoffId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        const body = await req.json();
-        await db
-          .update(orchestratorHandoffs)
-          .set({
-            ...(body.targetPersona !== undefined
-              ? {targetPersona: body.targetPersona}
-              : {}),
-            ...(body.title !== undefined ? {title: body.title} : {}),
-            ...(body.detail !== undefined ? {detail: body.detail} : {}),
-            ...(body.status !== undefined ? {status: body.status} : {}),
-            updatedAt: Date.now(),
-          })
-          .where(eq(orchestratorHandoffs.id, handoffId));
         return NextResponse.json({success: true});
       }
 
@@ -1609,48 +1169,6 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
         if (!wpPlanId)
           return NextResponse.json({error: 'id required'}, {status: 400});
         await db.delete(weeklyPlans).where(eq(weeklyPlans.id, wpPlanId));
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-goals': {
-        const goalId = req.nextUrl.searchParams.get('id');
-        if (!goalId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        await db.delete(orchestratorGoals).where(eq(orchestratorGoals.id, goalId));
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-plan-items': {
-        const planItemId = req.nextUrl.searchParams.get('id');
-        if (!planItemId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        await db
-          .delete(orchestratorPlanItems)
-          .where(eq(orchestratorPlanItems.id, planItemId));
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-blockers': {
-        const blockerId = req.nextUrl.searchParams.get('id');
-        if (!blockerId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        await db
-          .delete(orchestratorBlockers)
-          .where(eq(orchestratorBlockers.id, blockerId));
-        return NextResponse.json({success: true});
-      }
-
-      case 'orchestrator-handoffs': {
-        const handoffId = req.nextUrl.searchParams.get('id');
-        if (!handoffId) {
-          return NextResponse.json({error: 'id required'}, {status: 400});
-        }
-        await db
-          .delete(orchestratorHandoffs)
-          .where(eq(orchestratorHandoffs.id, handoffId));
         return NextResponse.json({success: true});
       }
 

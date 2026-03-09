@@ -1,132 +1,158 @@
 'use client';
 
-import {CalendarDays, Dumbbell, Footprints, Moon} from 'lucide-react';
+import {BarChart3} from 'lucide-react';
 import type {UnifiedSession} from '@/lib/cacheTypes';
-import {SESSION_TYPE_COLORS} from '@/lib/planConstants';
-
-const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+import {ZONE_NAMES} from '@/lib/activityModel';
 
 interface WeeklyPlanDistributionProps {
   weekStart: string;
   sessions: UnifiedSession[];
 }
 
-interface DayDistribution {
-  dayLabel: string;
-  isoDate: string;
-  session: UnifiedSession | null;
-}
+const ZONE_IDS = [1, 2, 3, 4, 5, 6] as const;
+type ZoneId = (typeof ZONE_IDS)[number];
 
-const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
-
-const buildWeekDays = (weekStart: string, sessions: UnifiedSession[]): DayDistribution[] => {
-  const start = new Date(weekStart);
-  const sessionByDate = new Map(sessions.map((session) => [session.date, session]));
-
-  return WEEKDAY_LABELS.map((dayLabel, index) => {
-    const dayDate = new Date(start);
-    dayDate.setDate(start.getDate() + index);
-    const isoDate = toIsoDate(dayDate);
-
-    return {
-      dayLabel,
-      isoDate,
-      session: sessionByDate.get(isoDate) ?? null,
-    };
-  });
+const ZONE_CARD_STYLES: Record<ZoneId, string> = {
+  1: 'bg-zone-1/15 text-zone-1',
+  2: 'bg-zone-2/15 text-zone-2',
+  3: 'bg-zone-3/15 text-zone-3',
+  4: 'bg-zone-4/15 text-zone-4',
+  5: 'bg-zone-5/15 text-zone-5',
+  6: 'bg-zone-6/15 text-zone-6',
 };
 
-const formatShortDate = (isoDate: string): string =>
-  new Date(isoDate).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
+const ZONE_SEGMENT_STYLES: Record<ZoneId, string> = {
+  1: 'bg-zone-1',
+  2: 'bg-zone-2',
+  3: 'bg-zone-3',
+  4: 'bg-zone-4',
+  5: 'bg-zone-5',
+  6: 'bg-zone-6',
+};
+
+const parseDistanceKm = (description?: string): number | null => {
+  if (!description) return null;
+  const distanceMatch = description.match(/(\d+(?:\.\d+)?)\s*km/i);
+  if (!distanceMatch) return null;
+  const parsed = Number(distanceMatch[1]);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const parseZoneFromTarget = (targetZone?: string): ZoneId | null => {
+  if (!targetZone) return null;
+  const zoneMatch = targetZone.match(/z\s*([1-6])/i);
+  if (!zoneMatch) return null;
+  const zone = Number(zoneMatch[1]) as ZoneId;
+  return ZONE_IDS.includes(zone) ? zone : null;
+};
+
+const mapSessionTypeToZone = (type?: string): ZoneId => {
+  const normalized = (type ?? '').toLowerCase();
+  if (
+    normalized.includes('easy') ||
+    normalized.includes('recovery') ||
+    normalized.includes('warm') ||
+    normalized.includes('cool')
+  ) {
+    return 2;
+  }
+  if (normalized.includes('long')) return 3;
+  if (normalized.includes('tempo')) return 4;
+  if (normalized.includes('threshold')) return 5;
+  if (
+    normalized.includes('interval') ||
+    normalized.includes('vo2') ||
+    normalized.includes('repetition')
+  ) {
+    return 5;
+  }
+  if (normalized.includes('race')) return 6;
+  return 3;
+};
 
 const WeeklyPlanDistribution = ({weekStart, sessions}: WeeklyPlanDistributionProps) => {
-  const weekDays = buildWeekDays(weekStart, sessions);
-  const runDays = weekDays.filter((day) => day.session?.run).length;
-  const physioDays = weekDays.filter((day) => day.session?.physio).length;
-  const restDays = weekDays.filter((day) => !day.session?.run && !day.session?.physio).length;
+  const zoneTotals = sessions.reduce<Record<ZoneId, number>>(
+    (acc, session) => {
+      if (!session.run) return acc;
+      const structuredZone = session.run.targetZoneId;
+      const zone = (structuredZone && ZONE_IDS.includes(structuredZone)
+        ? structuredZone
+        : parseZoneFromTarget(session.run.targetZone)) ?? mapSessionTypeToZone(session.run.type);
+      const distanceKm = session.run.plannedDistanceKm ?? parseDistanceKm(session.run.description) ?? 1;
+      acc[zone] += distanceKm;
+      return acc;
+    },
+    {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0},
+  );
+
+  const totalPlannedKm = ZONE_IDS.reduce((sum, zoneId) => sum + zoneTotals[zoneId], 0);
+  const strengthSlotCount = sessions.filter((session) => !!session.strengthSlot).length;
 
   return (
     <section
-      aria-label='Weekly planned activity distribution'
+      aria-label='Weekly planned zone distribution'
       className='border-3 border-border bg-background shadow-neo overflow-hidden'
     >
       <div className='p-4 md:p-5 border-b-3 border-border space-y-3'>
         <div className='flex items-center gap-2'>
-          <CalendarDays className='h-4 w-4 text-primary' />
+          <BarChart3 className='h-4 w-4 text-primary' />
           <h3 className='font-black text-base md:text-lg uppercase tracking-wider'>
-            Weekly Distribution
+            Week Zone Distribution
           </h3>
         </div>
-
-        <div className='flex flex-wrap gap-2'>
-          <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-secondary/10 text-secondary'>
-            <Footprints className='h-3 w-3' />
-            {runDays} run days
-          </span>
-          <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary/10 text-primary'>
-            <Dumbbell className='h-3 w-3' />
-            {physioDays} physio days
-          </span>
-          <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-muted text-muted-foreground'>
-            <Moon className='h-3 w-3' />
-            {restDays} rest days
-          </span>
+        <div className='space-y-2'>
+          <div className='w-full h-7 border-2 border-border bg-muted overflow-hidden flex'>
+            {ZONE_IDS.map((zoneId) => {
+              const pct = totalPlannedKm > 0 ? (zoneTotals[zoneId] / totalPlannedKm) * 100 : 0;
+              if (pct <= 0) return null;
+              return (
+                <div
+                  key={`segment-${zoneId}`}
+                  aria-label={`Z${zoneId} ${pct.toFixed(0)} percent`}
+                  className={`${ZONE_SEGMENT_STYLES[zoneId]} h-full flex items-center justify-center`}
+                  style={{width: `${pct}%`}}
+                >
+                  <span className='text-[10px] font-black text-background drop-shadow-sm'>
+                    Z{zoneId}
+                  </span>
+                </div>
+              );
+            })}
+            {totalPlannedKm <= 0 && (
+              <div className='w-full h-full flex items-center justify-center text-[10px] font-bold text-muted-foreground'>
+                No run zone data in this plan
+              </div>
+            )}
+          </div>
+          <p className='text-xs font-medium text-muted-foreground'>
+            Week of {weekStart} · Planned run volume: {totalPlannedKm.toFixed(1)} km · Strength slots: {strengthSlotCount}
+          </p>
         </div>
       </div>
 
-      <div className='p-4 md:p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2 md:gap-3'>
-        {weekDays.map((day) => {
-          const hasRun = !!day.session?.run;
-          const hasPhysio = !!day.session?.physio;
-          const isRest = !hasRun && !hasPhysio;
-
+      <div className='p-4 md:p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 md:gap-3'>
+        {ZONE_IDS.map((zoneId) => {
+          const zoneKm = zoneTotals[zoneId];
+          const pct = totalPlannedKm > 0 ? (zoneKm / totalPlannedKm) * 100 : 0;
           return (
             <article
-              key={day.isoDate}
-              aria-label={`${day.dayLabel} plan distribution`}
-              className='border-3 border-border bg-background p-3 space-y-2 min-w-0'
+              key={zoneId}
+              aria-label={`Zone ${zoneId} distribution`}
+              className={`border-3 border-border p-3 space-y-1.5 min-w-0 ${ZONE_CARD_STYLES[zoneId]}`}
             >
-              <div className='space-y-0.5'>
-                <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                  {day.dayLabel}
+              <p className='text-[10px] font-black uppercase tracking-widest'>
+                Zone {zoneId}
+              </p>
+              <p className='text-sm font-black leading-tight'>{ZONE_NAMES[zoneId]}</p>
+              <div className='flex items-end justify-between gap-2'>
+                <p className='text-xl font-black tabular-nums'>
+                  {zoneKm.toFixed(1)}
+                  <span className='text-xs font-bold ml-1'>km</span>
                 </p>
-                <p className='text-xs font-bold'>
-                  {formatShortDate(day.isoDate)}
+                <p className='text-xs font-black tabular-nums'>
+                  {pct.toFixed(0)}%
                 </p>
-              </div>
-
-              <div className='flex flex-wrap gap-1.5'>
-                {hasRun && day.session?.run && (
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border ${
-                      SESSION_TYPE_COLORS[day.session.run.type] ?? 'bg-secondary/10 text-secondary'
-                    }`}
-                  >
-                    <Footprints className='h-2.5 w-2.5' />
-                    Run
-                  </span>
-                )}
-
-                {hasPhysio && day.session?.physio && (
-                  <span
-                    className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border ${
-                      SESSION_TYPE_COLORS[day.session.physio.type] ?? 'bg-primary/10 text-primary'
-                    }`}
-                  >
-                    <Dumbbell className='h-2.5 w-2.5' />
-                    Physio
-                  </span>
-                )}
-
-                {isRest && (
-                  <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-muted text-muted-foreground'>
-                    <Moon className='h-2.5 w-2.5' />
-                    Rest
-                  </span>
-                )}
               </div>
             </article>
           );

@@ -88,6 +88,11 @@ export const DEFAULT_DISTRIBUTION_POLICY: DistributionPolicy = {
 };
 
 const clampScore = (value: number): number => Math.max(0, Math.min(100, value));
+const toZoneId = (value?: number): 1 | 2 | 3 | 4 | 5 | 6 | undefined => {
+  if (value == null) return undefined;
+  if (value < 1 || value > 6) return undefined;
+  return value as 1 | 2 | 3 | 4 | 5 | 6;
+};
 
 const parseDurationMinutes = (value?: string): number | null => {
   if (!value) return null;
@@ -117,9 +122,21 @@ const parseDurationMinutes = (value?: string): number | null => {
 const classifyRunIntensity = (session: {
   type: string;
   targetZone?: string;
+  targetZoneId?: number;
 }): 'hard' | 'moderate' | 'easy' => {
   const type = session.type.toLowerCase();
   const zone = session.targetZone?.toLowerCase() ?? '';
+  const zoneId = session.targetZoneId;
+
+  if (zoneId === 4 || zoneId === 5 || zoneId === 6) {
+    return 'hard';
+  }
+  if (zoneId === 3) {
+    return 'moderate';
+  }
+  if (zoneId === 1 || zoneId === 2) {
+    return 'easy';
+  }
 
   if (
     HARD_RUN_TYPES.has(type) ||
@@ -185,7 +202,7 @@ const calcWeekendLoadSharePct = (sessions: UnifiedSession[]): number => {
   for (let index = 0; index < sessions.length; index += 1) {
     const run = sessions[index].run;
     if (!run) continue;
-    const minutes = parseDurationMinutes(run.duration) ?? 45;
+    const minutes = run.plannedDurationMin ?? parseDurationMinutes(run.duration) ?? 45;
     totalMinutes += minutes;
     if (index >= 5) {
       weekendMinutes += minutes;
@@ -209,12 +226,12 @@ const buildMetrics = (sessions: UnifiedSession[]): DistributionMetrics => {
 
   for (const session of sessions) {
     if (!session.run) {
-      if (!session.physio) restDays += 1;
+      if (!session.physio && !session.strengthSlot) restDays += 1;
       continue;
     }
 
     runDays += 1;
-    const minutes = parseDurationMinutes(session.run.duration) ?? 45;
+    const minutes = session.run.plannedDurationMin ?? parseDurationMinutes(session.run.duration) ?? 45;
     const intensity = classifyRunIntensity(session.run);
 
     totalRunMinutes += minutes;
@@ -501,6 +518,14 @@ export const evaluateCoachWeeklyDistribution = (
       return {
         day: session.day,
         date: session.date,
+        ...(session.type === 'strength'
+          ? {
+              strengthSlot: {
+                load: 'moderate' as const,
+                notes: session.description,
+              },
+            }
+          : {}),
         notes: session.description,
       };
     }
@@ -511,8 +536,11 @@ export const evaluateCoachWeeklyDistribution = (
         type: session.type,
         description: session.description,
         duration: session.duration ?? undefined,
+        plannedDurationMin: session.plannedDurationMin ?? undefined,
+        plannedDistanceKm: session.plannedDistanceKm ?? undefined,
         targetPace: session.targetPace ?? undefined,
         targetZone: session.targetZone ?? undefined,
+        targetZoneId: toZoneId(session.targetZoneId ?? undefined),
         notes: session.notes ?? undefined,
       },
     };

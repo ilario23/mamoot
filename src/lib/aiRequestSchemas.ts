@@ -1,6 +1,6 @@
 import {z} from 'zod';
 
-const personSchema = z.enum(['coach', 'nutritionist', 'physio', 'orchestrator']);
+const personSchema = z.enum(['coach', 'nutritionist', 'physio']);
 
 const uiMessagePartSchema = z.object({
   type: z.string(),
@@ -39,11 +39,91 @@ export const weeklyPlanRequestSchema = z.object({
   strategySelectionMode: z.enum(['auto', 'preset']).optional(),
   strategyPreset: z.string().optional(),
   optimizationPriority: z.string().optional(),
-  orchestratorSessionId: z.string().optional(),
   useMultiAgent: z.boolean().optional(),
   editSourcePlanId: z.string().optional(),
   editInstructions: z.string().optional(),
   editTargetDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
+});
+
+export const weeklyPlanSessionStatusSchema = z.enum([
+  'planned',
+  'completed',
+  'skipped',
+  'modified',
+]);
+
+const weeklyPlanPhysioExerciseSchema = z.object({
+  name: z.string(),
+  sets: z.string().optional(),
+  reps: z.string().optional(),
+  tempo: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+const weeklyPlanRunSchema = z.object({
+  type: z.string(),
+  description: z.string(),
+  duration: z.string().optional(),
+  plannedDurationMin: z.number().positive().optional(),
+  plannedDistanceKm: z.number().positive().optional(),
+  targetPace: z.string().optional(),
+  targetZone: z.string().optional(),
+  targetZoneId: z.number().int().min(1).max(6).optional(),
+  notes: z.string().optional(),
+});
+
+const weeklyPlanPhysioSchema = z.object({
+  type: z.string(),
+  exercises: z.array(weeklyPlanPhysioExerciseSchema),
+  duration: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+const weeklyPlanActualActivitySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.string(),
+  distanceKm: z.number().nonnegative(),
+  durationSec: z.number().nonnegative(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  avgPaceSecPerKm: z.number().nonnegative().optional(),
+  avgHr: z.number().nonnegative().optional(),
+  elevationGainM: z.number().nonnegative().optional(),
+});
+
+const weeklyPlanBlockIntentSchema = z.object({
+  blockId: z.string(),
+  weekNumber: z.number().int().positive(),
+  goalEvent: z.string(),
+  goalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  weekType: z.string(),
+  volumeTargetKm: z.number().nonnegative(),
+  intensityLevel: z.string(),
+  keyWorkouts: z.array(z.string()),
+});
+
+const weeklyPlanComplianceSchema = z.object({
+  matchedPlanType: z.boolean().optional(),
+  notes: z.string().optional(),
+});
+
+const weeklyPlanStrengthSlotSchema = z.object({
+  focus: z.string().optional(),
+  load: z.enum(['light', 'moderate', 'heavy']).optional(),
+  notes: z.string().optional(),
+});
+
+export const weeklyPlanSessionSchema = z.object({
+  day: z.string(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  run: weeklyPlanRunSchema.optional(),
+  physio: weeklyPlanPhysioSchema.optional(),
+  strengthSlot: weeklyPlanStrengthSlotSchema.optional(),
+  notes: z.string().optional(),
+  status: weeklyPlanSessionStatusSchema.optional(),
+  actualActivity: weeklyPlanActualActivitySchema.optional(),
+  blockIntent: weeklyPlanBlockIntentSchema.optional(),
+  compliance: weeklyPlanComplianceSchema.optional(),
 });
 
 export const trainingBlockRequestSchema = z.object({
@@ -70,6 +150,5 @@ export const trainingBlockRequestSchema = z.object({
   strategySelectionMode: z.enum(['auto', 'preset']).optional(),
   strategyPreset: z.string().optional(),
   optimizationPriority: z.string().optional(),
-  orchestratorSessionId: z.string().optional(),
   useMultiAgent: z.boolean().optional(),
 });

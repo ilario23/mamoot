@@ -19,8 +19,11 @@ export const coachWeekSessionSchema = z.object({
     .describe('Workout type'),
   description: z.string().describe('Detailed workout description'),
   duration: z.string().nullable().describe('Expected duration, e.g. "45 min"'),
+  plannedDurationMin: z.number().positive().nullable().describe('Planned duration in minutes, e.g. 45'),
+  plannedDistanceKm: z.number().positive().nullable().describe('Planned run distance in km, e.g. 8'),
   targetPace: z.string().nullable().describe('Target pace, e.g. "5:00-5:15/km"'),
   targetZone: z.string().nullable().describe('Target HR zone, e.g. "Z2"'),
+  targetZoneId: z.number().int().min(1).max(6).nullable().describe('Structured zone ID from 1-6'),
   notes: z.string().nullable().describe('Additional notes'),
 });
 

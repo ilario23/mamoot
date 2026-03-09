@@ -1,6 +1,6 @@
 'use client';
 
-import {useState, useMemo, useEffect, useRef, useCallback} from 'react';
+import {useState, useMemo, useEffect, useCallback} from 'react';
 import {
   CalendarDays,
   Dumbbell,
@@ -15,13 +15,20 @@ import {
   Check,
   MessageSquareText,
   Target,
-  X,
-  ClipboardCheck,
-  SlidersHorizontal,
+  GripVertical,
 } from 'lucide-react';
 import Link from 'next/link';
+import {useRouter} from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import {CSS} from '@dnd-kit/utilities';
 import {NeoLoader} from '@/components/ui/neo-loader';
 import {
   AlertDialog,
@@ -33,27 +40,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
-import AiGenerationStatusCard from '@/components/ai/AiGenerationStatusCard';
-import WeeklyReflectionForm from '@/components/feedback/WeeklyReflectionForm';
 import WeeklyPlanDistribution from '@/components/weekly-plan/WeeklyPlanDistribution';
+import WeeklyDecisionHeader from '@/components/training-plan/WeeklyDecisionHeader';
+import TrainingPlanPanel from '@/components/training-plan/TrainingPlanPanel';
 import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
 import {useTrainingBlock} from '@/hooks/useTrainingBlock';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
-import {useSettings} from '@/contexts/SettingsContext';
 import {SESSION_TYPE_COLORS, SESSION_TYPE_BORDER_COLORS} from '@/lib/planConstants';
-import type {UnifiedSession, PhysioExercise} from '@/lib/cacheTypes';
+import type {UnifiedSession} from '@/lib/cacheTypes';
 import {
-  AUTO_STRATEGY_LABEL,
-  STRATEGY_PRESET_LABELS,
-  OPTIMIZATION_PRIORITY_LABELS,
-  describeAutoStrategySelection,
-  describeStrategyPreset,
   type OptimizationPriority,
   type StrategySelectionMode,
   type TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
-import type {AiProgressPhase} from '@/lib/aiProgress';
+import {
+  WEEKLY_PLAN_QUICK_ASK_OPTIONS,
+  type WeeklyPlanQuickAskAction,
+} from '@/lib/weeklyPlanQuickAsk';
 
 const formatWeekRange = (weekStart: string): string => {
   const start = new Date(weekStart);
@@ -66,20 +71,51 @@ const formatWeekRange = (weekStart: string): string => {
 };
 
 const toIsoDate = (d: Date): string => d.toISOString().slice(0, 10);
+const CLIENT_TIMEZONE =
+  Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-const getCurrentMonday = (): string => {
-  const now = new Date();
-  const day = now.getDay();
-  const daysSinceMonday = day === 0 ? 6 : day - 1;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - daysSinceMonday);
-  return toIsoDate(monday);
+const toIsoDateInTimeZone = (d: Date, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+  const year = parts.find((part) => part.type === 'year')?.value ?? '1970';
+  const month = parts.find((part) => part.type === 'month')?.value ?? '01';
+  const day = parts.find((part) => part.type === 'day')?.value ?? '01';
+  return `${year}-${month}-${day}`;
 };
 
-const getNextMonday = (): string => {
-  const currentMonday = new Date(getCurrentMonday());
-  currentMonday.setDate(currentMonday.getDate() + 7);
-  return toIsoDate(currentMonday);
+const getWeekdayInTimeZone = (d: Date, timeZone: string): number => {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+  }).format(d);
+  const map: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return map[weekday] ?? 0;
+};
+
+const addDaysToIsoDate = (isoDate: string, days: number): string => {
+  const d = new Date(`${isoDate}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return toIsoDate(d);
+};
+
+const getCurrentWeekNumberForBlock = (startDate: string, totalWeeks: number): number => {
+  const now = new Date();
+  const start = new Date(startDate);
+  const diffMs = Math.max(0, now.getTime() - start.getTime());
+  const weeksElapsed = Math.floor(diffMs / (7 * 86400000));
+  return Math.max(1, Math.min(totalWeeks, weeksElapsed + 1));
 };
 
 const isHardSessionType = (type?: string): boolean => {
@@ -90,8 +126,19 @@ const isHardSessionType = (type?: string): boolean => {
   );
 };
 
-const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const parseDistanceKm = (description?: string): number | null => {
+  if (!description) return null;
+  const match = description.match(/(\d+(?:\.\d+)?)\s*km/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+};
+
+const formatSessionDate = (dateIso: string): string =>
+  new Date(dateIso).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
 
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
@@ -164,160 +211,364 @@ const stripPlanMetaFromContent = (content?: string | null): string => {
     );
 };
 
-const DayCard = ({session}: {session: UnifiedSession}) => {
+const DayCard = ({
+  session,
+  isExpanded,
+  onToggle,
+  canDrag = false,
+  dragHandleProps,
+}: {
+  session: UnifiedSession;
+  isExpanded: boolean;
+  onToggle: () => void;
+  canDrag?: boolean;
+  dragHandleProps?: Record<string, unknown>;
+}) => {
   const hasRun = !!session.run;
   const hasPhysio = !!session.physio;
-  const isRest = !hasRun && !hasPhysio;
+  const hasStrengthSlot = !!session.strengthSlot;
+  const isRest = !hasRun && !hasPhysio && !hasStrengthSlot;
+  const plannedDistanceKm = session.run?.plannedDistanceKm ?? parseDistanceKm(session.run?.description);
+  const compactMetric = hasRun
+    ? plannedDistanceKm
+      ? `${plannedDistanceKm.toFixed(plannedDistanceKm >= 10 ? 0 : 1)} km`
+      : (session.run?.duration ?? 'Run')
+    : hasStrengthSlot
+      ? 'Strength slot'
+    : hasPhysio
+      ? (session.physio?.duration ?? `${session.physio?.exercises.length ?? 0} exercises`)
+      : 'Rest';
+  const compactSubline = hasRun
+    ? [session.run?.targetPace, session.run?.targetZone].filter(Boolean).join(' · ') || session.run?.description
+    : hasStrengthSlot
+      ? [session.strengthSlot?.focus, session.strengthSlot?.load, session.strengthSlot?.notes]
+        .filter(Boolean)
+        .join(' · ') || 'Coach-defined strength window.'
+    : hasPhysio
+      ? `${session.physio?.type ?? 'Physio'}${session.physio?.exercises.length ? ` · ${session.physio.exercises.length} exercises` : ''}`
+      : (session.notes ?? 'Recovery day');
+  const detailsId = `weekly-day-details-${session.date}`;
 
   const borderColor = hasRun
     ? (SESSION_TYPE_BORDER_COLORS[session.run!.type] ?? 'border-l-muted-foreground')
+    : hasStrengthSlot
+      ? 'border-l-secondary'
     : hasPhysio
       ? (SESSION_TYPE_BORDER_COLORS[session.physio!.type] ?? 'border-l-secondary')
       : 'border-l-muted-foreground';
 
   return (
     <div
-      className={`border-3 border-border bg-background shadow-neo-sm p-4 transition-all hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] border-l-[6px] overflow-hidden min-w-0 ${borderColor}`}
+      className={`border-3 border-border bg-background p-3 transition-all border-l-[6px] overflow-hidden min-w-0 ${
+        isExpanded
+          ? 'shadow-neo border-primary/60'
+          : 'shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px]'
+      } ${borderColor}`}
       role='article'
       aria-label={`${session.day} — ${session.date}`}
     >
-      {/* Day header */}
-      <div className='flex items-start justify-between gap-2 mb-3'>
-        <div className='flex items-center gap-2 shrink-0'>
-          <span className='font-black text-sm uppercase tracking-wider'>
-            {session.day}
-          </span>
-          <span className='text-[11px] text-muted-foreground font-bold'>
-            {new Date(session.date).toLocaleDateString(undefined, {
-              month: 'short',
-              day: 'numeric',
-            })}
-          </span>
-        </div>
-        <div className='flex flex-wrap justify-end gap-1'>
-          {hasRun && (
-            <span
-              className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${SESSION_TYPE_COLORS[session.run!.type] ?? 'bg-muted text-foreground'}`}
-            >
-              <Footprints className='h-3 w-3 inline mr-0.5 -mt-0.5' />
-              {session.run!.type}
-            </span>
-          )}
-          {hasPhysio && (
-            <span
-              className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${SESSION_TYPE_COLORS[session.physio!.type] ?? 'bg-muted text-foreground'}`}
-            >
-              <Dumbbell className='h-3 w-3 inline mr-0.5 -mt-0.5' />
-              {session.physio!.type}
-            </span>
-          )}
-          {isRest && (
-            <span className='px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-muted text-muted-foreground'>
-              <Moon className='h-3 w-3 inline mr-0.5 -mt-0.5' />
-              rest
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Running section */}
-      {hasRun && (
-        <div className='mb-3'>
-          <p className='text-sm font-medium leading-relaxed'>
-            {session.run!.description}
-          </p>
-          {(session.run!.duration || session.run!.targetPace || session.run!.targetZone) && (
-            <div className='flex flex-wrap gap-1.5 mt-2'>
-              {session.run!.duration && (
-                <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-muted border-2 border-border'>
-                  <Clock className='h-2.5 w-2.5' />
-                  {session.run!.duration}
-                </span>
-              )}
-              {session.run!.targetPace && (
-                <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-secondary/10 text-secondary border-2 border-border'>
-                  <Gauge className='h-2.5 w-2.5' />
-                  {session.run!.targetPace}
-                </span>
-              )}
-              {session.run!.targetZone && (
-                <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-primary/10 text-primary border-2 border-border'>
-                  <Zap className='h-2.5 w-2.5' />
-                  {session.run!.targetZone}
-                </span>
-              )}
+      <div className='flex items-start gap-2'>
+        <button
+          type='button'
+          onClick={onToggle}
+          aria-expanded={isExpanded}
+          aria-controls={detailsId}
+          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${session.day} details`}
+          className='flex-1 text-left min-w-0'
+        >
+          <div className='flex items-start justify-between gap-2'>
+            <div className='flex items-center gap-2 shrink-0'>
+              <span className='font-black text-sm uppercase tracking-wider'>
+                {session.day}
+              </span>
+              <span className='text-[11px] text-muted-foreground font-bold'>
+                {formatSessionDate(session.date)}
+              </span>
             </div>
-          )}
-          {session.run!.notes && (
-            <p className='text-xs text-muted-foreground font-medium mt-2 italic'>
-              {session.run!.notes}
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Divider between run and physio */}
-      {hasRun && hasPhysio && (
-        <div className='border-t-2 border-border/30 my-3' />
-      )}
-
-      {/* Physio section */}
-      {hasPhysio && (
-        <div>
-          <div className='flex items-center gap-1.5 mb-2'>
-            <Dumbbell className='h-3.5 w-3.5 text-secondary' />
-            <span className='text-xs font-black uppercase tracking-wider text-secondary'>
-              {session.physio!.type}
-            </span>
-            {session.physio!.duration && (
-              <span className='text-[10px] text-muted-foreground font-bold ml-auto'>
-                {session.physio!.duration}
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+            />
+          </div>
+          <div className='mt-2 flex flex-wrap items-center gap-1'>
+            {hasRun && (
+              <span
+                className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${SESSION_TYPE_COLORS[session.run!.type] ?? 'bg-muted text-foreground'}`}
+              >
+                <Footprints className='h-3 w-3 inline mr-0.5 -mt-0.5' />
+                {session.run!.type}
+              </span>
+            )}
+            {hasPhysio && (
+              <span
+                className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border ${SESSION_TYPE_COLORS[session.physio!.type] ?? 'bg-muted text-foreground'}`}
+              >
+                <Dumbbell className='h-3 w-3 inline mr-0.5 -mt-0.5' />
+                {session.physio!.type}
+              </span>
+            )}
+            {hasStrengthSlot && (
+              <span className='px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-secondary/10 text-secondary'>
+                <Dumbbell className='h-3 w-3 inline mr-0.5 -mt-0.5' />
+                strength slot
+              </span>
+            )}
+            {isRest && (
+              <span className='px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-muted text-muted-foreground'>
+                <Moon className='h-3 w-3 inline mr-0.5 -mt-0.5' />
+                rest
+              </span>
+            )}
+            {session.status && (
+              <span className='px-2 py-0.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary/10 text-primary'>
+                {session.status}
               </span>
             )}
           </div>
-          <div className='space-y-1'>
-            {session.physio!.exercises.map((ex, i) => (
-              <div
-                key={i}
-                className='text-xs'
-              >
-                <span className='font-bold'>{ex.name}</span>
-                {' '}
-                <span className='text-muted-foreground'>
-                  {[
-                    ex.sets && ex.reps ? `${ex.sets}x${ex.reps}` : null,
-                    ex.tempo,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
+          <p className='mt-2 text-base font-black leading-none'>{compactMetric}</p>
+          {compactSubline && (
+            <p className='mt-1 text-xs text-muted-foreground font-medium line-clamp-2'>
+              {compactSubline}
+            </p>
+          )}
+        </button>
+        <div className='shrink-0'>
+          <button
+            type='button'
+            aria-label={
+              canDrag
+                ? `Drag ${session.day} workout to another day`
+                : `${session.day} is locked and cannot be moved`
+            }
+            disabled={!canDrag}
+            className='p-1 border-2 border-border bg-muted/40 text-muted-foreground disabled:opacity-40 disabled:cursor-not-allowed'
+            {...(canDrag ? dragHandleProps : {})}
+          >
+            <GripVertical className='h-3 w-3' />
+          </button>
+        </div>
+      </div>
+      <div
+        id={detailsId}
+        className={`grid transition-[grid-template-rows,opacity,margin] duration-300 ease-out ${
+          isExpanded ? 'grid-rows-[1fr] opacity-100 mt-3' : 'grid-rows-[0fr] opacity-0 mt-0'
+        }`}
+      >
+        <div className='overflow-hidden space-y-3'>
+          {hasRun && (
+            <div>
+              <p className='text-sm font-medium leading-relaxed'>
+                {session.run!.description}
+              </p>
+              {(session.run!.duration || session.run!.targetPace || session.run!.targetZone) && (
+                <div className='flex flex-wrap gap-1.5 mt-2'>
+                  {session.run!.duration && (
+                    <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-muted border-2 border-border'>
+                      <Clock className='h-2.5 w-2.5' />
+                      {session.run!.duration}
+                    </span>
+                  )}
+                  {session.run!.targetPace && (
+                    <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-secondary/10 text-secondary border-2 border-border'>
+                      <Gauge className='h-2.5 w-2.5' />
+                      {session.run!.targetPace}
+                    </span>
+                  )}
+                  {session.run!.targetZone && (
+                    <span className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider bg-primary/10 text-primary border-2 border-border'>
+                      <Zap className='h-2.5 w-2.5' />
+                      {session.run!.targetZone}
+                    </span>
+                  )}
+                </div>
+              )}
+              {session.run!.notes && (
+                <p className='text-xs text-muted-foreground font-medium mt-2 italic'>
+                  {session.run!.notes}
+                </p>
+              )}
+            </div>
+          )}
+
+          {hasRun && hasPhysio && (
+            <div className='border-t-2 border-border/30' />
+          )}
+
+          {hasStrengthSlot && (
+            <div>
+              <div className='flex items-center gap-1.5 mb-2'>
+                <Dumbbell className='h-3.5 w-3.5 text-secondary' />
+                <span className='text-xs font-black uppercase tracking-wider text-secondary'>
+                  Strength slot
                 </span>
+                {session.strengthSlot?.load && (
+                  <span className='text-[10px] text-muted-foreground font-bold ml-auto uppercase'>
+                    {session.strengthSlot.load}
+                  </span>
+                )}
               </div>
-            ))}
-          </div>
-          {session.physio!.notes && (
-            <p className='text-xs text-muted-foreground font-medium mt-2 italic'>
-              {session.physio!.notes}
+              {session.strengthSlot?.focus && (
+                <p className='text-xs font-bold'>
+                  Focus: {session.strengthSlot.focus}
+                </p>
+              )}
+              <p className='text-xs text-muted-foreground font-medium mt-1'>
+                {session.strengthSlot?.notes || 'Coach-defined window for strength work.'}
+              </p>
+            </div>
+          )}
+
+          {hasPhysio && (
+            <div>
+              <div className='flex items-center gap-1.5 mb-2'>
+                <Dumbbell className='h-3.5 w-3.5 text-secondary' />
+                <span className='text-xs font-black uppercase tracking-wider text-secondary'>
+                  {session.physio!.type}
+                </span>
+                {session.physio!.duration && (
+                  <span className='text-[10px] text-muted-foreground font-bold ml-auto'>
+                    {session.physio!.duration}
+                  </span>
+                )}
+              </div>
+              <div className='space-y-1'>
+                {session.physio!.exercises.map((ex, i) => (
+                  <div
+                    key={i}
+                    className='text-xs'
+                  >
+                    <span className='font-bold'>{ex.name}</span>
+                    {' '}
+                    <span className='text-muted-foreground'>
+                      {[
+                        ex.sets && ex.reps ? `${ex.sets}x${ex.reps}` : null,
+                        ex.tempo,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {session.physio!.notes && (
+                <p className='text-xs text-muted-foreground font-medium mt-2 italic'>
+                  {session.physio!.notes}
+                </p>
+              )}
+            </div>
+          )}
+
+          {session.actualActivity && (
+            <div className='border-2 border-border bg-muted/30 p-2 space-y-1'>
+              <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
+                Completed activity
+              </p>
+              <p className='text-xs font-bold'>
+                {session.actualActivity.name}
+              </p>
+              <p className='text-xs text-muted-foreground font-medium'>
+                {session.actualActivity.distanceKm.toFixed(1)} km · {Math.round(session.actualActivity.durationSec / 60)} min
+              </p>
+            </div>
+          )}
+
+          {session.compliance?.notes && (
+            <p className='text-xs text-muted-foreground font-medium'>
+              {session.compliance.notes}
+            </p>
+          )}
+
+          {isRest && session.notes && (
+            <p className='text-sm text-muted-foreground font-medium'>
+              {session.notes}
             </p>
           )}
         </div>
-      )}
+      </div>
+    </div>
+  );
+};
 
-      {/* Rest day */}
-      {isRest && session.notes && (
-        <p className='text-sm text-muted-foreground font-medium'>
-          {session.notes}
-        </p>
-      )}
+const moveSessionPayloadBetweenDays = (
+  sessions: UnifiedSession[],
+  fromDate: string,
+  toDate: string,
+): UnifiedSession[] => {
+  const fromIndex = sessions.findIndex((session) => session.date === fromDate);
+  const toIndex = sessions.findIndex((session) => session.date === toDate);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+    return sessions;
+  }
+  const next = [...sessions];
+  const source = next[fromIndex];
+  const target = next[toIndex];
+  const sourcePayload = {
+    run: source.run,
+    physio: source.physio,
+    strengthSlot: source.strengthSlot,
+    notes: source.notes,
+    blockIntent: source.blockIntent,
+  };
+  const targetPayload = {
+    run: target.run,
+    physio: target.physio,
+    strengthSlot: target.strengthSlot,
+    notes: target.notes,
+    blockIntent: target.blockIntent,
+  };
+  next[fromIndex] = {...source, ...targetPayload};
+  next[toIndex] = {...target, ...sourcePayload};
+  return next;
+};
+
+const SortableDayCard = ({
+  session,
+  isLocked,
+  isExpanded,
+  onToggle,
+  className,
+}: {
+  session: UnifiedSession;
+  isLocked: boolean;
+  isExpanded: boolean;
+  onToggle: () => void;
+  className?: string;
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: session.date,
+    disabled: isLocked,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={`${isDragging ? 'opacity-70' : ''} ${className ?? ''}`}
+    >
+      <DayCard
+        session={session}
+        isExpanded={isExpanded}
+        onToggle={onToggle}
+        canDrag={!isLocked}
+        dragHandleProps={{
+          ...attributes,
+          ...listeners,
+        }}
+      />
     </div>
   );
 };
 
 const EmptyState = ({
-  onGenerate,
-  isGenerating,
 }: {
-  onGenerate: () => void;
-  isGenerating: boolean;
 }) => (
   <div className='border-3 border-border bg-background shadow-neo p-8 md:p-12 text-center space-y-4'>
     <div className='w-16 h-16 mx-auto bg-muted border-3 border-border shadow-neo-sm flex items-center justify-center'>
@@ -328,26 +579,18 @@ const EmptyState = ({
         No Weekly Plan Yet
       </h2>
       <p className='text-sm text-muted-foreground font-medium max-w-sm mx-auto'>
-        Generate a unified weekly plan that combines running sessions from your
-        Coach with strength and mobility work from your Physio.
+        No plan data yet. Ask Coach in AI Chat to create your weekly plan.
       </p>
     </div>
-    <button
-      onClick={onGenerate}
-      disabled={isGenerating}
+    <Link
+      href='/ai-chat?quickAsk=1&action=create_weekly_plan'
       tabIndex={0}
-      aria-label='Generate weekly plan'
-      className='inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground font-black text-sm uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
+      aria-label='Open AI chat to ask coach for a weekly plan'
+      className='inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground font-black text-sm uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]'
     >
-      {isGenerating ? (
-        <NeoLoader label='Generating' size='sm' />
-      ) : (
-        <>
-          <Sparkles className='h-4 w-4' />
-          Generate Weekly Plan
-        </>
-      )}
-    </button>
+      <MessageSquareText className='h-4 w-4' />
+      Ask Coach in Chat
+    </Link>
   </div>
 );
 
@@ -436,7 +679,7 @@ const BlockContextBanner = ({
   goalEvent: string;
 }) => (
   <Link
-    href='/training-block'
+    href='/training-plan?tab=block'
     className='flex items-center gap-2 px-4 py-2.5 border-3 border-border bg-nav-training-block/10 shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all min-w-0 overflow-hidden'
   >
     <Target className='h-4 w-4 text-nav-training-block shrink-0' />
@@ -454,70 +697,34 @@ const BlockContextBanner = ({
   </Link>
 );
 
-const WeeklyPlan = () => {
+interface WeeklyPlanProps {
+  embedded?: boolean;
+}
+
+const WeeklyPlan = ({embedded = false}: WeeklyPlanProps) => {
+  const router = useRouter();
   const {athlete} = useStravaAuth();
   const athleteId = athlete?.id ?? null;
   const {
     activePlan,
     plans,
     isLoading,
-    isGenerating,
-    generatePlan,
     activatePlan,
     deletePlan,
-    preferences,
-    setPreferences,
-    savePreferences,
     lastError,
-    generationProgress,
-    phaseStatusMap,
-    generationMessage,
-    previousWeekStart,
-    previousWeekFeedback,
-    isLoadingPreviousWeekFeedback,
-    isSavingPreviousWeekFeedback,
-    submitPreviousWeekFeedback,
+    reorderActivePlanSessions,
   } = useWeeklyPlan(athleteId);
   const {activeBlock} = useTrainingBlock(athleteId);
-  const {settings} = useSettings();
   const [fullPlanOpen, setFullPlanOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [regenerateOpen, setRegenerateOpen] = useState(false);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [regenerationMode, setRegenerationMode] = useState<'full' | 'remaining_days'>('full');
-  const [advancedRegenerationOpen, setAdvancedRegenerationOpen] = useState(false);
+  const [isHistorySidebarOpen, setIsHistorySidebarOpen] = useState(false);
+  const [lockedSessionsOpen, setLockedSessionsOpen] = useState(false);
+  const [weekContextOpen, setWeekContextOpen] = useState(true);
+  const [distributionOpen, setDistributionOpen] = useState(false);
   const [deletePlanConfirmId, setDeletePlanConfirmId] = useState<string | null>(null);
   const [isDeletingPlan, setIsDeletingPlan] = useState(false);
-  const [targetWeekStart, setTargetWeekStart] = useState('');
-  const [targetWeekSelection, setTargetWeekSelection] = useState<'current' | 'next'>('current');
-  const [regenerationPreferences, setRegenerationPreferences] = useState('');
-  const [strategySelectionMode, setStrategySelectionMode] =
-    useState<StrategySelectionMode>('auto');
-  const [strategyPreset, setStrategyPreset] =
-    useState<TrainingStrategyPreset>('polarized_80_20');
-  const [optimizationPriority, setOptimizationPriority] =
-    useState<OptimizationPriority>('race_performance');
-  const generationPhaseOrder: AiProgressPhase[] = [
-    'context',
-    'coach',
-    'physio',
-    'repair',
-    'merge',
-    'save',
-  ];
-  const generationPhaseLabels: Record<AiProgressPhase, string> = {
-    context: 'Load context',
-    coach: 'Coach draft',
-    physio: 'Physio draft',
-    repair: 'Conflict check and repair',
-    merge: 'Merge sessions',
-    save: 'Persist plan',
-    done: 'Complete',
-    error: 'Error',
-  };
-  const regenerateDialogRef = useRef<HTMLDivElement>(null);
-  const feedbackDialogRef = useRef<HTMLDivElement>(null);
-  const modalReturnFocusRef = useRef<HTMLElement | null>(null);
+  const [isSavingReorder, setIsSavingReorder] = useState(false);
+  const [expandedSessionDate, setExpandedSessionDate] = useState<string | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, {activationConstraint: {distance: 6}}));
   const activePlanPreferences = useMemo(
     () => extractPreferencesFromPlanContent(activePlan?.content),
     [activePlan?.content],
@@ -534,8 +741,9 @@ const WeeklyPlan = () => {
     if (!activePlan) return null;
     const runDays = activePlan.sessions.filter((session) => !!session.run).length;
     const physioDays = activePlan.sessions.filter((session) => !!session.physio).length;
+    const strengthSlots = activePlan.sessions.filter((session) => !!session.strengthSlot).length;
     const restDays = activePlan.sessions.filter(
-      (session) => !session.run && !session.physio,
+      (session) => !session.run && !session.physio && !session.strengthSlot,
     ).length;
     const hardRunDays = activePlan.sessions.filter((session) =>
       isHardSessionType(session.run?.type),
@@ -543,10 +751,25 @@ const WeeklyPlan = () => {
     return {
       runDays,
       physioDays,
+      strengthSlots,
       restDays,
       hardRunDays,
     };
   }, [activePlan]);
+
+  const loadLabel = useMemo<'Conservative load' | 'Balanced load' | 'High load'>(() => {
+    if (!weekAtGlance) return 'Conservative load';
+    if (weekAtGlance.hardRunDays >= 3) return 'High load';
+    if (weekAtGlance.hardRunDays === 2) return 'Balanced load';
+    return 'Conservative load';
+  }, [weekAtGlance]);
+
+  const todayIso = useMemo(() => toIsoDateInTimeZone(new Date(), CLIENT_TIMEZONE), []);
+  const isSessionLocked = useCallback(
+    (session: UnifiedSession) =>
+      Boolean(session.actualActivity) || session.date < todayIso || isSavingReorder,
+    [todayIso, isSavingReorder],
+  );
 
   const blockBannerData = useMemo(() => {
     if (!activeBlock || !activePlan?.blockId) return null;
@@ -563,69 +786,56 @@ const WeeklyPlan = () => {
     };
   }, [activeBlock, activePlan]);
 
-  const handleGenerate = () => {
-    handleOpenRegenerate();
-  };
+  const actionableSessions = useMemo(() => {
+    if (!activePlan) return [];
+    return activePlan.sessions.filter((session) => !isSessionLocked(session));
+  }, [activePlan, isSessionLocked]);
 
-  const handleOpenRegenerate = () => {
-    modalReturnFocusRef.current = document.activeElement as HTMLElement;
-    const currentMonday = getCurrentMonday();
-    const nextMonday = getNextMonday();
-    const defaultSelection: 'current' | 'next' =
-      activePlan?.weekStart === nextMonday ? 'next' : 'current';
-    setTargetWeekSelection(defaultSelection);
-    setTargetWeekStart(defaultSelection === 'next' ? nextMonday : currentMonday);
-    setRegenerationMode('full');
-    setAdvancedRegenerationOpen(false);
-    setRegenerationPreferences(activePlanPreferences || preferences || '');
-    setStrategySelectionMode(settings.strategySelectionMode ?? 'auto');
-    setStrategyPreset(settings.strategyPreset ?? 'polarized_80_20');
-    setOptimizationPriority(
-      settings.optimizationPriority ?? 'race_performance',
-    );
-    setRegenerateOpen(true);
-  };
+  const lockedSessions = useMemo(() => {
+    if (!activePlan) return [];
+    return activePlan.sessions.filter((session) => isSessionLocked(session));
+  }, [activePlan, isSessionLocked]);
 
-  const handleCloseRegenerate = useCallback(() => {
-    if (isGenerating) return;
-    setRegenerateOpen(false);
-    setTimeout(() => modalReturnFocusRef.current?.focus(), 0);
-  }, [isGenerating]);
+  const nextActionableSessions = useMemo(
+    () => actionableSessions.slice(0, 3),
+    [actionableSessions],
+  );
 
-  const handleSelectCurrentWeek = () => {
-    setTargetWeekSelection('current');
-    setTargetWeekStart(getCurrentMonday());
-  };
 
-  const handleSelectNextWeek = () => {
-    setTargetWeekSelection('next');
-    setTargetWeekStart(getNextMonday());
-  };
-
-  const handleRegenerateSubmit = async () => {
-    setPreferences(regenerationPreferences);
-    await savePreferences();
-    const generatedPlan = await generatePlan({
-      weekStartDate: targetWeekStart || undefined,
-      preferences: regenerationPreferences,
-      mode: regenerationMode,
-      sourcePlanId: activePlan?.id,
-      strategySelectionMode,
-      strategyPreset,
-      optimizationPriority,
-    });
-    if (generatedPlan) {
-      handleCloseRegenerate();
-    }
-  };
+  const handleDragEnd = useCallback(
+    async (event: DragEndEvent) => {
+      if (!activePlan || isSavingReorder) return;
+      const {active, over} = event;
+      const sourceDate = String(active.id);
+      const targetDate = over ? String(over.id) : null;
+      if (!targetDate || sourceDate === targetDate) return;
+      const sourceSession = activePlan.sessions.find((session) => session.date === sourceDate);
+      const targetSession = activePlan.sessions.find((session) => session.date === targetDate);
+      if (!sourceSession || !targetSession) return;
+      if (isSessionLocked(sourceSession) || isSessionLocked(targetSession)) return;
+      const nextSessions = moveSessionPayloadBetweenDays(
+        activePlan.sessions,
+        sourceDate,
+        targetDate,
+      );
+      if (nextSessions === activePlan.sessions) return;
+      setIsSavingReorder(true);
+      try {
+        await reorderActivePlanSessions(nextSessions);
+      } finally {
+        setIsSavingReorder(false);
+      }
+    },
+    [activePlan, isSavingReorder, isSessionLocked, reorderActivePlanSessions],
+  );
 
   const handleToggleFullPlan = () => {
     setFullPlanOpen((prev) => !prev);
   };
 
-  const handleToggleHistory = () => {
-    setHistoryOpen((prev) => !prev);
-  };
+  const handleToggleDayDetails = useCallback((sessionDate: string) => {
+    setExpandedSessionDate((prev) => (prev === sessionDate ? null : sessionDate));
+  }, []);
 
   const handleDeletePlanRequest = useCallback((planId: string) => {
     setDeletePlanConfirmId(planId);
@@ -647,105 +857,40 @@ const WeeklyPlan = () => {
     [deletePlanConfirmId, plans],
   );
 
-  const handleOpenFeedback = () => {
-    modalReturnFocusRef.current = document.activeElement as HTMLElement;
-    setFeedbackOpen(true);
-  };
-
-  const handleCloseFeedback = useCallback(() => {
-    if (isSavingPreviousWeekFeedback) return;
-    setFeedbackOpen(false);
-    setTimeout(() => modalReturnFocusRef.current?.focus(), 0);
-  }, [isSavingPreviousWeekFeedback]);
-
   useEffect(() => {
-    if (!regenerateOpen || !regenerateDialogRef.current) return;
-    const container = regenerateDialogRef.current;
-    const focusables = Array.from(
-      container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-    );
-    (focusables[0] ?? container).focus();
+    setExpandedSessionDate(null);
+  }, [activePlan?.id]);
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (isGenerating) return;
-        handleCloseRegenerate();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const items = Array.from(
-        container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      );
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
+  const handleQuickAskCoach = useCallback(
+    (action: WeeklyPlanQuickAskAction) => {
+      if (!activePlan) return;
+      const params = new URLSearchParams({
+        quickAsk: '1',
+        action,
+        weekStart: activePlan.weekStart,
+        title: activePlan.title,
+      });
+      router.push(`/ai-chat?${params.toString()}`);
+    },
+    [activePlan, router],
+  );
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [regenerateOpen, handleCloseRegenerate, isGenerating]);
+  const handleOpenHistorySidebar = useCallback(() => {
+    setIsHistorySidebarOpen(true);
+  }, []);
 
-  useEffect(() => {
-    if (!feedbackOpen || !feedbackDialogRef.current) return;
-    const container = feedbackDialogRef.current;
-    const focusables = Array.from(
-      container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-    );
-    (focusables[0] ?? container).focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (isSavingPreviousWeekFeedback) return;
-        handleCloseFeedback();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const items = Array.from(
-        container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      );
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [feedbackOpen, handleCloseFeedback, isSavingPreviousWeekFeedback]);
-
-  useEffect(() => {
-    if (!regenerateOpen && !feedbackOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    const previousTouchAction = document.body.style.touchAction;
-    document.body.style.overflow = 'hidden';
-    document.body.style.touchAction = 'none';
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.style.touchAction = previousTouchAction;
-    };
-  }, [regenerateOpen, feedbackOpen]);
+  const handleCloseHistorySidebar = useCallback(() => {
+    setIsHistorySidebarOpen(false);
+  }, []);
 
   if (isLoading) {
     return (
       <div className='space-y-4 md:space-y-6'>
-        <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
-          Weekly Plan
-        </h1>
+        {!embedded && (
+          <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
+            Weekly Plan
+          </h1>
+        )}
         <div className='border-3 border-border bg-background shadow-neo p-8 flex items-center justify-center'>
           <NeoLoader label='Loading plan' size='sm' />
         </div>
@@ -756,326 +901,35 @@ const WeeklyPlan = () => {
   return (
     <div className='space-y-4 md:space-y-6 min-w-0 max-w-full overflow-x-hidden'>
       {/* Page title */}
-      <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
-        Weekly Plan
-      </h1>
+      {!embedded && (
+        <h1 className='text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3'>
+          Weekly Plan
+        </h1>
+      )}
 
       {lastError && (
         <AiErrorBanner error={lastError} />
       )}
 
-      {/* Training block context banner */}
-      {blockBannerData && activePlan && (
-        <BlockContextBanner
-          weekNumber={blockBannerData.weekNumber}
-          totalWeeks={blockBannerData.totalWeeks}
-          phaseName={blockBannerData.phaseName}
-          goalEvent={blockBannerData.goalEvent}
-        />
-      )}
-
-      {regenerateOpen && (
-        <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'
-          onPointerDown={(event) => {
-            if (event.target !== event.currentTarget) return;
-            handleCloseRegenerate();
-          }}
-        >
-          <div
-            ref={regenerateDialogRef}
-            role='dialog'
-            aria-modal='true'
-            aria-labelledby='weekly-plan-regenerate-title'
-            aria-busy={isGenerating}
-            tabIndex={-1}
-            className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-4 md:p-5 space-y-4'
-          >
-            <div className='flex items-start justify-between gap-3'>
-              <div className='space-y-1'>
-                <h3 id='weekly-plan-regenerate-title' className='font-black text-base uppercase tracking-wider'>
-                  Regenerate Weekly Plan
-                </h3>
-                <p className='text-xs text-muted-foreground font-medium'>
-                  Choose whether to regenerate the full week or only the remaining days.
-                </p>
-              </div>
-              <button
-                onClick={handleCloseRegenerate}
-                disabled={isGenerating}
-                tabIndex={0}
-                aria-label='Close regenerate dialog'
-                className='p-1.5 border-2 border-border bg-background hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background'
-              >
-                <X className='h-3.5 w-3.5' />
-              </button>
-            </div>
-
-            <div className='space-y-2'>
-              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                Quick setup
-              </label>
-              <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
-                <button
-                  onClick={handleSelectCurrentWeek}
-                  tabIndex={0}
-                  aria-label='Use current week'
-                  className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
-                    targetWeekSelection === 'current'
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-background hover:bg-muted'
-                  }`}
-                >
-                  Current Week
-                </button>
-                <button
-                  onClick={handleSelectNextWeek}
-                  tabIndex={0}
-                  aria-label='Use next week'
-                  className={`px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border transition-colors ${
-                    targetWeekSelection === 'next'
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-background hover:bg-muted'
-                  }`}
-                >
-                  Next Week
-                </button>
-              </div>
-              <div
-                aria-label='Selected target week'
-                className='w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium'
-              >
-                {targetWeekStart
-                  ? `${formatWeekRange(targetWeekStart)} (${targetWeekStart})`
-                  : 'Select a week'}
-              </div>
-            </div>
-
-            <div className='space-y-2'>
-              <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                Regeneration mode
-              </label>
-              <div className='grid grid-cols-1 sm:grid-cols-2 gap-2'>
-                <button
-                  onClick={() => setRegenerationMode('full')}
-                  tabIndex={0}
-                  aria-label='Regenerate full week mode'
-                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold transition-colors ${
-                    regenerationMode === 'full'
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-background hover:bg-muted'
-                  }`}
-                >
-                  Full week
-                </button>
-                <button
-                  onClick={() => setRegenerationMode('remaining_days')}
-                  tabIndex={0}
-                  aria-label='Regenerate remaining days mode'
-                  className={`text-left px-3 py-2 border-3 border-border text-xs font-bold transition-colors ${
-                    regenerationMode === 'remaining_days'
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-background hover:bg-muted'
-                  }`}
-                >
-                  Remaining days only
-                </button>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setAdvancedRegenerationOpen((prev) => !prev)}
-              tabIndex={0}
-              aria-label='Toggle advanced regeneration options'
-              className='w-full flex items-center justify-between px-3 py-2 border-2 border-border bg-muted/40 hover:bg-muted text-xs font-black uppercase tracking-wider'
-            >
-              <span className='inline-flex items-center gap-1.5'>
-                <SlidersHorizontal className='h-3.5 w-3.5' />
-                Advanced options
-              </span>
-              <ChevronDown
-                className={`h-4 w-4 transition-transform ${advancedRegenerationOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
-
-            {advancedRegenerationOpen && (
-              <div className='space-y-3 border-2 border-border bg-muted/30 p-3'>
-                <div className='space-y-2'>
-                  <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                    Strategy
-                  </label>
-                  <select
-                    value={
-                      strategySelectionMode === 'auto' ? 'auto' : strategyPreset
-                    }
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === 'auto') {
-                        setStrategySelectionMode('auto');
-                        return;
-                      }
-                      setStrategySelectionMode('preset');
-                      setStrategyPreset(value as TrainingStrategyPreset);
-                    }}
-                    className='w-full bg-background border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
-                    aria-label='Select strategy'
-                  >
-                    <option value='auto'>{AUTO_STRATEGY_LABEL}</option>
-                    {Object.entries(STRATEGY_PRESET_LABELS).map(([id, label]) => (
-                      <option key={id} value={id}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className='text-xs text-muted-foreground font-medium'>
-                    {strategySelectionMode === 'auto'
-                      ? describeAutoStrategySelection()
-                      : describeStrategyPreset(strategyPreset)}
-                  </p>
-                </div>
-
-                <div className='space-y-2'>
-                  <label className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'>
-                    Optimization Priority
-                  </label>
-                  <select
-                    value={optimizationPriority}
-                    onChange={(e) =>
-                      setOptimizationPriority(
-                        e.target.value as OptimizationPriority,
-                      )
-                    }
-                    className='w-full bg-background border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30'
-                    aria-label='Select optimization priority'
-                  >
-                    {Object.entries(OPTIMIZATION_PRIORITY_LABELS).map(
-                      ([id, label]) => (
-                        <option key={id} value={id}>
-                          {label}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-
-                <div className='space-y-2'>
-                  <label
-                    htmlFor='regenerate-preferences'
-                    className='block text-[10px] font-black uppercase tracking-widest text-muted-foreground'
-                  >
-                    Preferences
-                  </label>
-                  <textarea
-                    id='regenerate-preferences'
-                    value={regenerationPreferences}
-                    onChange={(e) => setRegenerationPreferences(e.target.value)}
-                    rows={3}
-                    className='w-full bg-background border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none'
-                    placeholder='Add weekly constraints/preferences for this plan generation'
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className='flex flex-wrap gap-2'>
-              <button
-                onClick={handleRegenerateSubmit}
-                disabled={isGenerating}
-                tabIndex={0}
-                aria-label='Confirm regenerate weekly plan'
-                className='inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground font-black text-[10px] uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all disabled:opacity-50 disabled:pointer-events-none'
-              >
-                {isGenerating ? <NeoLoader size='sm' /> : <Sparkles className='h-3.5 w-3.5' />}
-                Generate Plan
-              </button>
-              <button
-                onClick={handleCloseRegenerate}
-                disabled={isGenerating}
-                tabIndex={0}
-                aria-label='Cancel plan regeneration'
-                className='px-3 py-2 text-[10px] font-black uppercase tracking-wider border-3 border-border bg-background hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background'
-              >
-                Cancel
-              </button>
-            </div>
-            {(isGenerating || generationProgress.length > 0) && (
-              <AiGenerationStatusCard
-                title='Pipeline status'
-                subtitle='Live coach and physio coordination progress.'
-                phaseOrder={generationPhaseOrder}
-                phaseLabels={generationPhaseLabels}
-                phaseStatusMap={phaseStatusMap}
-                currentMessage={generationMessage}
-              />
-            )}
-          </div>
-        </div>
-      )}
-
-      {feedbackOpen && (
-        <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'
-          onPointerDown={(event) => {
-            if (event.target !== event.currentTarget) return;
-            handleCloseFeedback();
-          }}
-        >
-          <div
-            ref={feedbackDialogRef}
-            role='dialog'
-            aria-modal='true'
-            aria-labelledby='weekly-plan-feedback-title'
-            aria-busy={isSavingPreviousWeekFeedback}
-            tabIndex={-1}
-            className='w-full max-w-xl border-3 border-border bg-background shadow-neo p-4 md:p-5 space-y-4'
-          >
-            <div className='flex items-start justify-between gap-3'>
-              <div className='space-y-1'>
-                <h3 id='weekly-plan-feedback-title' className='font-black text-base uppercase tracking-wider'>
-                  Last Week Reflection
-                </h3>
-                <p className='text-xs text-muted-foreground font-medium'>
-                  Share how training went for week starting {previousWeekStart}.
-                </p>
-              </div>
-              <button
-                onClick={handleCloseFeedback}
-                disabled={isSavingPreviousWeekFeedback}
-                tabIndex={0}
-                aria-label='Close feedback dialog'
-                className='p-1.5 border-2 border-border bg-background hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background'
-              >
-                <X className='h-3.5 w-3.5' />
-              </button>
-            </div>
-            <WeeklyReflectionForm
-              weekStart={previousWeekStart}
-              prompt={`Share how training went for week starting ${previousWeekStart}.`}
-              initialValues={previousWeekFeedback}
-              isSubmitting={isSavingPreviousWeekFeedback}
-              submitLabel='Save reflection'
-              onSubmit={async (values) => {
-                await submitPreviousWeekFeedback(values);
-                handleCloseFeedback();
-              }}
-              onCancel={handleCloseFeedback}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Empty state */}
       {!activePlan && (
         <div className='space-y-3'>
-          <EmptyState
-            onGenerate={handleGenerate}
-            isGenerating={isGenerating}
-          />
+          <EmptyState />
           {plans.length > 0 && (
             <div className='border-3 border-border bg-background shadow-neo-sm p-4'>
-              <p className='text-sm font-bold'>
-                No active plan selected. Choose one from history below.
-              </p>
+              <div className='flex flex-wrap items-center justify-between gap-2'>
+                <p className='text-sm font-bold'>
+                  No active plan selected. Choose one from history.
+                </p>
+                <button
+                  onClick={handleOpenHistorySidebar}
+                  tabIndex={0}
+                  aria-label='Open plan history'
+                  className='inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-background hover:bg-muted transition-colors'
+                >
+                  Open History
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1084,261 +938,260 @@ const WeeklyPlan = () => {
       {/* Active plan */}
       {activePlan && (
         <>
-          {/* Plan header */}
-          <div className='border-3 border-border bg-background shadow-neo border-l-[6px] border-l-primary p-5 md:p-6 space-y-3 overflow-hidden'>
-            <div className='flex items-start justify-between gap-3'>
-              <div className='min-w-0 space-y-1'>
-                <span className='font-black text-[10px] uppercase tracking-widest text-primary flex items-center gap-1'>
-                  <CalendarDays className='h-3 w-3' />
-                  Active Plan
-                </span>
-                <h2 className='font-black text-xl md:text-2xl uppercase tracking-tight leading-tight'>
-                  {activePlan.title}
-                </h2>
-                {activePlan.summary && (
-                  <p className='text-sm text-muted-foreground font-medium leading-relaxed'>
-                    {activePlan.summary}
+          <WeeklyDecisionHeader
+            title={activePlan.title}
+            summary={activePlan.summary}
+            weekRange={formatWeekRange(activePlan.weekStart)}
+            loadLabel={loadLabel}
+            strategyLabel={activePlanStrategyMeta?.strategyLabel ?? 'Not specified'}
+            priorityLabel={activePlanStrategyMeta?.optimizationPriorityLabel ?? 'Balanced progression'}
+            weekMixLabel={`${weekAtGlance?.runDays ?? 0} runs · ${weekAtGlance?.strengthSlots ?? 0} strength slots · ${weekAtGlance?.restDays ?? 0} rest`}
+            onOpenHistory={handleOpenHistorySidebar}
+            historyCount={plans.length}
+            quickAskOptions={WEEKLY_PLAN_QUICK_ASK_OPTIONS}
+            onQuickAsk={handleQuickAskCoach}
+          />
+
+          {blockBannerData && (
+            <div className='space-y-2'>
+              <BlockContextBanner
+                weekNumber={blockBannerData.weekNumber}
+                totalWeeks={blockBannerData.totalWeeks}
+                phaseName={blockBannerData.phaseName}
+                goalEvent={blockBannerData.goalEvent}
+              />
+              {activePlan.sessions.some((session) => session.blockIntent) && (
+                <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-1'>
+                  <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                    This week inside your block
                   </p>
-                )}
-              </div>
-              <div className='flex items-center gap-2 shrink-0'>
-                <button
-                  onClick={handleOpenFeedback}
-                  disabled={isLoadingPreviousWeekFeedback}
-                  tabIndex={0}
-                  aria-label='Review last week feedback'
-                  className='inline-flex items-center gap-1.5 px-2.5 py-2 text-muted-foreground hover:text-primary hover:bg-primary/10 border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all disabled:opacity-50 disabled:pointer-events-none'
-                >
-                  <ClipboardCheck className='h-4 w-4' />
-                  <span className='hidden md:inline text-[10px] font-black uppercase tracking-wider'>
-                    Review Last Week
-                  </span>
-                </button>
-                <button
-                  onClick={handleOpenRegenerate}
-                  disabled={isGenerating}
-                  tabIndex={0}
-                  aria-label='Open regenerate plan options'
-                  className='shrink-0 p-2.5 text-muted-foreground hover:text-primary hover:bg-primary/10 border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none'
-                >
-                  {isGenerating ? (
-                    <NeoLoader size='sm' />
-                  ) : (
-                    <Sparkles className='h-4 w-4' />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Week range + meta pills */}
-            <div className='flex flex-wrap gap-2'>
-              <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-secondary/10 text-secondary shadow-neo-sm'>
-                <CalendarDays className='h-3 w-3' />
-                {formatWeekRange(activePlan.weekStart)}
-              </span>
-              {activePlan.goal && (
-                <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-accent/20 text-accent-foreground shadow-neo-sm'>
-                  {activePlan.goal}
-                </span>
-              )}
-              <span className='inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-black uppercase tracking-wider border-3 border-border bg-muted shadow-neo-sm'>
-                {activePlan.sessions.filter((s) => s.run).length} runs · {activePlan.sessions.filter((s) => s.physio).length} physio
-              </span>
-            </div>
-          </div>
-
-          {weekAtGlance && (
-            <div className='grid grid-cols-1 md:grid-cols-3 gap-3'>
-              <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-1'>
-                <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
-                  This week at a glance
-                </p>
-                <p className='text-sm font-medium'>
-                  {weekAtGlance.runDays} runs · {weekAtGlance.physioDays} physio ·{' '}
-                  {weekAtGlance.restDays} rest
-                </p>
-                <p className='text-xs text-muted-foreground font-medium'>
-                  Hard run days: {weekAtGlance.hardRunDays}
-                </p>
-              </div>
-              <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-1'>
-                <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
-                  Strategy
-                </p>
-                <p className='text-sm font-medium'>
-                  {activePlanStrategyMeta?.strategyLabel ?? 'Not specified'}
-                </p>
-                <p className='text-xs text-muted-foreground font-medium'>
-                  Priority:{' '}
-                  {activePlanStrategyMeta?.optimizationPriorityLabel ?? 'Balanced progression'}
-                </p>
-              </div>
-              <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-1'>
-                <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
-                  Risk and tradeoff
-                </p>
-                <p className='text-sm font-medium'>
-                  {weekAtGlance.hardRunDays >= 3
-                    ? 'Higher load week'
-                    : 'Conservative load week'}
-                </p>
-                <p className='text-xs text-muted-foreground font-medium'>
-                  Regenerate in advanced mode to bias for recovery or performance.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Preferences used to generate this plan */}
-          <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
-            <div className='flex items-center gap-1.5'>
-              <ClipboardCheck className='h-3.5 w-3.5 text-primary' />
-              <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
-                Last Week Reflection
-              </span>
-            </div>
-            {isLoadingPreviousWeekFeedback ? (
-              <p className='text-sm font-medium text-muted-foreground'>
-                Loading...
-              </p>
-            ) : previousWeekFeedback ? (
-              <div className='space-y-1 text-sm font-medium'>
-                <p>
-                  Week: <span className='font-bold'>{previousWeekFeedback.weekStart}</span>
-                </p>
-                <p className='text-muted-foreground'>
-                  Adherence {previousWeekFeedback.adherence}/5 · Effort {previousWeekFeedback.effort}/5 · Fatigue {previousWeekFeedback.fatigue}/5 · Soreness {previousWeekFeedback.soreness}/5 · Mood {previousWeekFeedback.mood}/5 · Confidence {previousWeekFeedback.confidence}/5
-                </p>
-                {previousWeekFeedback.notes && (
-                  <p className='text-muted-foreground italic'>
-                    {previousWeekFeedback.notes}
+                  <p className='text-sm font-medium'>
+                    {activePlan.sessions.find((session) => session.blockIntent)?.blockIntent?.weekType} week with a target of{' '}
+                    {activePlan.sessions.find((session) => session.blockIntent)?.blockIntent?.volumeTargetKm ?? 0} km.
                   </p>
-                )}
-              </div>
-            ) : (
-              <p className='text-sm font-medium text-muted-foreground'>
-                No reflection submitted yet for week starting {previousWeekStart}.
-              </p>
-            )}
-          </div>
-
-          {/* Preferences used to generate this plan */}
-          <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
-            <div className='flex items-center gap-1.5'>
-              <MessageSquareText className='h-3.5 w-3.5 text-primary' />
-              <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
-                Preferences Used
-              </span>
-            </div>
-            <p className='text-sm font-medium whitespace-pre-wrap'>
-              {activePlanPreferences || 'No preferences were provided for this plan.'}
-            </p>
-          </div>
-
-          {activePlanStrategyMeta && (
-            <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-2'>
-              <div className='flex items-center gap-1.5'>
-                <Target className='h-3.5 w-3.5 text-primary' />
-                <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
-                  Strategy Rationale
-                </span>
-              </div>
-              <p className='text-sm font-medium'>
-                <span className='font-bold'>Strategy:</span>{' '}
-                {activePlanStrategyMeta.strategyLabel}{' '}
-                <span className='text-muted-foreground'>
-                  ({activePlanStrategyMeta.mode === 'auto' ? 'auto-selected' : 'manual'})
-                </span>
-              </p>
-              <p className='text-sm font-medium'>
-                <span className='font-bold'>Priority:</span>{' '}
-                {activePlanStrategyMeta.optimizationPriorityLabel}
-              </p>
-              {activePlanStrategyMeta.autoRationale && (
-                <p className='text-sm text-muted-foreground font-medium'>
-                  {activePlanStrategyMeta.autoRationale}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Day cards */}
-          <div className='grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4'>
-            {activePlan.sessions.map((session, index) => (
-              <DayCard key={session.date ?? index} session={session} />
-            ))}
-          </div>
-
-          {/* Full plan markdown */}
-          {activePlanContent && (
-            <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
-              <button
-                onClick={handleToggleFullPlan}
-                aria-expanded={fullPlanOpen}
-                aria-label={`${fullPlanOpen ? 'Collapse' : 'Expand'} full plan details`}
-                tabIndex={0}
-                className='w-full flex items-center justify-between p-4 md:p-5 hover:bg-muted/50 transition-colors'
-              >
-                <span className='font-black text-base md:text-lg uppercase tracking-wider'>
-                  Full Plan Details
-                </span>
-                <ChevronDown
-                  className={`h-5 w-5 shrink-0 transition-transform duration-200 ${
-                    fullPlanOpen ? 'rotate-180' : ''
-                  }`}
-                  aria-hidden='true'
-                />
-              </button>
-              {fullPlanOpen && (
-                <div className='px-4 pb-4 md:px-5 md:pb-5 prose-sm max-w-none overflow-hidden break-words'>
-                  <MarkdownContent content={activePlanContent} />
+                  <p className='text-xs text-muted-foreground font-medium'>
+                    Key intent: {(activePlan.sessions.find((session) => session.blockIntent)?.blockIntent?.keyWorkouts ?? []).join(' · ') || 'Maintain quality sessions while preserving recovery.'}
+                  </p>
                 </div>
               )}
             </div>
           )}
 
-          <WeeklyPlanDistribution
-            weekStart={activePlan.weekStart}
-            sessions={activePlan.sessions}
-          />
+          <div className='border-3 border-border bg-background shadow-neo-sm p-4 space-y-3'>
+            <div className='space-y-1'>
+              <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                Weekly execution board
+              </p>
+              <p className='text-xs text-muted-foreground font-medium'>
+                Actionable days first. Completed or locked days are grouped below.
+              </p>
+            </div>
+            {nextActionableSessions.length > 0 && (
+              <div className='md:hidden border-2 border-border bg-primary/5 p-2 space-y-1'>
+                <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
+                  Next 3 actionable days
+                </p>
+                <p className='text-xs font-medium'>
+                  {nextActionableSessions.map((session) => session.day).join(' · ')}
+                </p>
+              </div>
+            )}
+            <p className='text-[11px] font-bold uppercase tracking-widest text-muted-foreground'>
+              Click a day to expand details. Drag unlocked cards by the grip handle to swap workouts.
+            </p>
+            <div className='md:hidden'>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={actionableSessions.map((session) => session.date)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className='space-y-3'>
+                    {actionableSessions.map((session) => (
+                      <SortableDayCard
+                        key={session.date}
+                        session={session}
+                        isLocked={false}
+                        isExpanded={expandedSessionDate === session.date}
+                        onToggle={() => handleToggleDayDetails(session.date)}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </div>
+            <div className='hidden md:block'>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={actionableSessions.map((session) => session.date)}
+                  strategy={horizontalListSortingStrategy}
+                >
+                  <div className='flex gap-3 overflow-x-auto pb-1'>
+                    {actionableSessions.map((session) => (
+                      <SortableDayCard
+                        key={session.date}
+                        session={session}
+                        isLocked={false}
+                        isExpanded={expandedSessionDate === session.date}
+                        onToggle={() => handleToggleDayDetails(session.date)}
+                        className='w-[clamp(220px,23vw,280px)] shrink-0'
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </div>
+            <TrainingPlanPanel
+              title={`Completed or Locked (${lockedSessions.length})`}
+              open={lockedSessionsOpen}
+              onToggle={() => setLockedSessionsOpen((prev) => !prev)}
+            >
+              <div className='space-y-3 md:hidden'>
+                {lockedSessions.map((session) => (
+                  <DayCard
+                    key={session.date}
+                    session={session}
+                    isExpanded={expandedSessionDate === session.date}
+                    onToggle={() => handleToggleDayDetails(session.date)}
+                    canDrag={false}
+                  />
+                ))}
+              </div>
+              <div className='hidden md:flex gap-3 overflow-x-auto pb-1'>
+                {lockedSessions.map((session) => (
+                  <div key={session.date} className='w-[clamp(220px,23vw,280px)] shrink-0'>
+                    <DayCard
+                      session={session}
+                      isExpanded={expandedSessionDate === session.date}
+                      onToggle={() => handleToggleDayDetails(session.date)}
+                      canDrag={false}
+                    />
+                  </div>
+                ))}
+              </div>
+            </TrainingPlanPanel>
+            {isSavingReorder && (
+              <p className='text-xs text-muted-foreground font-medium'>
+                Saving updated week order...
+              </p>
+            )}
+          </div>
+
+          <TrainingPlanPanel
+            title='Why This Week Looks Like This'
+            open={weekContextOpen}
+            onToggle={() => setWeekContextOpen((prev) => !prev)}
+          >
+            <div className='space-y-3'>
+              <div className='border-2 border-border bg-background p-3 space-y-2'>
+                <div className='flex items-center gap-1.5'>
+                  <MessageSquareText className='h-3.5 w-3.5 text-primary' />
+                  <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
+                    Preferences Used
+                  </span>
+                </div>
+                <p className='text-sm font-medium whitespace-pre-wrap'>
+                  {activePlanPreferences || 'No preferences were provided for this plan.'}
+                </p>
+              </div>
+              {activePlanStrategyMeta && (
+                <div className='border-2 border-border bg-background p-3 space-y-2'>
+                  <div className='flex items-center gap-1.5'>
+                    <Target className='h-3.5 w-3.5 text-primary' />
+                    <span className='font-black text-[10px] uppercase tracking-widest text-primary'>
+                      Strategy Rationale
+                    </span>
+                  </div>
+                  <p className='text-sm font-medium'>
+                    <span className='font-bold'>Strategy:</span>{' '}
+                    {activePlanStrategyMeta.strategyLabel}{' '}
+                    <span className='text-muted-foreground'>
+                      ({activePlanStrategyMeta.mode === 'auto' ? 'auto-selected' : 'manual'})
+                    </span>
+                  </p>
+                  <p className='text-sm font-medium'>
+                    <span className='font-bold'>Priority:</span>{' '}
+                    {activePlanStrategyMeta.optimizationPriorityLabel}
+                  </p>
+                  {activePlanStrategyMeta.autoRationale && (
+                    <p className='text-sm text-muted-foreground font-medium'>
+                      {activePlanStrategyMeta.autoRationale}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </TrainingPlanPanel>
+
+          {activePlanContent && (
+            <TrainingPlanPanel
+              title='Full AI Plan Narrative'
+              open={fullPlanOpen}
+              onToggle={handleToggleFullPlan}
+            >
+              <div className='prose-sm max-w-none overflow-hidden break-words'>
+                <MarkdownContent content={activePlanContent} />
+              </div>
+            </TrainingPlanPanel>
+          )}
+
+          <TrainingPlanPanel
+            title='Weekly Distribution'
+            open={distributionOpen}
+            onToggle={() => setDistributionOpen((prev) => !prev)}
+          >
+            <WeeklyPlanDistribution
+              weekStart={activePlan.weekStart}
+              sessions={activePlan.sessions}
+            />
+          </TrainingPlanPanel>
+
         </>
       )}
 
-      {/* Plan history */}
-      {plans.length > 0 && (
-        <div className='border-3 border-border bg-background shadow-neo overflow-hidden'>
-          <button
-            onClick={handleToggleHistory}
-            aria-expanded={historyOpen}
-            aria-label={`${historyOpen ? 'Collapse' : 'Expand'} plan history`}
-            tabIndex={0}
-            className='w-full flex items-center justify-between p-4 md:p-5 hover:bg-muted/50 transition-colors'
-          >
-            <span className='font-black text-base md:text-lg uppercase tracking-wider'>
-              Plan History ({plans.length})
-            </span>
-            <ChevronDown
-              className={`h-5 w-5 shrink-0 transition-transform duration-200 ${
-                historyOpen ? 'rotate-180' : ''
-              }`}
-              aria-hidden='true'
-            />
-          </button>
-          {historyOpen && (
-            <div className='space-y-1 p-2 overflow-hidden'>
-              {plans.map((plan) => (
-                <PlanHistoryItem
-                  key={plan.id}
-                  plan={plan}
-                  isActive={plan.isActive}
-                  onActivate={() => activatePlan(plan.id)}
-                  onDelete={() => handleDeletePlanRequest(plan.id)}
-                />
-              ))}
+      <Sheet open={isHistorySidebarOpen} onOpenChange={setIsHistorySidebarOpen}>
+        <SheetContent
+          side='right'
+          className='p-0 w-[320px] sm:max-w-[320px]'
+          aria-describedby={undefined}
+        >
+          <SheetTitle className='sr-only'>Plan History</SheetTitle>
+          <div className='flex flex-col h-full min-h-0'>
+            <div className='px-3 py-2.5 border-b-3 border-border flex items-center justify-between bg-foreground text-background'>
+              <span className='font-black text-xs uppercase tracking-widest'>
+                Plan History ({plans.length})
+              </span>
             </div>
-          )}
-        </div>
-      )}
+            <div className='flex-1 overflow-y-auto p-2 space-y-1 bg-muted/20'>
+              {plans.length === 0 ? (
+                <div className='border-2 border-border bg-background px-3 py-4 text-center text-xs text-muted-foreground font-medium'>
+                  No plans yet
+                </div>
+              ) : (
+                plans.map((plan) => (
+                  <PlanHistoryItem
+                    key={plan.id}
+                    plan={plan}
+                    isActive={plan.isActive}
+                    onActivate={() => {
+                      activatePlan(plan.id);
+                      handleCloseHistorySidebar();
+                    }}
+                    onDelete={() => handleDeletePlanRequest(plan.id)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <AlertDialog
         open={!!deletePlanConfirmId}

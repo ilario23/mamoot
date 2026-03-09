@@ -13,8 +13,12 @@ export const PERSONA_BEHAVIOR_CONTRACTS: Record<
   coach: [
     {
       id: 'coach-no-weekly-plan-in-chat',
-      description: 'Coach must redirect week-plan requests to Weekly Plan page',
-      requiredText: ['MUST NOT write out weekly training plans', 'Weekly Plan'],
+      description: 'Coach must run tool-based chat planning flow for week plans',
+      requiredText: [
+        'MUST NOT write out weekly training plans',
+        'startPlanningFlow',
+        'executePlanningGeneration',
+      ],
     },
     {
       id: 'coach-safety-medical-boundary',
@@ -93,23 +97,6 @@ export const PERSONA_BEHAVIOR_CONTRACTS: Record<
       id: 'physio-weekly-plan-first',
       description: 'Physio should integrate around the unified weekly plan',
       requiredText: ['ALWAYS call getWeeklyPlan as your first action'],
-    },
-  ],
-  orchestrator: [
-    {
-      id: 'orchestrator-structured-state-first',
-      description: 'Orchestrator should use state tools for coordination',
-      requiredText: ['createOrchestratorGoal', 'createOrchestratorPlanItem'],
-    },
-    {
-      id: 'orchestrator-delegates-execution',
-      description: 'Orchestrator delegates to specialist personas',
-      requiredText: ['coach, nutritionist, physio'],
-    },
-    {
-      id: 'orchestrator-followups-tool-required',
-      description: 'Orchestrator should end most responses with follow-up tool',
-      requiredText: ['ALWAYS call the suggestFollowUps tool'],
     },
   ],
 };

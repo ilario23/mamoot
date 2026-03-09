@@ -1,7 +1,7 @@
-import TrainingBlockView from '@/views/TrainingBlock';
+import {redirect} from 'next/navigation';
 
 const TrainingBlockPage = () => {
-  return <TrainingBlockView />;
+  redirect('/training-plan?tab=block');
 };
 
 export default TrainingBlockPage;

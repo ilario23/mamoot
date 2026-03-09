@@ -1,6 +1,6 @@
 'use client';
 
-import {useState, useMemo} from 'react';
+import {useState, useMemo, useEffect} from 'react';
 import {
   Target,
   CalendarDays,
@@ -17,7 +17,9 @@ import {
   Pencil,
   X,
   AlertCircle,
+  Link2,
 } from 'lucide-react';
+import {useRouter} from 'next/navigation';
 import {NeoLoader} from '@/components/ui/neo-loader';
 import {
   AlertDialog,
@@ -33,6 +35,8 @@ import {useTrainingBlock} from '@/hooks/useTrainingBlock';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import type {WeekOutline, TrainingPhase} from '@/lib/cacheTypes';
+import BlockPeriodizationOverview from '@/components/training-block/BlockPeriodizationOverview';
+import {neonActivateWeeklyPlan, neonGetWeeklyPlans} from '@/lib/chatSync';
 import {
   AUTO_STRATEGY_LABEL,
   STRATEGY_PRESET_LABELS,
@@ -73,8 +77,9 @@ const INTENSITY_ICON: Record<string, typeof Zap> = {
 const getCurrentWeek = (startDate: string, totalWeeks: number): number => {
   const now = new Date();
   const start = new Date(startDate);
-  const diffMs = now.getTime() - start.getTime();
-  return Math.max(1, Math.min(totalWeeks, Math.ceil(diffMs / (7 * 86400000))));
+  const diffMs = Math.max(0, now.getTime() - start.getTime());
+  const weeksElapsed = Math.floor(diffMs / (7 * 86400000));
+  return Math.max(1, Math.min(totalWeeks, weeksElapsed + 1));
 };
 
 const formatDate = (iso: string): string =>
@@ -108,11 +113,15 @@ const WeekRow = ({
   isCurrent,
   isPast,
   blockStart,
+  linkedWeeklyPlan,
+  onOpenLinkedWeekPlan,
 }: {
   outline: WeekOutline;
   isCurrent: boolean;
   isPast: boolean;
   blockStart: string;
+  linkedWeeklyPlan?: {id: string; title: string; weekStart: string};
+  onOpenLinkedWeekPlan?: (planId: string) => void;
 }) => {
   const IntensityIcon = INTENSITY_ICON[outline.intensityLevel] ?? Minus;
   const weekDate = getWeekStartDate(blockStart, outline.weekNumber);
@@ -167,6 +176,17 @@ const WeekRow = ({
               <IntensityIcon className="h-2.5 w-2.5" />
               {outline.intensityLevel}
             </span>
+            {linkedWeeklyPlan && (
+              <button
+                type="button"
+                onClick={() => onOpenLinkedWeekPlan?.(linkedWeeklyPlan.id)}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-primary/10 text-primary border-2 border-border hover:bg-primary/20 transition-colors"
+                aria-label={`Open linked weekly plan for week ${outline.weekNumber}`}
+              >
+                <Link2 className="h-2.5 w-2.5" />
+                linked week
+              </button>
+            )}
           </div>
 
           {outline.keyWorkouts.length > 0 && (
@@ -214,188 +234,30 @@ const PhaseHeader = ({phase}: {phase: TrainingPhase}) => {
   );
 };
 
-const CreateBlockForm = ({
-  onGenerate,
-  isGenerating,
-  defaultGoalEvent,
-  defaultStrategySelectionMode,
-  defaultStrategyPreset,
-  defaultOptimizationPriority,
-}: {
-  onGenerate: (options: {
-    goalEvent: string;
-    goalDate: string;
-    totalWeeks?: number;
-    strategySelectionMode: StrategySelectionMode;
-    strategyPreset: TrainingStrategyPreset;
-    optimizationPriority: OptimizationPriority;
-  }) => void;
-  isGenerating: boolean;
-  defaultGoalEvent: string;
-  defaultStrategySelectionMode: StrategySelectionMode;
-  defaultStrategyPreset: TrainingStrategyPreset;
-  defaultOptimizationPriority: OptimizationPriority;
-}) => {
-  const [goalEvent, setGoalEvent] = useState(defaultGoalEvent);
-  const [goalDate, setGoalDate] = useState('');
-  const [totalWeeks, setTotalWeeks] = useState('');
-  const [strategySelectionMode, setStrategySelectionMode] =
-    useState<StrategySelectionMode>(defaultStrategySelectionMode);
-  const [strategyPreset, setStrategyPreset] =
-    useState<TrainingStrategyPreset>(defaultStrategyPreset);
-  const [optimizationPriority, setOptimizationPriority] =
-    useState<OptimizationPriority>(defaultOptimizationPriority);
-
-  const handleSubmit = () => {
-    if (!goalEvent.trim() || !goalDate) return;
-    onGenerate({
-      goalEvent: goalEvent.trim(),
-      goalDate,
-      totalWeeks: totalWeeks ? Number(totalWeeks) : undefined,
-      strategySelectionMode,
-      strategyPreset,
-      optimizationPriority,
-    });
-  };
-
-  return (
-    <div className="border-3 border-border bg-background shadow-neo p-8 md:p-12 text-center space-y-6">
-      <div className="w-16 h-16 mx-auto bg-muted border-3 border-border shadow-neo-sm flex items-center justify-center">
-        <Target className="h-8 w-8 text-muted-foreground" />
-      </div>
-      <div className="space-y-1">
-        <h2 className="font-black text-lg uppercase tracking-wider">
-          Create Training Block
-        </h2>
-        <p className="text-sm text-muted-foreground font-medium max-w-md mx-auto">
-          Set a goal event and date to generate a periodized macro plan with
-          phases, volume targets, and key workouts for each week.
-        </p>
-      </div>
-
-      <div className="max-w-sm mx-auto space-y-3 text-left">
-        <div>
-          <label
-            htmlFor="tb-event"
-            className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
-          >
-            Goal Event
-          </label>
-          <input
-            id="tb-event"
-            type="text"
-            value={goalEvent}
-            onChange={(e) => setGoalEvent(e.target.value)}
-            placeholder='e.g. "Berlin Marathon"'
-            className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="tb-date"
-            className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
-          >
-            Event Date
-          </label>
-          <input
-            id="tb-date"
-            type="date"
-            value={goalDate}
-            onChange={(e) => setGoalDate(e.target.value)}
-            className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="tb-weeks"
-            className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1"
-          >
-            Total Weeks (optional — auto-calculated from date)
-          </label>
-          <input
-            id="tb-weeks"
-            type="number"
-            min={4}
-            max={52}
-            value={totalWeeks}
-            onChange={(e) => setTotalWeeks(e.target.value)}
-            placeholder="Auto"
-            className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
-          />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">
-            <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1">
-              Strategy
-            </label>
-            <select
-              value={strategySelectionMode === 'auto' ? 'auto' : strategyPreset}
-              onChange={(e) => {
-                const value = e.target.value;
-                if (value === 'auto') {
-                  setStrategySelectionMode('auto');
-                  return;
-                }
-                setStrategySelectionMode('preset');
-                setStrategyPreset(value as TrainingStrategyPreset);
-              }}
-              className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              <option value="auto">{AUTO_STRATEGY_LABEL}</option>
-              {Object.entries(STRATEGY_PRESET_LABELS).map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground font-medium mt-2">
-              {strategySelectionMode === 'auto'
-                ? describeAutoStrategySelection()
-                : describeStrategyPreset(strategyPreset)}
-            </p>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1">
-              Optimization Priority
-            </label>
-            <select
-              value={optimizationPriority}
-              onChange={(e) =>
-                setOptimizationPriority(e.target.value as OptimizationPriority)
-              }
-              className="w-full bg-muted/50 border-2 border-border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              {Object.entries(OPTIMIZATION_PRIORITY_LABELS).map(
-                ([id, label]) => (
-                  <option key={id} value={id}>
-                    {label}
-                  </option>
-                ),
-              )}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <button
-        onClick={handleSubmit}
-        disabled={isGenerating || !goalEvent.trim() || !goalDate}
-        tabIndex={0}
-        aria-label="Generate training block"
-        className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground font-black text-sm uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px] disabled:opacity-50 disabled:pointer-events-none"
-      >
-        {isGenerating ? (
-          <NeoLoader label="Generating" size="sm" />
-        ) : (
-          <>
-            <Sparkles className="h-4 w-4" />
-            Generate Training Block
-          </>
-        )}
-      </button>
+const EmptyBlockState = () => (
+  <div className="border-3 border-border bg-background shadow-neo p-8 md:p-12 text-center space-y-4">
+    <div className="w-16 h-16 mx-auto bg-muted border-3 border-border shadow-neo-sm flex items-center justify-center">
+      <Target className="h-8 w-8 text-muted-foreground" />
     </div>
-  );
-};
+    <div className="space-y-1">
+      <h2 className="font-black text-lg uppercase tracking-wider">
+        No Training Block Yet
+      </h2>
+      <p className="text-sm text-muted-foreground font-medium max-w-md mx-auto">
+        No block data yet. Ask Coach in AI Chat to create your training block.
+      </p>
+    </div>
+    <a
+      href="/ai-chat?quickAsk=1&action=create_training_block"
+      tabIndex={0}
+      aria-label="Open AI chat to ask coach for a training block"
+      className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground font-black text-sm uppercase tracking-wider border-3 border-border shadow-neo-sm hover:shadow-neo hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all active:shadow-none active:translate-x-[1px] active:translate-y-[1px]"
+    >
+      <Target className="h-4 w-4" />
+      Ask Coach in Chat
+    </a>
+  </div>
+);
 
 const BlockHistoryItem = ({
   block,
@@ -442,7 +304,12 @@ const BlockHistoryItem = ({
   </div>
 );
 
-const TrainingBlockView = () => {
+interface TrainingBlockViewProps {
+  embedded?: boolean;
+}
+
+const TrainingBlockView = ({embedded = false}: TrainingBlockViewProps) => {
+  const router = useRouter();
   const {athlete} = useStravaAuth();
   const {settings} = useSettings();
   const athleteId = athlete?.id ?? null;
@@ -451,7 +318,6 @@ const TrainingBlockView = () => {
     blocks,
     isLoading,
     isGenerating,
-    generateBlock,
     adaptBlock,
     activateBlock,
     deleteBlock,
@@ -479,6 +345,9 @@ const TrainingBlockView = () => {
     null,
   );
   const [isDeletingBlock, setIsDeletingBlock] = useState(false);
+  const [weeklyPlansByWeek, setWeeklyPlansByWeek] = useState<
+    Record<number, {id: string; title: string; weekStart: string}>
+  >({});
 
   const currentWeek = useMemo(
     () =>
@@ -503,17 +372,6 @@ const TrainingBlockView = () => {
         : {strategy: null, priority: null},
     [activeBlock],
   );
-
-  const handleGenerate = (options: {
-    goalEvent: string;
-    goalDate: string;
-    totalWeeks?: number;
-    strategySelectionMode: StrategySelectionMode;
-    strategyPreset: TrainingStrategyPreset;
-    optimizationPriority: OptimizationPriority;
-  }) => {
-    generateBlock(options);
-  };
 
   const handleToggleHistory = () => {
     setHistoryOpen((prev) => !prev);
@@ -544,12 +402,56 @@ const TrainingBlockView = () => {
     || (adaptationType === 'shift_target_date' && !newGoalDate);
   const isApplyAdaptationDisabled = isGenerating || isAdaptationInputInvalid;
 
+  useEffect(() => {
+    if (!activeBlock || !athleteId) return;
+    void (async () => {
+      const weeklyPlans = await neonGetWeeklyPlans(athleteId);
+      if (!weeklyPlans) {
+        setWeeklyPlansByWeek({});
+        return;
+      }
+      const linkedPlans = weeklyPlans.filter((plan) => plan.blockId === activeBlock.id);
+      const byWeek: Record<number, {id: string; title: string; weekStart: string}> = {};
+      linkedPlans.forEach((plan) => {
+        if (typeof plan.weekNumber === 'number' && plan.weekNumber > 0) {
+          byWeek[plan.weekNumber] = {
+            id: plan.id,
+            title: plan.title,
+            weekStart: plan.weekStart,
+          };
+          return;
+        }
+        const weekDiff = Math.round(
+          (new Date(plan.weekStart).getTime() - new Date(activeBlock.startDate).getTime())
+            / (7 * 86400000),
+        );
+        const derivedWeek = weekDiff + 1;
+        if (derivedWeek > 0 && derivedWeek <= activeBlock.totalWeeks) {
+          byWeek[derivedWeek] = {
+            id: plan.id,
+            title: plan.title,
+            weekStart: plan.weekStart,
+          };
+        }
+      });
+      setWeeklyPlansByWeek(byWeek);
+    })();
+  }, [activeBlock, athleteId, blocks.length]);
+
+  const handleOpenLinkedWeekPlan = async (planId: string) => {
+    if (!athleteId) return;
+    await neonActivateWeeklyPlan(planId, athleteId);
+    router.push('/training-plan');
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-4 md:space-y-6">
-        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
-          Training Block
-        </h1>
+        {!embedded && (
+          <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
+            Training Block
+          </h1>
+        )}
         <div className="border-3 border-border bg-background shadow-neo p-8 flex items-center justify-center">
           <NeoLoader label="Loading block" size="sm" />
         </div>
@@ -559,9 +461,11 @@ const TrainingBlockView = () => {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
-        Training Block
-      </h1>
+      {!embedded && (
+        <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight border-l-[5px] border-page pl-3">
+          Training Block
+        </h1>
+      )}
 
       {lastError && (
         <div className="border-3 border-border bg-destructive/10 text-destructive shadow-neo-sm p-3 space-y-2">
@@ -585,16 +489,7 @@ const TrainingBlockView = () => {
       )}
 
       {!activeBlock && (
-        <CreateBlockForm
-          onGenerate={handleGenerate}
-          isGenerating={isGenerating}
-          defaultGoalEvent={settings?.goal ?? ''}
-          defaultStrategySelectionMode={settings.strategySelectionMode ?? 'auto'}
-          defaultStrategyPreset={settings.strategyPreset ?? 'polarized_80_20'}
-          defaultOptimizationPriority={
-            settings.optimizationPriority ?? 'race_performance'
-          }
-        />
+        <EmptyBlockState />
       )}
 
       {activeBlock && (
@@ -974,12 +869,20 @@ const TrainingBlockView = () => {
                         isCurrent={outline.weekNumber === currentWeek}
                         isPast={outline.weekNumber < currentWeek}
                         blockStart={activeBlock.startDate}
+                        linkedWeeklyPlan={weeklyPlansByWeek[outline.weekNumber]}
+                        onOpenLinkedWeekPlan={handleOpenLinkedWeekPlan}
                       />
                     ))}
                 </div>
               </div>
             ))}
           </div>
+
+          <BlockPeriodizationOverview
+            weekOutlines={activeBlock.weekOutlines}
+            linkedWeekPlanByWeek={weeklyPlansByWeek}
+            onOpenLinkedWeekPlan={handleOpenLinkedWeekPlan}
+          />
 
           {/* Block history */}
           {blocks.length > 0 && (

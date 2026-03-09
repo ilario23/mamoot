@@ -6,15 +6,9 @@ import {
   userSettings,
   trainingBlocks,
   weeklyPlans,
-  trainingFeedback,
   athleteReadinessSignals,
-  chatSessions,
-  orchestratorGoals,
-  orchestratorPlanItems,
-  orchestratorBlockers,
-  orchestratorHandoffs,
 } from '@/db/schema';
-import {eq, desc, and, ne, isNull, sql} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull, sql, gte} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
 import {
@@ -25,9 +19,9 @@ import {
   calcRiskIntelligence,
 } from '@/utils/trainingLoad';
 import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/activityModel';
-import {buildCoachPipelinePrompt, buildPhysioPipelinePrompt} from '@/lib/weeklyPlanPrompts';
+import {buildCoachPipelinePrompt} from '@/lib/weeklyPlanPrompts';
 import {
-  coachWeekOutputSchema, physioWeekOutputSchema, planMetaSchema, type CoachWeekOutput, type PhysioWeekOutput, type PlanMeta,
+  coachWeekOutputSchema, planMetaSchema, type CoachWeekOutput, type PlanMeta,
 } from '@/lib/weeklyPlanSchema';
 import type {UnifiedSession} from '@/lib/cacheTypes';
 import {buildWeekReview} from '@/lib/weekReview';
@@ -52,7 +46,6 @@ import {weeklyPlanRequestSchema} from '@/lib/aiRequestSchemas';
 import {generateObjectWithRetry} from '@/lib/aiGeneration';
 import {
   validateCoachWeekOutput,
-  validateCombinedWeekSemantics,
 } from '@/lib/planSemanticValidators';
 import {
   evaluateCoachWeeklyDistribution,
@@ -64,9 +57,6 @@ import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
 import {
   resolveMultiAgentRuntimeConfig,
-  resolveWeeklyCoachPhysioConflicts,
-  summarizeConflictResolution,
-  type WeeklyAgentConflict,
 } from '@/lib/multiAgentContracts';
 import {
   encodeSseEvent,
@@ -75,6 +65,7 @@ import {
 } from '@/lib/aiProgress';
 
 export const maxDuration = 120;
+const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
 const PLAN_STRATEGY_PREFIX = '<!-- weekly-plan-strategy:';
@@ -129,12 +120,6 @@ const getSunday = (mondayStr: string): string => {
   return d.toISOString().slice(0, 10);
 };
 
-const getPreviousMonday = (mondayStr: string): string => {
-  const d = new Date(mondayStr);
-  d.setDate(d.getDate() - 7);
-  return d.toISOString().slice(0, 10);
-};
-
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 const getDatesForWeek = (mondayStr: string): {day: string; date: string}[] => {
@@ -146,46 +131,51 @@ const getDatesForWeek = (mondayStr: string): {day: string; date: string}[] => {
   });
 };
 
+const getActivityContextStartDate = (): string => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - ACTIVITY_CONTEXT_WINDOW_DAYS);
+  return cutoff.toISOString().slice(0, 10);
+};
+
 const buildGeneratedSessions = (
   weekDates: {day: string; date: string}[],
   coachSessions: CoachWeekOutput['sessions'],
-  physioSessions: PhysioWeekOutput['sessions'],
 ): UnifiedSession[] => {
-  const physioByDate = new Map(physioSessions.map((session) => [session.date, session]));
   const n2u = <T,>(value: T | null | undefined): T | undefined => value ?? undefined;
+  const asZoneId = (
+    value: number | null | undefined,
+  ): 1 | 2 | 3 | 4 | 5 | 6 | undefined => {
+    if (value == null) return undefined;
+    if (value >= 1 && value <= 6) return value as 1 | 2 | 3 | 4 | 5 | 6;
+    return undefined;
+  };
 
   return weekDates.map(({day, date}) => {
     const coach = coachSessions.find((session) => session.date === date);
-    const physio = physioByDate.get(date);
     const unified: UnifiedSession = {day, date};
 
-    if (coach && coach.type !== 'rest') {
+    if (coach && coach.type !== 'rest' && coach.type !== 'strength') {
       unified.run = {
         type: coach.type,
         description: coach.description,
         duration: n2u(coach.duration),
+        plannedDurationMin: n2u(coach.plannedDurationMin),
+        plannedDistanceKm: n2u(coach.plannedDistanceKm),
         targetPace: n2u(coach.targetPace),
         targetZone: n2u(coach.targetZone),
+        targetZoneId: asZoneId(coach.targetZoneId),
         notes: n2u(coach.notes),
       };
     }
 
-    if (physio) {
-      unified.physio = {
-        type: physio.type,
-        exercises: physio.exercises.map((exercise) => ({
-          name: exercise.name,
-          sets: n2u(exercise.sets),
-          reps: n2u(exercise.reps),
-          tempo: n2u(exercise.tempo),
-          notes: n2u(exercise.notes),
-        })),
-        duration: n2u(physio.duration),
-        notes: n2u(physio.notes),
+    if (coach?.type === 'strength') {
+      unified.strengthSlot = {
+        load: 'moderate',
+        notes: coach.description,
       };
     }
 
-    if (coach?.type === 'rest' && !physio) {
+    if (coach?.type === 'rest') {
       unified.notes = coach.description;
     }
 
@@ -224,8 +214,6 @@ export async function POST(req: Request) {
     strategySelectionMode?: StrategySelectionMode;
     strategyPreset?: TrainingStrategyPreset;
     optimizationPriority?: OptimizationPriority;
-    orchestratorSessionId?: string;
-    useMultiAgent?: boolean;
     editSourcePlanId?: string;
     editInstructions?: string;
     editTargetDates?: string[];
@@ -241,8 +229,6 @@ export async function POST(req: Request) {
     strategySelectionMode,
     strategyPreset,
     optimizationPriority,
-    orchestratorSessionId,
-    useMultiAgent,
     editSourcePlanId,
     editInstructions,
     editTargetDates,
@@ -258,8 +244,7 @@ export async function POST(req: Request) {
   const mode = generationMode ?? 'full';
   const todayIso = today ?? new Date().toISOString().slice(0, 10);
   const multiAgentConfig = resolveMultiAgentRuntimeConfig();
-  const multiAgentEnabled =
-    multiAgentConfig.enabled && (useMultiAgent ?? true);
+  const multiAgentEnabled = false;
   let model = getModel(clientModel);
   let resolvedModel =
     clientModel && ALLOWED_MODELS[clientModel]
@@ -321,12 +306,18 @@ export async function POST(req: Request) {
       (async () => {
         try {
     // Step 1: Load context
+    const activityContextStartDate = getActivityContextStartDate();
     const [settingsRows, activityRows, planRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
       db
         .select()
         .from(activitiesTable)
-        .where(eq(activitiesTable.athleteId, athleteId))
+        .where(
+          and(
+            eq(activitiesTable.athleteId, athleteId),
+            gte(activitiesTable.date, activityContextStartDate),
+          ),
+        )
         .orderBy(desc(activitiesTable.date)),
       db
         .select()
@@ -348,36 +339,25 @@ export async function POST(req: Request) {
     const elapsedMs = () => Date.now() - requestStartedAt;
     const hasRuntimeBudget = () => elapsedMs() < multiAgentConfig.maxRuntimeMs;
     let specialistTurnsUsed = 0;
-    let repairTurnsUsed = 0;
+    const repairTurnsUsed = 0;
     let roundCount = 0;
-    let multiAgentConflicts: WeeklyAgentConflict[] = [];
-    let repairApplied = false;
+    const multiAgentConflicts: Array<{
+      date: string;
+      rule: string;
+      severity: 'low' | 'medium' | 'high';
+      action: string;
+    }> = [];
+    const repairApplied = false;
     let distributionRepairApplied = false;
     let distributionRepairAttempts = 0;
     let coachDistributionEvaluation: DistributionEvaluation | null = null;
     let finalDistributionEvaluation: DistributionEvaluation | null = null;
-    let conflictSummary = 'No coach/physio conflicts detected.';
+    const conflictSummary = 'Coach-only pipeline: no coach/physio conflict resolution step.';
     const isEditRequest =
       Boolean(editInstructions && editInstructions.trim()) ||
       Boolean(editSourcePlanId);
     const normalizedEditInstructions = editInstructions?.trim() ?? '';
     const normalizedEditTargetDates = (editTargetDates ?? []).filter(Boolean);
-
-    const resolveOrchestratorSessionId = async (): Promise<string | null> => {
-      if (orchestratorSessionId) return orchestratorSessionId;
-      const latestOrchestratorSessions = await db
-        .select()
-        .from(chatSessions)
-        .where(
-          and(
-            eq(chatSessions.athleteId, athleteId),
-            eq(chatSessions.persona, 'orchestrator'),
-          ),
-        )
-        .orderBy(desc(chatSessions.updatedAt))
-        .limit(1);
-      return latestOrchestratorSessions[0]?.id ?? null;
-    };
 
     console.log(`\n[WeeklyPlan] ========== Generating Plan ==========`);
     console.log(`[WeeklyPlan] Athlete: ${athleteId}`);
@@ -417,12 +397,8 @@ export async function POST(req: Request) {
       transformActivity(r.data as StravaSummaryActivity),
     );
 
-    // Recent 4 weeks summary
-    const now = new Date();
-    const fourWeeksAgo = new Date(now.getTime() - 28 * 86400000);
-    const recentActivities = allActivities.filter(
-      (a) => new Date(a.date) >= fourWeeksAgo,
-    );
+    // Recent 4 months summary
+    const recentActivities = allActivities;
 
     const weeklyVolumes: Record<string, {distance: number; count: number; types: string[]}> = {};
     for (const act of recentActivities) {
@@ -543,12 +519,6 @@ export async function POST(req: Request) {
 
     // Step 1b: Build last-week review (only for new-week generation, not retries)
     let lastWeekReview: string | null = null;
-    let athleteTrainingFeedback: string | null = null;
-    let latestFeedbackForTwin: {
-      adherence?: number | null;
-      fatigue?: number | null;
-      confidence?: number | null;
-    } | null = null;
     try {
       const prevPlan = planRows[0];
       if (prevPlan && prevPlan.weekStart !== weekStart) {
@@ -567,39 +537,6 @@ export async function POST(req: Request) {
       }
     } catch {
       console.log(`[WeeklyPlan] Could not build last-week review (non-blocking)`);
-    }
-
-    try {
-      const previousWeekStart = getPreviousMonday(weekStart);
-      const feedbackRows = await db
-        .select()
-        .from(trainingFeedback)
-        .where(
-          and(
-            eq(trainingFeedback.athleteId, athleteId),
-            eq(trainingFeedback.weekStart, previousWeekStart),
-          ),
-        )
-        .orderBy(desc(trainingFeedback.updatedAt))
-        .limit(1);
-      const feedback = feedbackRows[0];
-      if (feedback) {
-        latestFeedbackForTwin = {
-          adherence: feedback.adherence,
-          fatigue: feedback.fatigue,
-          confidence: feedback.confidence,
-        };
-        athleteTrainingFeedback = [
-          `- Week: ${feedback.weekStart}`,
-          `- Scores (1-5): adherence ${feedback.adherence}, effort ${feedback.effort}, fatigue ${feedback.fatigue}, soreness ${feedback.soreness}, mood ${feedback.mood}, confidence ${feedback.confidence}`,
-          feedback.notes ? `- Notes: ${feedback.notes}` : null,
-        ]
-          .filter(Boolean)
-          .join('\n');
-        console.log('[WeeklyPlan] Athlete training feedback injected');
-      }
-    } catch {
-      console.log('[WeeklyPlan] Could not load athlete training feedback (non-blocking)');
     }
 
     const dbContextRows = await db.execute<{
@@ -636,13 +573,13 @@ export async function POST(req: Request) {
     });
     const twinProfile = buildAthleteDigitalTwin({
       activities: allActivities,
-      recentFeedback: latestFeedbackForTwin,
+      recentFeedback: null,
       risk: riskIntelligence,
     });
     const calibration = calibratePriorityFromOutcomes({
-      recentAdherence: latestFeedbackForTwin?.adherence ?? null,
-      recentFatigue: latestFeedbackForTwin?.fatigue ?? null,
-      recentConfidence: latestFeedbackForTwin?.confidence ?? null,
+      recentAdherence: null,
+      recentFatigue: null,
+      recentConfidence: null,
       risk: riskIntelligence,
     });
     const calibratedPriority =
@@ -747,10 +684,10 @@ export async function POST(req: Request) {
             const runPart = session.run
               ? `run ${session.run.type}: ${session.run.description}`
               : 'no run';
-            const physioPart = session.physio
-              ? `physio ${session.physio.type}`
-              : 'no physio';
-            return `- ${session.day} (${session.date}): ${runPart}; ${physioPart}`;
+            const strengthPart = session.strengthSlot
+              ? `strength slot (${session.strengthSlot.load ?? 'moderate'})`
+              : 'no strength slot';
+            return `- ${session.day} (${session.date}): ${runPart}; ${strengthPart}`;
           }),
         ].join('\n')
       : '';
@@ -824,7 +761,6 @@ export async function POST(req: Request) {
       personalRecords: prText,
       preferences: generationPreferences || null,
       lastWeekReview,
-      trainingFeedback: athleteTrainingFeedback,
       trainingBlockContext,
       strategyLabel,
       strategyDescription,
@@ -902,154 +838,12 @@ export async function POST(req: Request) {
       distributionAccepted: coachDistributionEvaluation.accepted,
     });
 
-    // Step 3: Physio generates complementary sessions
-    console.log(`[WeeklyPlan] Step 3: Physio generateObject...`);
-    sendProgress('physio', 'Physio is drafting complementary work.');
-    const coachSessionsSummary = coachSessions
-      .map((s) => `- ${s.day} (${s.date}): ${s.type} — ${s.description}`)
-      .join('\n');
-
-    const physioPrompt = buildPhysioPipelinePrompt({
-      athleteName: null,
-      weight: settings?.weight ?? null,
-      trainingBalance: settings?.trainingBalance ?? null,
-      weekStart,
-      weekEnd,
-      injuries: injuriesText,
-      coachSessions: coachSessionsSummary,
-      preferences: generationPreferences || null,
-      optimizationPriorityLabel,
-    });
-    const physioEditDirective = isEditRequest
-      ? `\n\n## Weekly Plan Edit Instructions\nYou are editing the physio complement of an existing weekly plan.\n${normalizedEditInstructions ? `Apply these requested edits exactly when safe:\n${normalizedEditInstructions}\n` : ''}${sourcePlanSummary ? `Reference source plan:\n${sourcePlanSummary}\n` : ''}${normalizedEditTargetDates.length > 0 ? `Prioritize changes to these dates: ${normalizedEditTargetDates.join(', ')}.\n` : ''}${effectiveMode === 'full' ? 'Avoid unnecessary changes outside explicitly requested edits.\n' : 'Only adjust remaining/future days; do not rewrite past days.\n'}`
-      : '';
-    const finalPhysioPrompt = isEditRequest
-      ? `${physioPrompt}${physioEditDirective}`
-      : physioPrompt;
-
-    logAiTrace(trace, 'physio_prompt_built', {
-      promptHash: promptHash(finalPhysioPrompt),
-      coachSessions: coachSessions.length,
-    });
-    const allowMissingStrengthBeforeDate =
-      effectiveMode === 'remaining_days' ? todayIso : undefined;
-    let physioSessions: PhysioWeekOutput['sessions'] = [];
-    let physioFallbackReason: 'runtime_budget' | null = null;
-    if (!hasRuntimeBudget()) {
-      physioFallbackReason = 'runtime_budget';
-      conflictSummary =
-        'Physio generation skipped due to runtime budget; coach plan was saved without complementary physio sessions.';
-      console.log(
-        '[WeeklyPlan] Runtime budget exceeded before physio. Falling back to coach-only generation.',
-      );
-      sendProgress(
-        'physio',
-        'Runtime budget was reached before physio step. Proceeding with coach-only plan.',
-        {fallback: 'coach_only'},
-      );
-      logAiTrace(trace, 'weekly_physio_skipped_runtime_budget', {
-        athleteId,
-        elapsedMs: elapsedMs(),
-        mode: effectiveMode,
-      });
-    } else {
-      const physioObject = await generateObjectWithRetry<PhysioWeekOutput>({
-        model,
-        schema: physioWeekOutputSchema,
-        prompt: finalPhysioPrompt,
-        semanticCheck: (candidate) => {
-          return validateCombinedWeekSemantics(
-            coachObject,
-            candidate,
-            {allowMissingStrengthBeforeDate},
-          );
-        },
-      });
-      specialistTurnsUsed += 1;
-      roundCount += 1;
-      physioSessions = physioObject.sessions;
-      console.log(`[WeeklyPlan] Physio produced ${physioSessions.length} sessions`);
-      sendProgress('physio', 'Physio draft ready.', {
-        sessionCount: physioSessions.length,
-      });
-    }
-
-    if (multiAgentEnabled && !physioFallbackReason) {
-      sendProgress('repair', 'Checking coach/physio conflicts.');
-      const conflictResolution = resolveWeeklyCoachPhysioConflicts(
-        coachObject,
-        {sessions: physioSessions},
-      );
-      multiAgentConflicts = conflictResolution.conflicts;
-      conflictSummary = summarizeConflictResolution(conflictResolution.conflicts);
-      physioSessions = conflictResolution.resolvedPhysioSessions;
-      logAiTrace(trace, 'weekly_multi_agent_conflicts_checked', {
-        athleteId,
-        conflictCount: conflictResolution.conflicts.length,
-        highSeverity: conflictResolution.conflicts.filter(
-          (conflict) => conflict.severity === 'high',
-        ).length,
-        roundCount,
-        specialistTurnsUsed,
-        repairSuggested: conflictResolution.repairSuggested,
-      });
-
-      const canRepair =
-        conflictResolution.repairSuggested &&
-        multiAgentConfig.maxRepairTurns > 0 &&
-        repairTurnsUsed < multiAgentConfig.maxRepairTurns &&
-        roundCount < multiAgentConfig.maxRounds &&
-        hasRuntimeBudget();
-
-      if (canRepair) {
-        sendProgress('repair', 'Applying automatic conflict repair.');
-        const conflictDigest = conflictResolution.conflicts
-          .map(
-            (conflict) =>
-              `- ${conflict.date}: ${conflict.rule} (${conflict.severity}) -> ${conflict.message}`,
-          )
-          .join('\n');
-        const repairPrompt = `${finalPhysioPrompt}\n\n## Deterministic Conflict Feedback\nYour previous proposal caused scheduling conflicts with coach load intent.\n${conflictDigest}\n\nRepair instructions:\n- Keep the same dates.\n- Resolve all high-severity conflicts.\n- Favor mobility/warmup/cooldown over heavy strength when uncertain.\n- Keep output concise and safe-first.`;
-        const repairedPhysioObject = await generateObjectWithRetry<PhysioWeekOutput>({
-          model,
-          schema: physioWeekOutputSchema,
-          prompt: repairPrompt,
-          semanticCheck: (candidate) =>
-            validateCombinedWeekSemantics(coachObject, candidate, {
-              allowMissingStrengthBeforeDate,
-            }),
-        });
-        repairTurnsUsed += 1;
-        roundCount += 1;
-        repairApplied = true;
-        const postRepairResolution = resolveWeeklyCoachPhysioConflicts(
-          coachObject,
-          repairedPhysioObject,
-        );
-        physioSessions = postRepairResolution.resolvedPhysioSessions;
-        multiAgentConflicts = postRepairResolution.conflicts;
-        conflictSummary = summarizeConflictResolution(postRepairResolution.conflicts);
-        logAiTrace(trace, 'weekly_multi_agent_repair_applied', {
-          athleteId,
-          conflictCountAfterRepair: postRepairResolution.conflicts.length,
-          highSeverityAfterRepair: postRepairResolution.conflicts.filter(
-            (conflict) => conflict.severity === 'high',
-          ).length,
-          roundCount,
-          specialistTurnsUsed,
-          repairTurnsUsed,
-          elapsedMs: elapsedMs(),
-        });
-        sendProgress('repair', 'Conflict repair completed.');
-      }
-    }
-
-    // Step 4: Merge by date
-    sendProgress('merge', 'Merging coach and physio plans by date.');
+    // Step 3: Merge by date
+    sendProgress('merge', 'Building unified coach week with strength slots.');
+    const physioFallbackReason: 'runtime_budget' | null = null;
     let generatedSessions: UnifiedSession[] = buildGeneratedSessions(
       weekDates,
       coachSessions,
-      physioSessions,
     );
     finalDistributionEvaluation = evaluateUnifiedWeeklyDistribution(generatedSessions);
     logAiTrace(trace, 'weekly_distribution_final_evaluated', {
@@ -1068,7 +862,7 @@ export async function POST(req: Request) {
       hasRuntimeBudget() &&
       roundCount < multiAgentConfig.maxRounds
     ) {
-      sendProgress('repair', 'Applying targeted distribution repair pass.');
+      sendProgress('merge', 'Applying targeted coach distribution repair pass.');
       const distributionRepairPrompt = `${finalCoachPrompt}\n\n## Deterministic Weekly Distribution Repair Feedback\n${summarizeDistributionForPrompt(
         finalDistributionEvaluation,
       )}\n\nRepair instructions:\n- Keep all dates fixed.\n- Reduce hard clustering and excessive weekend load.\n- Keep easy-minute dominance.\n- Preserve key workout intent from block context and athlete goals.\n- Keep changes minimal and safety-first.`;
@@ -1083,42 +877,7 @@ export async function POST(req: Request) {
       roundCount += 1;
       distributionRepairApplied = true;
       distributionRepairAttempts += 1;
-
-      const repairedCoachSessionsSummary = coachSessions
-        .map((session) => `- ${session.day} (${session.date}): ${session.type} — ${session.description}`)
-        .join('\n');
-      const repairedPhysioPrompt = buildPhysioPipelinePrompt({
-        athleteName: null,
-        weight: settings?.weight ?? null,
-        trainingBalance: settings?.trainingBalance ?? null,
-        weekStart,
-        weekEnd,
-        injuries: injuriesText,
-        coachSessions: repairedCoachSessionsSummary,
-        preferences: generationPreferences || null,
-        optimizationPriorityLabel,
-      });
-      const repairedPhysioObject = await generateObjectWithRetry<PhysioWeekOutput>({
-        model,
-        schema: physioWeekOutputSchema,
-        prompt: repairedPhysioPrompt,
-        semanticCheck: (candidate) =>
-          validateCombinedWeekSemantics(coachObject, candidate, {
-            allowMissingStrengthBeforeDate,
-          }),
-      });
-      specialistTurnsUsed += 1;
-      roundCount += 1;
-      physioSessions = repairedPhysioObject.sessions;
-
-      const conflictResolution = resolveWeeklyCoachPhysioConflicts(
-        coachObject,
-        {sessions: physioSessions},
-      );
-      multiAgentConflicts = conflictResolution.conflicts;
-      conflictSummary = summarizeConflictResolution(conflictResolution.conflicts);
-      physioSessions = conflictResolution.resolvedPhysioSessions;
-      generatedSessions = buildGeneratedSessions(weekDates, coachSessions, physioSessions);
+      generatedSessions = buildGeneratedSessions(weekDates, coachSessions);
       finalDistributionEvaluation = evaluateUnifiedWeeklyDistribution(generatedSessions);
       logAiTrace(trace, 'weekly_distribution_final_repaired', {
         athleteId,
@@ -1128,7 +887,7 @@ export async function POST(req: Request) {
         issueCount: finalDistributionEvaluation.issues.length,
         repairAttempts: distributionRepairAttempts,
       });
-      sendProgress('repair', 'Distribution repair pass completed.');
+      sendProgress('merge', 'Coach distribution repair pass completed.');
     }
 
     const activitiesByDate = new Map<string, ActivitySummary[]>();
@@ -1201,8 +960,8 @@ export async function POST(req: Request) {
       .map((s) => {
         const parts = [s.day];
         if (s.run) parts.push(`run: ${s.run.type}`);
-        if (s.physio) parts.push(`physio: ${s.physio.type}`);
-        if (!s.run && !s.physio) parts.push('rest');
+        if (s.strengthSlot) parts.push(`strength slot: ${s.strengthSlot.load ?? 'moderate'}`);
+        if (!s.run && !s.strengthSlot) parts.push('rest');
         return parts.join(' — ');
       })
       .join('\n');
@@ -1227,20 +986,14 @@ export async function POST(req: Request) {
         if (details.length) markdownLines.push(details.join(' | '));
         if (s.run.notes) markdownLines.push(`> ${s.run.notes}`);
       }
-      if (s.physio) {
-        markdownLines.push(`### Physio: ${s.physio.type}`);
-        if (s.physio.duration) markdownLines.push(`Duration: ${s.physio.duration}`);
-        markdownLines.push('');
-        markdownLines.push('| Exercise | Sets x Reps | Tempo | Notes |');
-        markdownLines.push('|----------|-------------|-------|-------|');
-        for (const ex of s.physio.exercises) {
-          markdownLines.push(
-            `| ${ex.name} | ${ex.sets ?? '-'}x${ex.reps ?? '-'} | ${ex.tempo ?? '-'} | ${ex.notes ?? '-'} |`,
-          );
-        }
-        if (s.physio.notes) markdownLines.push(`> ${s.physio.notes}`);
+      if (s.strengthSlot) {
+        markdownLines.push('### Strength slot');
+        markdownLines.push(
+          `Load target: ${s.strengthSlot.load ?? 'moderate'}${s.strengthSlot.focus ? ` | Focus: ${s.strengthSlot.focus}` : ''}`,
+        );
+        if (s.strengthSlot.notes) markdownLines.push(`> ${s.strengthSlot.notes}`);
       }
-      if (!s.run && !s.physio) {
+      if (!s.run && !s.strengthSlot) {
         markdownLines.push('Rest day');
         if (s.notes) markdownLines.push(s.notes);
       }
@@ -1254,13 +1007,12 @@ export async function POST(req: Request) {
     markdownLines.push(
       `- Risk level: ${riskIntelligence.riskLevel} (${riskIntelligence.riskScore}/100)`,
     );
+    markdownLines.push('- Pipeline mode: coach-only with strength-slot planning.');
     markdownLines.push(
-      `- Multi-agent runtime: ${multiAgentEnabled ? 'enabled' : 'disabled'} (rounds: ${roundCount}, specialist turns: ${specialistTurnsUsed}, repairs: ${repairTurnsUsed})`,
+      `- Runtime counters: rounds ${roundCount}, specialist turns ${specialistTurnsUsed}, repairs ${repairTurnsUsed}.`,
     );
     if (physioFallbackReason) {
-      markdownLines.push(
-        '- Fallback applied: physio step skipped because the runtime budget was exceeded; this version includes coach sessions only.',
-      );
+      markdownLines.push('- Fallback applied: coach-only fallback was activated.');
     }
     if (finalDistributionEvaluation) {
       markdownLines.push(
@@ -1319,7 +1071,7 @@ export async function POST(req: Request) {
     const content = `${PLAN_PREFERENCES_PREFIX}${encodedPreferences}${PLAN_PREFERENCES_SUFFIX}\n${PLAN_STRATEGY_PREFIX}${strategyMetaPayload}${PLAN_STRATEGY_SUFFIX}\n${markdownContent}`;
 
     // Step 6: Save
-    sendProgress('save', 'Saving weekly plan and orchestrator records.');
+    sendProgress('save', 'Saving weekly plan.');
     const planId = crypto.randomUUID();
     const now2 = Date.now();
 
@@ -1348,95 +1100,6 @@ export async function POST(req: Request) {
           ne(weeklyPlans.id, planId),
         ),
       );
-
-    const resolvedOrchestratorSessionId = await resolveOrchestratorSessionId();
-    if (resolvedOrchestratorSessionId) {
-      const now3 = Date.now();
-      const summaryPayload = JSON.stringify({
-        type: 'weekly_multi_agent_summary',
-        weekStart,
-        roundCount,
-        specialistTurnsUsed,
-        repairTurnsUsed,
-        repairApplied,
-        conflictCount: multiAgentConflicts.length,
-        highSeverityConflictCount: multiAgentConflicts.filter(
-          (conflict) => conflict.severity === 'high',
-        ).length,
-        conflictSummary,
-        distributionScore: finalDistributionEvaluation?.score ?? null,
-        distributionAccepted: finalDistributionEvaluation?.accepted ?? null,
-        distributionRepairApplied,
-        distributionRepairAttempts,
-      });
-      await db.insert(orchestratorPlanItems).values({
-        id: crypto.randomUUID(),
-        athleteId,
-        sessionId: resolvedOrchestratorSessionId,
-        title: `Weekly plan generated (${weekStart})`,
-        detail: summaryPayload,
-        status: 'done',
-        ownerPersona: 'coach',
-        dueDate: weekEnd,
-        createdAt: now3,
-        updatedAt: now3,
-      });
-
-      await db.insert(orchestratorHandoffs).values({
-        id: crypto.randomUUID(),
-        athleteId,
-        sessionId: resolvedOrchestratorSessionId,
-        targetPersona: 'physio',
-        title: `Weekly coordination review (${weekStart})`,
-        detail: summaryPayload,
-        status: repairApplied ? 'accepted' : 'done',
-        createdAt: now3,
-        updatedAt: now3,
-      });
-
-      if (multiAgentConflicts.some((conflict) => conflict.severity === 'high')) {
-        await db.insert(orchestratorBlockers).values({
-          id: crypto.randomUUID(),
-          athleteId,
-          sessionId: resolvedOrchestratorSessionId,
-          title: `High-risk conflict flagged (${weekStart})`,
-          detail: JSON.stringify({
-            type: 'weekly_multi_agent_blocker',
-            conflicts: multiAgentConflicts.filter(
-              (conflict) => conflict.severity === 'high',
-            ),
-          }),
-          status: 'open',
-          linkedPlanItemId: null,
-          createdAt: now3,
-          updatedAt: now3,
-        });
-      }
-
-      const hasActiveGoal = await db
-        .select()
-        .from(orchestratorGoals)
-        .where(
-          and(
-            eq(orchestratorGoals.athleteId, athleteId),
-            eq(orchestratorGoals.sessionId, resolvedOrchestratorSessionId),
-            eq(orchestratorGoals.status, 'active'),
-          ),
-        )
-        .limit(1);
-      if (hasActiveGoal.length === 0) {
-        await db.insert(orchestratorGoals).values({
-          id: crypto.randomUUID(),
-          athleteId,
-          sessionId: resolvedOrchestratorSessionId,
-          title: `Maintain safe progression for week ${weekStart}`,
-          detail: summaryPayload,
-          status: 'active',
-          createdAt: now3,
-          updatedAt: now3,
-        });
-      }
-    }
 
     console.log(`[WeeklyPlan] Plan saved: ${planId}`);
     console.log(`[WeeklyPlan] ========================================\n`);

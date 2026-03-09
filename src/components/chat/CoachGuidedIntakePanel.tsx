@@ -35,8 +35,6 @@ import {neonGetActiveWeeklyPlan} from '@/lib/chatSync';
 const WEEKLY_PHASE_ORDER: AiProgressPhase[] = [
   'context',
   'coach',
-  'physio',
-  'repair',
   'merge',
   'save',
 ];
@@ -44,9 +42,9 @@ const WEEKLY_PHASE_ORDER: AiProgressPhase[] = [
 const WEEKLY_PHASE_LABELS: Record<AiProgressPhase, string> = {
   context: 'Load context',
   coach: 'Coach draft',
-  physio: 'Physio draft',
-  repair: 'Conflict check',
-  merge: 'Merge sessions',
+  physio: 'Physio draft (legacy)',
+  repair: 'Repair (legacy)',
+  merge: 'Assemble week',
   save: 'Persist plan',
   done: 'Complete',
   error: 'Error',

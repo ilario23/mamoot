@@ -32,15 +32,14 @@ export const encodeSseEvent = <T>(event: T, eventName?: string): string => {
     lines.push(`event: ${eventName}`);
   }
   lines.push(`data: ${JSON.stringify(event)}`);
-  lines.push('');
-  return lines.join('\n');
+  return `${lines.join('\n')}\n\n`;
 };
 
 export const parseSseChunks = <T>(
   buffer: string,
   chunk: string,
 ): SseParseResult<T> => {
-  const joined = buffer + chunk;
+  const joined = (buffer + chunk).replace(/\r\n/g, '\n');
   const rawEvents = joined.split(END_OF_EVENT);
   const remainder = rawEvents.pop() ?? '';
   const events: T[] = [];

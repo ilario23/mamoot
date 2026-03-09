@@ -1,7 +1,7 @@
-import WeeklyPlan from '@/views/WeeklyPlan';
+import {redirect} from 'next/navigation';
 
 const WeeklyPlanPage = () => {
-  return <WeeklyPlan />;
+  redirect('/training-plan');
 };
 
 export default WeeklyPlanPage;

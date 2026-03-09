@@ -10,31 +10,22 @@ import {getSystemPrompt, isValidPersona} from '@/lib/aiPrompts';
 import {
   suggestFollowUpsSchema,
   saveWeeklyPreferencesSchema,
-  requestTrainingFeedbackSchema,
-  saveTrainingFeedbackSchema,
-  getTrainingFeedbackSchema,
   updateTrainingBlockSchema,
-  orchestratorGoalSchema,
-  orchestratorGoalUpdateSchema,
-  orchestratorPlanItemSchema,
-  orchestratorPlanItemUpdateSchema,
-  orchestratorBlockerSchema,
-  orchestratorBlockerUpdateSchema,
-  orchestratorHandoffSchema,
-  orchestratorHandoffUpdateSchema,
+  startPlanningFlowSchema,
+  setPlanningFieldSchema,
+  getPlanningStateSchema,
+  confirmPlanningStateSchema,
+  executePlanningGenerationSchema,
+  type PlanningFlowIntent,
+  type SetPlanningFieldInput,
 } from '@/lib/aiTools';
 import {createRetrievalTools} from '@/lib/aiRetrievalTools';
 import {db} from '@/db';
 import {
   userSettings,
-  trainingFeedback,
   trainingBlocks,
-  orchestratorGoals,
-  orchestratorPlanItems,
-  orchestratorBlockers,
-  orchestratorHandoffs,
 } from '@/db/schema';
-import {eq, and, isNull, desc} from 'drizzle-orm';
+import {eq, and, isNull} from 'drizzle-orm';
 import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 import {chatRequestSchema} from '@/lib/aiRequestSchemas';
@@ -44,7 +35,18 @@ import {
   buildReliabilityEnvelope,
   detectRedFlagInput,
 } from '@/lib/aiReliabilityPolicy';
-import {detectCoachIntakeIntent} from '@/lib/coachIntake';
+import {parseSseChunks, type AiProgressEvent} from '@/lib/aiProgress';
+import {
+  defaultWeeklyPlanRequirements,
+  defaultWeeklyPlanEditRequirements,
+  defaultTrainingBlockRequirements,
+  summarizeWeeklyPlanRequirements,
+  summarizeWeeklyPlanEditRequirements,
+  summarizeTrainingBlockRequirements,
+  type WeeklyPlanRequirements,
+  type WeeklyPlanEditRequirements,
+  type TrainingBlockRequirements,
+} from '@/lib/coachIntake';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -69,9 +71,6 @@ const ALLOWED_MODELS: Record<
   'claude-haiku-3-5': () => anthropic('claude-3-5-haiku-latest'),
 };
 
-const ORCHESTRATOR_ENABLED =
-  (process.env.AI_ORCHESTRATOR_ENABLED ?? 'true').toLowerCase() !== 'false';
-
 // ----- Provider / model selection -----
 
 const getModel = (clientModel?: string) => {
@@ -92,7 +91,24 @@ const getModel = (clientModel?: string) => {
   return openai(modelOverride ?? 'gpt-4o-mini');
 };
 
-const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
+type PlanningState = {
+  flow: PlanningFlowIntent;
+  confirmed: boolean;
+  weeklyPlan: WeeklyPlanRequirements;
+  weeklyPlanEdit: WeeklyPlanEditRequirements;
+  trainingBlock: TrainingBlockRequirements;
+  sourcePlanId?: string;
+  lastUpdatedAt: number;
+};
+
+const planningStateStore = new Map<string, PlanningState>();
+const PLANNING_TTL_MS = 60 * 60 * 1000;
+
+const isPlanningToolsEnabled = () =>
+  process.env.AI_CHAT_PLANNING_TOOLS_ENABLED !== 'false';
+
+const getPlanningSessionKey = (athleteId: number, sessionId: string) =>
+  `${athleteId}:${sessionId}`;
 
 const getCurrentMondayIso = (): string => {
   const now = new Date();
@@ -100,13 +116,191 @@ const getCurrentMondayIso = (): string => {
   const daysSinceMonday = day === 0 ? 6 : day - 1;
   const monday = new Date(now);
   monday.setDate(now.getDate() - daysSinceMonday);
-  return toIsoDate(monday);
+  return monday.toISOString().slice(0, 10);
 };
 
-const getPreviousMondayIso = (): string => {
-  const currentMonday = new Date(getCurrentMondayIso());
-  currentMonday.setDate(currentMonday.getDate() - 7);
-  return toIsoDate(currentMonday);
+const getNextMondayIso = (): string => {
+  const now = new Date();
+  const day = now.getDay();
+  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 7 : 8 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + daysUntilMonday);
+  return monday.toISOString().slice(0, 10);
+};
+
+const inferTargetWeekFromNotes = (
+  notes: string | undefined,
+): 'current' | 'next' | null => {
+  if (!notes?.trim()) return null;
+  const normalized = notes.toLowerCase();
+  const currentMonday = getCurrentMondayIso();
+  const nextMonday = getNextMondayIso();
+
+  const embeddedIso = normalized.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
+  if (embeddedIso === currentMonday) return 'current';
+  if (embeddedIso === nextMonday) return 'next';
+  if (normalized.includes('current week') || normalized.includes('this week')) {
+    return 'current';
+  }
+  if (
+    normalized.includes('start from current day') ||
+    normalized.includes('start from today') ||
+    normalized.includes('from current day') ||
+    normalized.includes('from today')
+  ) {
+    return 'current';
+  }
+  if (normalized.includes('next week')) return 'next';
+  return null;
+};
+
+const inferGenerationModeFromNotes = (
+  notes: string | undefined,
+): 'remaining_days' | 'full' | null => {
+  if (!notes?.trim()) return null;
+  const normalized = notes.toLowerCase();
+  if (
+    normalized.includes('start from current day') ||
+    normalized.includes('start from today') ||
+    normalized.includes('from current day') ||
+    normalized.includes('from today') ||
+    normalized.includes('remaining days')
+  ) {
+    return 'remaining_days';
+  }
+  if (
+    normalized.includes('full week') ||
+    normalized.includes('entire week')
+  ) {
+    return 'full';
+  }
+  return null;
+};
+
+const getMissingRequiredPlanningFields = (
+  state: PlanningState,
+): {field: string; prompt: string}[] => {
+  if (state.flow === 'weekly_plan') {
+    const missing: {field: string; prompt: string}[] = [];
+    if (!state.weeklyPlan.focus.trim()) {
+      missing.push({
+        field: 'focus',
+        prompt: 'What should this week optimize for?',
+      });
+    }
+    return missing;
+  }
+
+  if (state.flow === 'weekly_plan_edit') {
+    const missing: {field: string; prompt: string}[] = [];
+    if (!state.sourcePlanId?.trim()) {
+      missing.push({
+        field: 'sourcePlanId',
+        prompt: 'Which active weekly plan should I edit?',
+      });
+    }
+    if (!state.weeklyPlanEdit.editGoal.trim()) {
+      missing.push({
+        field: 'editGoal',
+        prompt: 'What is the primary goal for this edit?',
+      });
+    }
+    if (!state.weeklyPlanEdit.constraints.trim()) {
+      missing.push({
+        field: 'constraints',
+        prompt: 'What constraints must stay true?',
+      });
+    }
+    return missing;
+  }
+
+  const missing: {field: string; prompt: string}[] = [];
+  if (!state.trainingBlock.goalEvent.trim()) {
+    missing.push({
+      field: 'goalEvent',
+      prompt: 'What is your goal event?',
+    });
+  }
+  if (!state.trainingBlock.goalDate.trim()) {
+    missing.push({
+      field: 'goalDate',
+      prompt: 'What is the goal event date (YYYY-MM-DD)?',
+    });
+  }
+  return missing;
+};
+
+const summarizePlanningState = (state: PlanningState): string => {
+  if (state.flow === 'weekly_plan') {
+    return summarizeWeeklyPlanRequirements(state.weeklyPlan);
+  }
+  if (state.flow === 'weekly_plan_edit') {
+    return summarizeWeeklyPlanEditRequirements(state.weeklyPlanEdit);
+  }
+  return summarizeTrainingBlockRequirements(state.trainingBlock);
+};
+
+const readWeeklyPlanStreamPayload = async (response: Response) => {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('WEEKLY_PLAN_STREAM_MISSING');
+  }
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let donePayload: unknown = null;
+  let latestProgressMessage = 'Generating weekly plan...';
+
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, {stream: true});
+    const parsed = parseSseChunks<AiProgressEvent>(buffer, '');
+    buffer = parsed.remainder;
+    for (const event of parsed.events) {
+      if (event.type === 'progress') {
+        latestProgressMessage = event.message;
+      }
+      if (event.type === 'error') {
+        const code =
+          (event.meta as {code?: string; status?: number} | undefined)?.code ??
+          'weekly_plan_generation_failed';
+        throw new Error(
+          `WEEKLY_PLAN_STREAM_ERROR:${code}:${event.message ?? 'unknown'}`,
+        );
+      }
+      if (event.type === 'done') {
+        donePayload = event.payload;
+        latestProgressMessage = event.message;
+      }
+    }
+  }
+
+  if (!donePayload && buffer.trim().length > 0) {
+    const parsed = parseSseChunks<AiProgressEvent>(buffer, '\n\n');
+    for (const event of parsed.events) {
+      if (event.type === 'done') {
+        donePayload = event.payload;
+      }
+      if (event.type === 'error') {
+        throw new Error(`WEEKLY_PLAN_STREAM_ERROR:unknown:${event.message}`);
+      }
+    }
+  }
+
+  if (!donePayload) {
+    throw new Error(`WEEKLY_PLAN_STREAM_DONE_MISSING:${latestProgressMessage}`);
+  }
+
+  return donePayload as Record<string, unknown>;
+};
+
+const cleanupPlanningStateStore = () => {
+  const now = Date.now();
+  for (const [key, state] of planningStateStore.entries()) {
+    if (now - state.lastUpdatedAt > PLANNING_TTL_MS) {
+      planningStateStore.delete(key);
+    }
+  }
 };
 
 // ----- Route handler -----
@@ -169,6 +363,10 @@ export async function POST(req: Request) {
     explicitContext?: ResolvedMention[] | null;
   };
 
+  cleanupPlanningStateStore();
+  const planningSessionKey =
+    athleteId && sessionId ? getPlanningSessionKey(athleteId, sessionId) : null;
+
   const resolvedModel =
     clientModel && ALLOWED_MODELS[clientModel]
       ? clientModel
@@ -209,26 +407,11 @@ export async function POST(req: Request) {
       JSON.stringify(
         createAiErrorPayload(
           'invalid_persona',
-          'Invalid persona. Must be one of: coach, nutritionist, physio, orchestrator',
+          'Invalid persona. Must be one of: coach, nutritionist, physio',
         ),
       ),
       {
         status: 400,
-        headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
-      },
-    );
-  }
-
-  if (persona === 'orchestrator' && !ORCHESTRATOR_ENABLED) {
-    return new Response(
-      JSON.stringify(
-        createAiErrorPayload(
-          'orchestrator_disabled',
-          'Orchestrator chat is currently disabled. Ask an admin to enable AI_ORCHESTRATOR_ENABLED.',
-        ),
-      ),
-      {
-        status: 503,
         headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
       },
     );
@@ -241,25 +424,6 @@ export async function POST(req: Request) {
         createAiErrorPayload(
           'messages_required',
           'Messages array is required and must not be empty',
-        ),
-      ),
-      {
-        status: 400,
-        headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
-      },
-    );
-  }
-
-  if (persona === 'orchestrator' && (!athleteId || !sessionId)) {
-    return new Response(
-      JSON.stringify(
-        createAiErrorPayload(
-          'orchestrator_context_required',
-          'Orchestrator requires athleteId and sessionId to coordinate goals, blockers, and handoffs.',
-          {
-            clarification:
-              'Open an orchestrator conversation from AI Team and try again.',
-          },
         ),
       ),
       {
@@ -360,27 +524,6 @@ export async function POST(req: Request) {
     ?.parts?.filter((p): p is {type: 'text'; text: string} => p.type === 'text')
     .map((p) => p.text)
     .join('') ?? '';
-  if (persona === 'coach') {
-    const guidedIntent = detectCoachIntakeIntent(latestUserText);
-    if (guidedIntent) {
-      const subject =
-        guidedIntent === 'training_block'
-          ? 'a new training block'
-          : guidedIntent === 'weekly_plan_edit'
-            ? 'an edit to your weekly plan'
-            : 'a new weekly plan';
-      return new Response(
-        `Perfect timing — I can start a guided setup for ${subject}. Use the guided card in Coach chat to answer one focused question at a time, then review and press Generate when ready.`,
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'x-trace-id': trace.traceId,
-          },
-        },
-      );
-    }
-  }
   const reliability = buildReliabilityEnvelope({
     userText: latestUserText,
     hasGroundingData: Boolean((explicitContext && explicitContext.length > 0) || athleteId),
@@ -419,15 +562,6 @@ export async function POST(req: Request) {
   // Build tools — retrieval tools (all personas) + follow-up suggestions
   const allRetrievalTools = athleteId ? createRetrievalTools(athleteId) : null;
   const retrievalTools = allRetrievalTools ?? {};
-  const orchestratorRetrievalTools =
-    allRetrievalTools && persona === 'orchestrator'
-      ? {
-          getTrainingGoal: allRetrievalTools.getTrainingGoal,
-          getInjuries: allRetrievalTools.getInjuries,
-          getWeeklyPlan: allRetrievalTools.getWeeklyPlan,
-          getTrainingBlock: allRetrievalTools.getTrainingBlock,
-        }
-      : {};
 
   const suggestFollowUps = {
     suggestFollowUps: {
@@ -439,6 +573,446 @@ export async function POST(req: Request) {
       },
     },
   };
+
+  const canUsePlanningTools =
+    persona === 'coach' &&
+    Boolean(athleteId) &&
+    Boolean(sessionId) &&
+    Boolean(planningSessionKey) &&
+    isPlanningToolsEnabled();
+
+  const getState = (): PlanningState | null => {
+    if (!planningSessionKey) return null;
+    return planningStateStore.get(planningSessionKey) ?? null;
+  };
+
+  const upsertState = (next: PlanningState): PlanningState => {
+    if (!planningSessionKey) return next;
+    const withTimestamp: PlanningState = {
+      ...next,
+      lastUpdatedAt: Date.now(),
+    };
+    planningStateStore.set(planningSessionKey, withTimestamp);
+    return withTimestamp;
+  };
+
+  const resolveState = (
+    requestedFlow?: PlanningFlowIntent,
+  ): PlanningState | null => {
+    const state = getState();
+    if (!state) return null;
+    if (!requestedFlow || requestedFlow === state.flow) return state;
+    return {
+      ...state,
+      flow: requestedFlow,
+      confirmed: false,
+    };
+  };
+
+  const planningTools = canUsePlanningTools
+    ? {
+        startPlanningFlow: {
+          description:
+            'Start a structured planning flow in chat for weekly plan creation, weekly plan edits, or training block creation.',
+          inputSchema: startPlanningFlowSchema,
+          execute: async ({
+            flow,
+            reset,
+          }: {
+            flow: PlanningFlowIntent;
+            reset: boolean;
+          }) => {
+            const existing = getState();
+            const shouldReset = reset || !existing;
+            const next: PlanningState =
+              shouldReset || !existing
+                ? {
+                    flow,
+                    confirmed: false,
+                    weeklyPlan:
+                      flow === 'weekly_plan'
+                        ? {
+                            ...defaultWeeklyPlanRequirements(),
+                            targetWeek: 'current',
+                          }
+                        : defaultWeeklyPlanRequirements(),
+                    weeklyPlanEdit: defaultWeeklyPlanEditRequirements(),
+                    trainingBlock: defaultTrainingBlockRequirements(),
+                    sourcePlanId: undefined,
+                    lastUpdatedAt: Date.now(),
+                  }
+                : {
+                    ...existing,
+                    flow,
+                    confirmed: false,
+                    lastUpdatedAt: Date.now(),
+                  };
+            const saved = upsertState(next);
+            return {
+              ok: true,
+              action: 'started',
+              flow: saved.flow,
+              confirmed: saved.confirmed,
+              missing: getMissingRequiredPlanningFields(saved),
+              summary: summarizePlanningState(saved),
+            };
+          },
+        },
+        setPlanningField: {
+          description:
+            'Set one or more structured planning fields for the active chat planning flow.',
+          inputSchema: setPlanningFieldSchema,
+          execute: async (input: SetPlanningFieldInput) => {
+            const existing = resolveState(input.flow) ?? {
+              flow: input.flow,
+              confirmed: false,
+              weeklyPlan: defaultWeeklyPlanRequirements(),
+              weeklyPlanEdit: defaultWeeklyPlanEditRequirements(),
+              trainingBlock: defaultTrainingBlockRequirements(),
+              sourcePlanId: undefined,
+              lastUpdatedAt: Date.now(),
+            };
+
+            let updated: PlanningState = {
+              ...existing,
+              flow: input.flow,
+              confirmed: false,
+            };
+
+            if (input.flow === 'weekly_plan') {
+              const weeklyPatch = input.patch as Partial<WeeklyPlanRequirements>;
+              const inferredTargetWeek =
+                weeklyPatch.targetWeek ?? inferTargetWeekFromNotes(weeklyPatch.notes);
+              const inferredGenerationMode =
+                weeklyPatch.generationMode ??
+                inferGenerationModeFromNotes(weeklyPatch.notes);
+              updated = {
+                ...updated,
+                weeklyPlan: {
+                  ...updated.weeklyPlan,
+                  ...input.patch,
+                  ...(inferredTargetWeek
+                    ? {targetWeek: inferredTargetWeek}
+                    : {}),
+                  ...(inferredGenerationMode
+                    ? {generationMode: inferredGenerationMode}
+                    : {}),
+                },
+              };
+            } else if (input.flow === 'weekly_plan_edit') {
+              const patch = input.patch as Partial<WeeklyPlanEditRequirements> & {
+                sourcePlanId?: string;
+              };
+              updated = {
+                ...updated,
+                weeklyPlanEdit: {
+                  ...updated.weeklyPlanEdit,
+                  ...patch,
+                },
+                sourcePlanId:
+                  patch.sourcePlanId?.trim() || updated.sourcePlanId || undefined,
+              };
+            } else {
+              updated = {
+                ...updated,
+                trainingBlock: {
+                  ...updated.trainingBlock,
+                  ...input.patch,
+                },
+              };
+            }
+
+            const saved = upsertState(updated);
+            return {
+              ok: true,
+              action: 'updated',
+              flow: saved.flow,
+              confirmed: saved.confirmed,
+              summary: summarizePlanningState(saved),
+              missing: getMissingRequiredPlanningFields(saved),
+            };
+          },
+        },
+        getPlanningState: {
+          description:
+            'Return the current planning state summary, confirmation status, and missing fields.',
+          inputSchema: getPlanningStateSchema,
+          execute: async (input?: {flow?: PlanningFlowIntent}) => {
+            const state = resolveState(input?.flow);
+            if (!state) {
+              return {
+                ok: false,
+                error: 'No planning flow started yet. Call startPlanningFlow first.',
+              };
+            }
+            const saved = upsertState(state);
+            return {
+              ok: true,
+              flow: saved.flow,
+              confirmed: saved.confirmed,
+              summary: summarizePlanningState(saved),
+              missing: getMissingRequiredPlanningFields(saved),
+              state: {
+                weeklyPlan: saved.weeklyPlan,
+                weeklyPlanEdit: saved.weeklyPlanEdit,
+                trainingBlock: saved.trainingBlock,
+                sourcePlanId: saved.sourcePlanId ?? null,
+              },
+            };
+          },
+        },
+        confirmPlanningState: {
+          description:
+            'Confirm or unconfirm the current planning state before execution.',
+          inputSchema: confirmPlanningStateSchema,
+          execute: async ({
+            flow,
+            confirmed,
+          }: {
+            flow?: PlanningFlowIntent;
+            confirmed: boolean;
+          }) => {
+            const state = resolveState(flow);
+            if (!state) {
+              return {
+                ok: false,
+                error: 'No planning flow to confirm. Start one first.',
+              };
+            }
+            const missing = getMissingRequiredPlanningFields(state);
+            const nextConfirmed = confirmed && missing.length === 0;
+            const saved = upsertState({
+              ...state,
+              confirmed: nextConfirmed,
+            });
+            return {
+              ok: true,
+              flow: saved.flow,
+              confirmed: saved.confirmed,
+              summary: summarizePlanningState(saved),
+              missing,
+              warning:
+                confirmed && missing.length > 0
+                  ? 'Cannot confirm yet; required fields are still missing.'
+                  : null,
+            };
+          },
+        },
+        executePlanningGeneration: {
+          description:
+            'Execute generation for the confirmed planning flow. This triggers weekly-plan or training-block APIs.',
+          inputSchema: executePlanningGenerationSchema,
+          execute: async ({
+            flow,
+            dryRun,
+          }: {
+            flow?: PlanningFlowIntent;
+            dryRun: boolean;
+          }) => {
+            const state = resolveState(flow);
+            if (!state) {
+              return {
+                ok: false,
+                error: 'No planning flow found. Start and fill one first.',
+              };
+            }
+            const missing = getMissingRequiredPlanningFields(state);
+            if (missing.length > 0) {
+              return {
+                ok: false,
+                flow: state.flow,
+                error: 'Planning state is incomplete.',
+                missing,
+                summary: summarizePlanningState(state),
+              };
+            }
+            if (!state.confirmed) {
+              return {
+                ok: false,
+                flow: state.flow,
+                error: 'Planning state is not confirmed yet.',
+                summary: summarizePlanningState(state),
+              };
+            }
+            if (!athleteId || !sessionId) {
+              return {
+                ok: false,
+                flow: state.flow,
+                error: 'Missing athlete/session context to execute generation.',
+              };
+            }
+            if (dryRun) {
+              return {
+                ok: true,
+                flow: state.flow,
+                dryRun: true,
+                summary: summarizePlanningState(state),
+              };
+            }
+
+            const baseUrl = new URL(req.url);
+
+            try {
+              if (state.flow === 'training_block') {
+                const payload = {
+                  athleteId,
+                  goalEvent: state.trainingBlock.goalEvent,
+                  goalDate: state.trainingBlock.goalDate,
+                  requirements: summarizeTrainingBlockRequirements(
+                    state.trainingBlock,
+                  ),
+                  totalWeeks: state.trainingBlock.totalWeeks,
+                  model: clientModel,
+                  strategySelectionMode:
+                    state.trainingBlock.strategySelectionMode,
+                  strategyPreset: state.trainingBlock.strategyPreset,
+                  optimizationPriority:
+                    state.trainingBlock.optimizationPriority,
+                };
+                const response = await fetch(
+                  new URL('/api/ai/training-block', baseUrl),
+                  {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                  },
+                );
+
+                if (!response.ok) {
+                  let body: unknown = null;
+                  try {
+                    body = await response.json();
+                  } catch {
+                    body = null;
+                  }
+                  return {
+                    ok: false,
+                    flow: state.flow,
+                    error: 'Training block generation failed.',
+                    status: response.status,
+                    details: body,
+                  };
+                }
+
+                const data = (await response.json()) as Record<string, unknown>;
+                const resetState = upsertState({
+                  ...state,
+                  confirmed: false,
+                });
+                return {
+                  ok: true,
+                  flow: state.flow,
+                  status: 'completed',
+                  summary: summarizePlanningState(resetState),
+                  result: {
+                    id: data.id ?? null,
+                    goalEvent: data.goalEvent ?? null,
+                    goalDate: data.goalDate ?? null,
+                    totalWeeks: data.totalWeeks ?? null,
+                  },
+                };
+              }
+
+              const weekStartDate =
+                state.flow === 'weekly_plan'
+                  ? state.weeklyPlan.targetWeek === 'current'
+                    ? getCurrentMondayIso()
+                    : getNextMondayIso()
+                  : undefined;
+              const weeklyPayload = {
+                athleteId,
+                model: clientModel,
+                weekStartDate,
+                mode:
+                  state.flow === 'weekly_plan'
+                    ? state.weeklyPlan.generationMode
+                    : state.weeklyPlanEdit.generationMode,
+                preferences:
+                  state.flow === 'weekly_plan'
+                    ? summarizeWeeklyPlanRequirements(state.weeklyPlan)
+                    : undefined,
+                strategySelectionMode:
+                  state.flow === 'weekly_plan'
+                    ? state.weeklyPlan.strategySelectionMode
+                    : state.weeklyPlanEdit.strategySelectionMode,
+                strategyPreset:
+                  state.flow === 'weekly_plan'
+                    ? state.weeklyPlan.strategyPreset
+                    : state.weeklyPlanEdit.strategyPreset,
+                optimizationPriority:
+                  state.flow === 'weekly_plan'
+                    ? state.weeklyPlan.optimizationPriority
+                    : state.weeklyPlanEdit.optimizationPriority,
+                sourcePlanId:
+                  state.flow === 'weekly_plan_edit'
+                    ? state.sourcePlanId
+                    : undefined,
+                editSourcePlanId:
+                  state.flow === 'weekly_plan_edit'
+                    ? state.sourcePlanId
+                    : undefined,
+                editInstructions:
+                  state.flow === 'weekly_plan_edit'
+                    ? summarizeWeeklyPlanEditRequirements(state.weeklyPlanEdit)
+                    : undefined,
+              };
+
+              const weeklyResponse = await fetch(
+                new URL('/api/ai/weekly-plan', baseUrl),
+                {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify(weeklyPayload),
+                },
+              );
+              if (!weeklyResponse.ok) {
+                let body: unknown = null;
+                try {
+                  body = await weeklyResponse.json();
+                } catch {
+                  body = null;
+                }
+                return {
+                  ok: false,
+                  flow: state.flow,
+                  error: 'Weekly plan generation failed.',
+                  status: weeklyResponse.status,
+                  details: body,
+                };
+              }
+
+              const donePayload = await readWeeklyPlanStreamPayload(
+                weeklyResponse,
+              );
+              const resetState = upsertState({
+                ...state,
+                confirmed: false,
+              });
+              return {
+                ok: true,
+                flow: state.flow,
+                status: 'completed',
+                summary: summarizePlanningState(resetState),
+                result: {
+                  id: donePayload.id ?? null,
+                  title: donePayload.title ?? null,
+                  weekStart: donePayload.weekStart ?? null,
+                  sourcePlanId: donePayload.sourcePlanId ?? null,
+                },
+              };
+            } catch (error) {
+              return {
+                ok: false,
+                flow: state.flow,
+                error: 'Execution bridge failed while generating.',
+                details:
+                  error instanceof Error ? error.message : 'unknown execution error',
+              };
+            }
+          },
+        },
+      }
+    : {};
 
   const coachOnlyTools =
     persona === 'coach' && athleteId
@@ -453,119 +1027,6 @@ export async function POST(req: Request) {
                 .set({weeklyPreferences: preferences})
                 .where(eq(userSettings.athleteId, athleteId));
               return {saved: true, preferences};
-            },
-          },
-          requestTrainingFeedback: {
-            description:
-              'Ask the athlete for end-of-week training reflection using a structured checklist (adherence, effort, fatigue, soreness, mood, confidence, notes). Use when feedback is missing after a training week.',
-            inputSchema: requestTrainingFeedbackSchema,
-            execute: async (input: {weekStart?: string; prompt?: string}) => {
-              const weekStart = input.weekStart ?? getPreviousMondayIso();
-              return {
-                requested: true,
-                weekStart,
-                prompt:
-                  input.prompt ??
-                  'How did last week of training go and feel overall?',
-                questions: [
-                  {key: 'adherence', label: 'How closely did you follow the plan? (1-5)'},
-                  {key: 'effort', label: 'How hard did the week feel? (1-5)'},
-                  {key: 'fatigue', label: 'How fatigued do you feel now? (1-5)'},
-                  {key: 'soreness', label: 'How sore are you now? (1-5)'},
-                  {key: 'mood', label: 'How is your mood/readiness? (1-5)'},
-                  {key: 'confidence', label: 'How confident do you feel? (1-5)'},
-                  {key: 'notes', label: 'Any notes about how training felt? (optional)'},
-                ],
-              };
-            },
-          },
-          saveTrainingFeedback: {
-            description:
-              'Persist athlete end-of-week training reflection scores and optional notes.',
-            inputSchema: saveTrainingFeedbackSchema,
-            execute: async (input: {
-              weekStart: string;
-              adherence: number;
-              effort: number;
-              fatigue: number;
-              soreness: number;
-              mood: number;
-              confidence: number;
-              notes?: string;
-            }) => {
-              const now = Date.now();
-              const id = `${athleteId}:${input.weekStart}`;
-              await db
-                .insert(trainingFeedback)
-                .values({
-                  id,
-                  athleteId,
-                  weekStart: input.weekStart,
-                  adherence: input.adherence,
-                  effort: input.effort,
-                  fatigue: input.fatigue,
-                  soreness: input.soreness,
-                  mood: input.mood,
-                  confidence: input.confidence,
-                  notes: input.notes ?? null,
-                  source: 'coach_chat',
-                  createdAt: now,
-                  updatedAt: now,
-                })
-                .onConflictDoUpdate({
-                  target: trainingFeedback.id,
-                  set: {
-                    adherence: input.adherence,
-                    effort: input.effort,
-                    fatigue: input.fatigue,
-                    soreness: input.soreness,
-                    mood: input.mood,
-                    confidence: input.confidence,
-                    notes: input.notes ?? null,
-                    source: 'coach_chat',
-                    updatedAt: now,
-                  },
-                });
-              return {saved: true, weekStart: input.weekStart};
-            },
-          },
-          getTrainingFeedback: {
-            description:
-              'Retrieve latest athlete training reflection feedback, optionally for a specific week.',
-            inputSchema: getTrainingFeedbackSchema,
-            execute: async (input: {weekStart?: string; limit?: number}) => {
-              const rows = await db
-                .select()
-                .from(trainingFeedback)
-                .where(
-                  and(
-                    eq(trainingFeedback.athleteId, athleteId),
-                    ...(input.weekStart
-                      ? [eq(trainingFeedback.weekStart, input.weekStart)]
-                      : []),
-                  ),
-                )
-                .orderBy(desc(trainingFeedback.weekStart))
-                .limit(input.weekStart ? 1 : (input.limit ?? 4));
-
-              if (rows.length === 0) {
-                return {feedback: 'No training feedback found for this athlete.'};
-              }
-
-              return {
-                feedback: rows.map((row) => ({
-                  weekStart: row.weekStart,
-                  adherence: row.adherence,
-                  effort: row.effort,
-                  fatigue: row.fatigue,
-                  soreness: row.soreness,
-                  mood: row.mood,
-                  confidence: row.confidence,
-                  notes: row.notes,
-                  source: row.source,
-                  updatedAt: row.updatedAt,
-                })),
-              };
             },
           },
           updateTrainingBlock: {
@@ -623,232 +1084,13 @@ export async function POST(req: Request) {
               };
             },
           },
-        }
-      : {};
-
-  const orchestratorTools =
-    persona === 'orchestrator'
-      ? {
-          createOrchestratorGoal: {
-            description:
-              'Create a high-level goal tracked in the orchestrator board.',
-            inputSchema: orchestratorGoalSchema,
-            execute: async (input: {
-              title: string;
-              detail?: string;
-              status?: 'active' | 'on_hold' | 'done';
-            }) => {
-              if (!athleteId || !sessionId) {
-                return {saved: false, error: 'athleteId and sessionId required'};
-              }
-              const now = Date.now();
-              const record = {
-                id: crypto.randomUUID(),
-                athleteId,
-                sessionId,
-                title: input.title,
-                detail: input.detail ?? null,
-                status: input.status ?? 'active',
-                createdAt: now,
-                updatedAt: now,
-              };
-              await db.insert(orchestratorGoals).values(record);
-              return {saved: true, goal: record};
-            },
-          },
-          updateOrchestratorGoal: {
-            description: 'Update an existing orchestrator goal.',
-            inputSchema: orchestratorGoalUpdateSchema,
-            execute: async (input: {
-              id: string;
-              title?: string;
-              detail?: string;
-              status?: 'active' | 'on_hold' | 'done';
-            }) => {
-              await db
-                .update(orchestratorGoals)
-                .set({
-                  ...(input.title !== undefined ? {title: input.title} : {}),
-                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
-                  ...(input.status !== undefined ? {status: input.status} : {}),
-                  updatedAt: Date.now(),
-                })
-                .where(eq(orchestratorGoals.id, input.id));
-              return {updated: true, id: input.id};
-            },
-          },
-          createOrchestratorPlanItem: {
-            description:
-              'Create a concrete execution item for the not-done queue.',
-            inputSchema: orchestratorPlanItemSchema,
-            execute: async (input: {
-              title: string;
-              detail?: string;
-              status?: 'todo' | 'in_progress' | 'blocked' | 'done';
-              ownerPersona?: 'coach' | 'nutritionist' | 'physio';
-              dueDate?: string;
-            }) => {
-              if (!athleteId || !sessionId) {
-                return {saved: false, error: 'athleteId and sessionId required'};
-              }
-              const now = Date.now();
-              const record = {
-                id: crypto.randomUUID(),
-                athleteId,
-                sessionId,
-                title: input.title,
-                detail: input.detail ?? null,
-                status: input.status ?? 'todo',
-                ownerPersona: input.ownerPersona ?? null,
-                dueDate: input.dueDate ?? null,
-                createdAt: now,
-                updatedAt: now,
-              };
-              await db.insert(orchestratorPlanItems).values(record);
-              return {saved: true, planItem: record};
-            },
-          },
-          updateOrchestratorPlanItem: {
-            description: 'Update an existing plan item in the orchestrator queue.',
-            inputSchema: orchestratorPlanItemUpdateSchema,
-            execute: async (input: {
-              id: string;
-              title?: string;
-              detail?: string;
-              status?: 'todo' | 'in_progress' | 'blocked' | 'done';
-              ownerPersona?: 'coach' | 'nutritionist' | 'physio';
-              dueDate?: string;
-            }) => {
-              await db
-                .update(orchestratorPlanItems)
-                .set({
-                  ...(input.title !== undefined ? {title: input.title} : {}),
-                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
-                  ...(input.status !== undefined ? {status: input.status} : {}),
-                  ...(input.ownerPersona !== undefined
-                    ? {ownerPersona: input.ownerPersona}
-                    : {}),
-                  ...(input.dueDate !== undefined ? {dueDate: input.dueDate} : {}),
-                  updatedAt: Date.now(),
-                })
-                .where(eq(orchestratorPlanItems.id, input.id));
-              return {updated: true, id: input.id};
-            },
-          },
-          createOrchestratorBlocker: {
-            description: 'Create a blocker item that prevents plan completion.',
-            inputSchema: orchestratorBlockerSchema,
-            execute: async (input: {
-              title: string;
-              detail?: string;
-              linkedPlanItemId?: string;
-              status?: 'open' | 'resolved';
-            }) => {
-              if (!athleteId || !sessionId) {
-                return {saved: false, error: 'athleteId and sessionId required'};
-              }
-              const now = Date.now();
-              const record = {
-                id: crypto.randomUUID(),
-                athleteId,
-                sessionId,
-                title: input.title,
-                detail: input.detail ?? null,
-                status: input.status ?? 'open',
-                linkedPlanItemId: input.linkedPlanItemId ?? null,
-                createdAt: now,
-                updatedAt: now,
-              };
-              await db.insert(orchestratorBlockers).values(record);
-              return {saved: true, blocker: record};
-            },
-          },
-          updateOrchestratorBlocker: {
-            description: 'Update an existing blocker.',
-            inputSchema: orchestratorBlockerUpdateSchema,
-            execute: async (input: {
-              id: string;
-              title?: string;
-              detail?: string;
-              linkedPlanItemId?: string;
-              status?: 'open' | 'resolved';
-            }) => {
-              await db
-                .update(orchestratorBlockers)
-                .set({
-                  ...(input.title !== undefined ? {title: input.title} : {}),
-                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
-                  ...(input.status !== undefined ? {status: input.status} : {}),
-                  ...(input.linkedPlanItemId !== undefined
-                    ? {linkedPlanItemId: input.linkedPlanItemId}
-                    : {}),
-                  updatedAt: Date.now(),
-                })
-                .where(eq(orchestratorBlockers.id, input.id));
-              return {updated: true, id: input.id};
-            },
-          },
-          createOrchestratorHandoff: {
-            description:
-              'Create a handoff task for coach, nutritionist, or physio execution.',
-            inputSchema: orchestratorHandoffSchema,
-            execute: async (input: {
-              targetPersona: 'coach' | 'nutritionist' | 'physio';
-              title: string;
-              detail?: string;
-              status?: 'pending' | 'accepted' | 'done' | 'cancelled';
-            }) => {
-              if (!athleteId || !sessionId) {
-                return {saved: false, error: 'athleteId and sessionId required'};
-              }
-              const now = Date.now();
-              const record = {
-                id: crypto.randomUUID(),
-                athleteId,
-                sessionId,
-                targetPersona: input.targetPersona,
-                title: input.title,
-                detail: input.detail ?? null,
-                status: input.status ?? 'pending',
-                createdAt: now,
-                updatedAt: now,
-              };
-              await db.insert(orchestratorHandoffs).values(record);
-              return {saved: true, handoff: record};
-            },
-          },
-          updateOrchestratorHandoff: {
-            description: 'Update the state of an existing handoff.',
-            inputSchema: orchestratorHandoffUpdateSchema,
-            execute: async (input: {
-              id: string;
-              targetPersona?: 'coach' | 'nutritionist' | 'physio';
-              title?: string;
-              detail?: string;
-              status?: 'pending' | 'accepted' | 'done' | 'cancelled';
-            }) => {
-              await db
-                .update(orchestratorHandoffs)
-                .set({
-                  ...(input.targetPersona !== undefined
-                    ? {targetPersona: input.targetPersona}
-                    : {}),
-                  ...(input.title !== undefined ? {title: input.title} : {}),
-                  ...(input.detail !== undefined ? {detail: input.detail} : {}),
-                  ...(input.status !== undefined ? {status: input.status} : {}),
-                  updatedAt: Date.now(),
-                })
-                .where(eq(orchestratorHandoffs.id, input.id));
-              return {updated: true, id: input.id};
-            },
-          },
+          ...planningTools,
         }
       : {};
 
   const tools = {
-    ...(persona === 'orchestrator' ? orchestratorRetrievalTools : retrievalTools),
+    ...retrievalTools,
     ...coachOnlyTools,
-    ...orchestratorTools,
     ...suggestFollowUps,
   };
 
@@ -860,13 +1102,14 @@ export async function POST(req: Request) {
   });
 
   let result;
+  const maxToolSteps = canUsePlanningTools ? 8 : 5;
   try {
     result = streamText({
       model: getModel(clientModel),
       system,
       messages: await convertToModelMessages(processedMessages),
       tools: Object.keys(tools).length > 0 ? tools : undefined,
-      stopWhen: stepCountIs(5),
+      stopWhen: stepCountIs(maxToolSteps),
       onStepFinish(event) {
         logAiTrace(trace, 'step_finished', {
           persona,

@@ -13,7 +13,6 @@ export const buildCoachPipelinePrompt = (context: {
   personalRecords: string;
   preferences: string | null;
   lastWeekReview: string | null;
-  trainingFeedback: string | null;
   trainingBlockContext: string | null;
   strategyLabel: string;
   strategyDescription: string;
@@ -23,7 +22,7 @@ export const buildCoachPipelinePrompt = (context: {
 
 ## Athlete
 ${context.athleteName ? `- Name: ${context.athleteName}` : ''}
-${context.hrZones ? `- HR Zones: ${context.hrZones}` : ''}
+${context.hrZones ? `- HR Zones (6-zone model): ${context.hrZones}` : '- HR Zones model: Use a 6-zone heart-rate system (Z1, Z2, Z3, Z4, Z5, Z6).'}
 ${context.weight ? `- Weight: ${context.weight} kg` : ''}
 ${context.trainingBalance != null ? `- Training Balance: ${context.trainingBalance}/80 (20=run-focused, 80=gym-focused)` : ''}
 ${context.goal ? `- Goal: ${context.goal}` : ''}
@@ -36,7 +35,6 @@ ${context.trainingBlockContext ? `\n## Training Block Context\nThis week is part
 ## Recent Training (last 4 weeks)
 ${context.recentTraining}
 ${context.lastWeekReview ? `\n## Last Week Review\nBelow is a comparison of last week's planned sessions vs what the athlete actually did. Use this to inform progression, recovery needs, and session placement this week:\n${context.lastWeekReview}\n` : ''}
-${context.trainingFeedback ? `\n## Athlete Last Week Reflection\nUse this athlete-reported feedback about how training felt:\n${context.trainingFeedback}\n` : ''}
 ## Personal Records
 ${context.personalRecords}
 
@@ -46,11 +44,12 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 ## Instructions
 - Produce exactly 7 sessions (Monday through Sunday) with ISO dates.
 - Vary session types: include easy runs, one quality session (intervals or tempo), one long run, and appropriate rest days.
+- HR-zone language MUST follow a 6-zone model (Z1-Z6) for all weekly plan outputs.
 - For rest/strength days, use type "rest" or "strength" and describe what the day is for.
 - Honor the training balance: lower values (closer to 20) = more running days; higher values (closer to 80) = fewer runs, more rest/strength days.
-- Coach owns strength slot allocation: intentionally create 1-3 "strength-capable" windows across the week (typically on rest or low-run-load days), then leave execution details for Physio.
-- Use activity-type-aware sequencing: pair strength-capable windows with easy/recovery/rest context; avoid placing them right before key run days whenever possible.
-- DOMS-aware planning: after a likely heavy lower-body strength window, the next day must NOT be a long run, intervals, or tempo; use easy/recovery/rest as a buffer.
+- Coach owns strength slot allocation: intentionally create 1-3 explicit "strength" days across the week (typically on rest or low-run-load days).
+- Use activity-type-aware sequencing: pair strength slots with easy/recovery/rest context; avoid placing them right before key run days whenever possible.
+- DOMS-aware planning: after a likely heavy lower-body strength slot, the next day must NOT be a long run, intervals, or tempo; use easy/recovery/rest as a buffer.
 - Weekly distribution targets (deterministic scorer aligned):
   - Run days: usually 3-6/week.
   - Rest days: usually 1-3/week.
@@ -65,7 +64,6 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 - Keep weekly load ramp conservative when monotony or strain is elevated.
 - If injuries are reported, avoid aggravating movements and reduce load.
 - If a Last Week Review is provided, factor adherence into your plan: if sessions were missed, consider whether load should stay flat or catch up; if everything was hit, consider progressing; if the week was an intentional deload (check athlete preferences), plan a return to normal or increased load.
-- If Athlete Last Week Reflection is provided, use it as a safety/load signal. High fatigue/soreness or low mood/confidence should reduce intensity/volume; strong adherence with low fatigue and good mood can support progression.
 - If a Training Block Context is provided, your plan MUST respect the volume target and intensity level. Include the specified key workouts. The week type (build/recovery/taper/etc.) should guide overall session selection.
 - Be specific with workout descriptions (e.g. "6x1000m at 4:15/km with 90s jog recovery").`;
 

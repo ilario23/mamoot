@@ -1,7 +1,8 @@
 'use client';
 
-import {useState} from 'react';
+import {useMemo, useState} from 'react';
 import Link from 'next/link';
+import {useSearchParams} from 'next/navigation';
 import {
   Target,
   ChevronDown,
@@ -11,15 +12,61 @@ import {
 } from 'lucide-react';
 import AITeamChat from '@/components/layout/AITeamChat';
 import {useSettings} from '@/contexts/SettingsContext';
+import {
+  buildWeeklyPlanQuickAskDraft,
+  isWeeklyPlanQuickAskAction,
+} from '@/lib/weeklyPlanQuickAsk';
 
 const AIChat = () => {
-  const {settings} = useSettings();
+  const {settings, isLoadingSettings} = useSettings();
+  const searchParams = useSearchParams();
   const [infoExpanded, setInfoExpanded] = useState(false);
 
   const goal = settings.goal?.trim();
   const allergies = settings.allergies ?? [];
   const injuries = settings.injuries ?? [];
   const hasAnyInfo = !!goal || allergies.length > 0 || injuries.length > 0;
+
+  const initialDraft = useMemo(() => {
+    if (searchParams.get('quickAsk') !== '1') return null;
+    const action = searchParams.get('action');
+    if (!isWeeklyPlanQuickAskAction(action)) return null;
+    const isCreationAction =
+      action === 'create_weekly_plan' || action === 'create_training_block';
+    if (isCreationAction && isLoadingSettings) {
+      // Avoid using default settings snapshot (e.g. 50/50) before Neon settings load.
+      return null;
+    }
+    const allergyNames = (settings.allergies ?? []).map((item) => item.trim()).filter(Boolean);
+    const injurySummaries = (settings.injuries ?? [])
+      .map((injury) => {
+        const name = injury?.name?.trim();
+        const notes = injury?.notes?.trim();
+        if (!name) return null;
+        return notes ? `${name} (${notes})` : name;
+      })
+      .filter((item): item is string => Boolean(item));
+    const weekStart = searchParams.get('weekStart');
+    const title = searchParams.get('title');
+    const settingsFingerprint = [
+      settings.goal ?? '',
+      settings.trainingBalance ?? '',
+      allergyNames.join('|'),
+      injurySummaries.join('|'),
+    ].join('::');
+    const draft = buildWeeklyPlanQuickAskDraft(action, {
+      weekStart,
+      weekTitle: title,
+      athleteGoal: settings.goal ?? null,
+      allergyNames,
+      injurySummaries,
+      trainingBalance: settings.trainingBalance ?? null,
+    });
+    return {
+      ...draft,
+      id: `weekly-quick-ask-${action}-${weekStart ?? 'no-week'}-${title ?? 'no-title'}-${settingsFingerprint}`,
+    };
+  }, [searchParams, settings, isLoadingSettings]);
 
   const handleToggleInfo = () => {
     setInfoExpanded((prev) => !prev);
@@ -153,7 +200,9 @@ const AIChat = () => {
 
       {/* Chat area with integrated sidebar */}
       <div className='flex-1 md:border-3 md:border-border bg-background md:shadow-neo overflow-hidden'>
-        <AITeamChat />
+        <AITeamChat
+          initialDraft={initialDraft}
+        />
       </div>
     </div>
   );

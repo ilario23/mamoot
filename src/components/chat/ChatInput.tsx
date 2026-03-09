@@ -12,6 +12,7 @@ import {
   useState,
   useRef,
   useCallback,
+  useEffect,
   type KeyboardEvent,
   type ChangeEvent,
 } from 'react';
@@ -29,7 +30,13 @@ interface ChatInputProps {
   isStreaming: boolean;
   /** Placeholder text for the input. */
   placeholder?: string;
+  /** Optional prefill payload for external quick actions. */
+  prefillDraft?: {id: string; text: string; mentions: MentionReference[]} | null;
+  /** Called once a prefill payload has been applied locally. */
+  onPrefillApplied?: (id: string) => void;
 }
+
+const MAX_TEXTAREA_HEIGHT = 220;
 
 /** Detect @query at the cursor: returns {query, startIndex} or null. */
 const detectMentionAtCursor = (
@@ -58,7 +65,14 @@ const detectMentionAtCursor = (
   return null;
 };
 
-const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) => {
+const ChatInput = ({
+  onSend,
+  onStop,
+  isStreaming,
+  placeholder,
+  prefillDraft = null,
+  onPrefillApplied,
+}: ChatInputProps) => {
   const [text, setText] = useState('');
   const [mentions, setMentions] = useState<MentionReference[]>([]);
   const [popupOpen, setPopupOpen] = useState(false);
@@ -67,11 +81,18 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
   const [triggeredByButton, setTriggeredByButton] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const popupRef = useRef<MentionPopupHandle>(null);
+  const lastAppliedPrefillRef = useRef<string | null>(null);
   const {collapseSidebar} = useSidebarCollapse();
 
   const handleTextareaFocus = useCallback(() => {
     collapseSidebar();
   }, [collapseSidebar]);
+
+  const resizeTextarea = useCallback((el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+  }, []);
 
   // ---- Inline @-detection on every text change ----
   const handleChange = useCallback(
@@ -197,6 +218,27 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
     // Popover, causing it to immediately close via onOpenChange.
   }, []);
 
+  useEffect(() => {
+    if (!prefillDraft) return;
+    if (lastAppliedPrefillRef.current === prefillDraft.id) return;
+    const timeoutId = window.setTimeout(() => {
+      setText(prefillDraft.text);
+      setMentions(prefillDraft.mentions);
+      closePopup();
+      lastAppliedPrefillRef.current = prefillDraft.id;
+      onPrefillApplied?.(prefillDraft.id);
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      resizeTextarea(el);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [prefillDraft, closePopup, onPrefillApplied, resizeTextarea]);
+
+  useEffect(() => {
+    resizeTextarea(inputRef.current);
+  }, [text, resizeTextarea]);
+
   return (
     <div className='relative p-1.5 md:p-3 border-t-[4px] border-border bg-muted/30 overflow-hidden'>
       {/* Mention pills */}
@@ -254,13 +296,10 @@ const ChatInput = ({onSend, onStop, isStreaming, placeholder}: ChatInputProps) =
           disabled={isStreaming}
           aria-label='Message input'
           rows={1}
-          className='flex-1 min-w-0 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-medium text-sm bg-background shadow-neo-inset focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 resize-none overflow-hidden'
-          style={{maxHeight: '120px'}}
+          className='flex-1 min-w-0 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-medium text-sm bg-background shadow-neo-inset focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 resize-none overflow-y-auto'
+          style={{maxHeight: `${MAX_TEXTAREA_HEIGHT}px`}}
           onInput={(e) => {
-            // Auto-resize textarea
-            const el = e.target as HTMLTextAreaElement;
-            el.style.height = 'auto';
-            el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+            resizeTextarea(e.target as HTMLTextAreaElement);
           }}
         />
 

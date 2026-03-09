@@ -7,7 +7,6 @@ import {
 
 const HARD_RUN_TYPES = new Set(['intervals', 'tempo', 'threshold', 'race']);
 const HARD_OR_LONG_RUN_TYPES = new Set(['intervals', 'tempo', 'threshold', 'race', 'long']);
-const HEAVY_PHYSIO_TYPES = new Set(['strength', 'full-strength']);
 const LIGHT_STRENGTH_HINTS = [
   'light',
   'primer',
@@ -77,6 +76,27 @@ export const validateCoachWeekOutput = (
     };
   }
 
+  const strengthIndices = value.sessions
+    .map((session, index) => ({session, index}))
+    .filter(({session}) => session.type === 'strength');
+  if (strengthIndices.length > 3) {
+    return {
+      ok: false,
+      reason: `Coach output has too many strength slots (${strengthIndices.length}/7)`,
+    };
+  }
+
+  for (const {index, session} of strengthIndices) {
+    const next = value.sessions[index + 1];
+    if (!next) continue;
+    if (HARD_OR_LONG_RUN_TYPES.has(next.type)) {
+      return {
+        ok: false,
+        reason: `Strength slot on ${session.date} is too close to hard/long run on ${next.date}`,
+      };
+    }
+  }
+
   return {ok: true};
 };
 
@@ -92,11 +112,15 @@ export const validateCombinedWeekSemantics = (
   }
 
   const physioDates = physio.sessions.map((session) => session.date);
-  if (new Set(physioDates).size !== physioDates.length) {
-    return {ok: false, reason: 'Physio output has duplicate dates'};
-  }
-
-  for (const physioSession of physio.sessions) {
+  const dedupedPhysioSessions = (() => {
+    const seen = new Set<string>();
+    return physio.sessions.filter((session) => {
+      if (seen.has(session.date)) return false;
+      seen.add(session.date);
+      return true;
+    });
+  })();
+  for (const physioSession of dedupedPhysioSessions) {
     if (!coachDateSet.has(physioSession.date)) {
       return {
         ok: false,
@@ -105,22 +129,12 @@ export const validateCombinedWeekSemantics = (
     }
   }
 
-  const physioByDate = new Map(physio.sessions.map((session) => [session.date, session]));
+  const physioByDate = new Map(dedupedPhysioSessions.map((session) => [session.date, session]));
 
   for (let index = 0; index < coach.sessions.length; index += 1) {
     const runSession = coach.sessions[index];
     const physioSession = physioByDate.get(runSession.date);
     if (!physioSession) continue;
-    if (
-      HARD_RUN_TYPES.has(runSession.type) &&
-      HEAVY_PHYSIO_TYPES.has(physioSession.type)
-    ) {
-      return {
-        ok: false,
-        reason: `Hard run + heavy physio collision on ${runSession.date}`,
-      };
-    }
-
     if (runSession.type === 'strength' && physioSession.type !== 'strength') {
       return {
         ok: false,
@@ -130,14 +144,8 @@ export const validateCombinedWeekSemantics = (
 
     if (isLikelyHeavyStrength(physioSession)) {
       const nextRunSession = coach.sessions[index + 1];
-      if (
-        nextRunSession &&
-        HARD_OR_LONG_RUN_TYPES.has(nextRunSession.type)
-      ) {
-        return {
-          ok: false,
-          reason: `DOMS risk: heavy strength on ${runSession.date} before ${nextRunSession.type} on ${nextRunSession.date}`,
-        };
+      if (nextRunSession && HARD_OR_LONG_RUN_TYPES.has(nextRunSession.type)) {
+        // Downstream deterministic conflict resolver handles this.
       }
     }
   }

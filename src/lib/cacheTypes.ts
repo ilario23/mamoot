@@ -137,7 +137,7 @@ export interface CachedChatSession {
   id: string;
   /** Strava athlete ID */
   athleteId: number;
-  /** Persona: "coach" | "nutritionist" | "physio" | "orchestrator" */
+  /** Persona: "coach" | "nutritionist" | "physio" */
   persona: string;
   /** Auto-generated from first user message */
   title: string;
@@ -162,34 +162,6 @@ export interface CachedChatMessage {
   content: string;
   /** Unix ms timestamp */
   createdAt: number;
-}
-
-export type TrainingFeedbackSource = 'weekly_plan_ui' | 'coach_chat';
-
-export interface CachedTrainingFeedback {
-  /** Stable ID, typically "{athleteId}:{weekStart}" */
-  id: string;
-  athleteId: number;
-  /** ISO Monday date for reviewed week */
-  weekStart: string;
-  /** 1-5 adherence to plan */
-  adherence: number;
-  /** 1-5 perceived effort */
-  effort: number;
-  /** 1-5 fatigue */
-  fatigue: number;
-  /** 1-5 soreness */
-  soreness: number;
-  /** 1-5 mood/readiness */
-  mood: number;
-  /** 1-5 confidence */
-  confidence: number;
-  /** Optional free text reflection */
-  notes: string | null;
-  /** Where submission originated */
-  source: TrainingFeedbackSource;
-  createdAt: number;
-  updatedAt: number;
 }
 
 // ----- Activity label persistence -----
@@ -225,8 +197,11 @@ export interface UnifiedSession {
     type: string;
     description: string;
     duration?: string;
+    plannedDurationMin?: number;
+    plannedDistanceKm?: number;
     targetPace?: string;
     targetZone?: string;
+    targetZoneId?: 1 | 2 | 3 | 4 | 5 | 6;
     notes?: string;
   };
   /** Strength/mobility component (from Physio) */
@@ -238,6 +213,14 @@ export interface UnifiedSession {
   };
   /** Day-level combined notes */
   notes?: string;
+  /** Coach-owned strength window placeholder (execution details planned later) */
+  strengthSlot?: {
+    focus?: string;
+    load?: 'light' | 'moderate' | 'heavy';
+    notes?: string;
+  };
+  /** Planning/completion lifecycle state */
+  status?: 'planned' | 'completed' | 'skipped' | 'modified';
   /** Optional completed activity metadata used for retrospective matching */
   actualActivity?: {
     id: string;
@@ -246,6 +229,14 @@ export interface UnifiedSession {
     distanceKm: number;
     durationSec: number;
     date: string;
+    avgPaceSecPerKm?: number;
+    avgHr?: number;
+    elevationGainM?: number;
+  };
+  /** Optional plan-vs-actual adherence metadata */
+  compliance?: {
+    matchedPlanType?: boolean;
+    notes?: string;
   };
   /** Snapshot of block-week intent when this plan was generated */
   blockIntent?: {
@@ -320,10 +311,11 @@ export interface CachedTrainingBlock {
   updatedAt: number;
 }
 
-// ----- Orchestrator tracking persistence -----
-
+/**
+ * @deprecated Orchestrator state is removed in v2. These legacy types remain
+ * only for backward-compatible typing in existing UI code paths.
+ */
 export type OrchestratorGoalStatus = 'active' | 'on_hold' | 'done';
-
 export interface CachedOrchestratorGoal {
   id: string;
   athleteId: number;
@@ -335,12 +327,14 @@ export interface CachedOrchestratorGoal {
   updatedAt: number;
 }
 
+/**
+ * @deprecated Orchestrator state is removed in v2.
+ */
 export type OrchestratorPlanItemStatus =
   | 'todo'
   | 'in_progress'
   | 'blocked'
   | 'done';
-
 export interface CachedOrchestratorPlanItem {
   id: string;
   athleteId: number;
@@ -354,8 +348,10 @@ export interface CachedOrchestratorPlanItem {
   updatedAt: number;
 }
 
+/**
+ * @deprecated Orchestrator state is removed in v2.
+ */
 export type OrchestratorBlockerStatus = 'open' | 'resolved';
-
 export interface CachedOrchestratorBlocker {
   id: string;
   athleteId: number;
@@ -368,12 +364,14 @@ export interface CachedOrchestratorBlocker {
   updatedAt: number;
 }
 
+/**
+ * @deprecated Orchestrator state is removed in v2.
+ */
 export type OrchestratorHandoffStatus =
   | 'pending'
   | 'accepted'
   | 'done'
   | 'cancelled';
-
 export interface CachedOrchestratorHandoff {
   id: string;
   athleteId: number;
@@ -385,3 +383,4 @@ export interface CachedOrchestratorHandoff {
   createdAt: number;
   updatedAt: number;
 }
+

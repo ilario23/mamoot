@@ -33,7 +33,6 @@ import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/activityModel';
 import type {PersonaId} from '@/lib/aiPrompts';
 import type {
-  CachedTrainingFeedback,
   CachedOrchestratorGoal,
   CachedOrchestratorPlanItem,
   CachedOrchestratorBlocker,
@@ -47,7 +46,6 @@ import {
   type MentionReference,
 } from '@/lib/mentionTypes';
 import {
-  neonSyncTrainingFeedback,
   neonGetOrchestratorGoals,
   neonGetOrchestratorPlanItems,
   neonGetOrchestratorBlockers,
@@ -67,13 +65,11 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import ChatInput from '@/components/chat/ChatInput';
-import CoachGuidedIntakePanel from '@/components/chat/CoachGuidedIntakePanel';
 import StreamingIndicator from '@/components/chat/StreamingIndicator';
 import SuggestionChips from '@/components/chat/SuggestionChips';
 import ToolCallChip from '@/components/chat/ToolCallChip';
 import type {SuggestFollowUpsInput} from '@/lib/aiTools';
 import {parseAiErrorFromUnknown} from '@/lib/aiErrors';
-import WeeklyReflectionForm from '@/components/feedback/WeeklyReflectionForm';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
 import AiGenerationStatusCard from '@/components/ai/AiGenerationStatusCard';
 import {
@@ -81,7 +77,7 @@ import {
   type AiProgressEvent,
   type AiProgressPhase,
 } from '@/lib/aiProgress';
-import {detectCoachIntakeIntent, type CoachIntakeIntent} from '@/lib/coachIntake';
+import type {WeeklyPlanQuickAskDraft} from '@/lib/weeklyPlanQuickAsk';
 
 // ----- Personas -----
 
@@ -126,18 +122,9 @@ const personas: Persona[] = [
     labelColor: 'text-destructive',
     tintBg: 'bg-destructive/10',
   },
-  {
-    id: 'orchestrator',
-    label: 'Orchestrator',
-    icon: ClipboardList,
-    color: 'bg-primary',
-    bubbleBorder: 'border-l-primary',
-    labelColor: 'text-primary',
-    tintBg: 'bg-primary/10',
-  },
 ];
 
-const visiblePersonas = personas.filter((persona) => persona.id !== 'orchestrator');
+const visiblePersonas = personas;
 
 const PERSONA_STARTERS: Record<PersonaId, string[]> = {
   coach: [
@@ -154,11 +141,6 @@ const PERSONA_STARTERS: Record<PersonaId, string[]> = {
     "Prevent runner's knee",
     'Post-run stretch routine',
     'Hip mobility drills',
-  ],
-  orchestrator: [
-    'Set my weekly goals',
-    'What is still blocked?',
-    'Create handoffs for the team',
   ],
 };
 
@@ -199,18 +181,18 @@ const TOOL_LABELS: Record<string, string> = {
   getActivityDetail: 'Analyzing activity details',
   getPersonalRecords: 'Looking at your personal records',
   getWeatherForecast: 'Checking the weather forecast',
-  getTrainingFeedback: 'Loading your training feedback',
-  requestTrainingFeedback: 'Preparing weekly reflection',
-  saveTrainingFeedback: 'Saving training feedback',
   // Action tools
   suggestFollowUps: 'Preparing suggestions',
+  startPlanningFlow: 'Starting planning flow',
+  setPlanningField: 'Updating plan inputs',
+  getPlanningState: 'Reviewing plan inputs',
+  confirmPlanningState: 'Confirming plan inputs',
+  executePlanningGeneration: 'Generating from plan inputs',
 };
 
 const WEEKLY_PLAN_PROGRESS_PHASE_ORDER: AiProgressPhase[] = [
   'context',
   'coach',
-  'physio',
-  'repair',
   'merge',
   'save',
 ];
@@ -218,9 +200,9 @@ const WEEKLY_PLAN_PROGRESS_PHASE_ORDER: AiProgressPhase[] = [
 const WEEKLY_PLAN_PROGRESS_PHASE_LABELS: Record<AiProgressPhase, string> = {
   context: 'Load context',
   coach: 'Coach draft',
-  physio: 'Physio draft',
-  repair: 'Conflict check and repair',
-  merge: 'Merge sessions',
+  physio: 'Physio draft (legacy)',
+  repair: 'Repair (legacy)',
+  merge: 'Assemble week',
   save: 'Persist plan',
   done: 'Complete',
   error: 'Error',
@@ -253,6 +235,102 @@ interface PendingSendPayload {
   mentions: MentionReference[];
 }
 
+interface ChatInputPrefillDraft {
+  id: string;
+  text: string;
+  mentions: MentionReference[];
+}
+
+type PlanningToolOutput = {
+  ok?: boolean;
+  flow?: 'weekly_plan' | 'weekly_plan_edit' | 'training_block';
+  action?: string;
+  status?: string;
+  summary?: string;
+  warning?: string | null;
+  error?: string;
+  missing?: Array<{field: string; prompt?: string}>;
+  result?: {
+    id?: string | null;
+    title?: string | null;
+    weekStart?: string | null;
+    goalEvent?: string | null;
+    goalDate?: string | null;
+    totalWeeks?: number | null;
+  };
+};
+
+const renderPlanningToolResult = (toolName: string, output: PlanningToolOutput) => {
+  const flowLabel =
+    output.flow === 'weekly_plan'
+      ? 'Weekly plan'
+      : output.flow === 'weekly_plan_edit'
+        ? 'Weekly plan edit'
+        : output.flow === 'training_block'
+          ? 'Training block'
+          : 'Planning flow';
+
+  const title =
+    toolName === 'startPlanningFlow'
+      ? 'Planning started'
+      : toolName === 'setPlanningField'
+        ? 'Planning updated'
+        : toolName === 'getPlanningState'
+          ? 'Planning state'
+          : toolName === 'confirmPlanningState'
+            ? 'Planning confirmation'
+            : toolName === 'executePlanningGeneration'
+              ? 'Generation execution'
+              : 'Planning tool';
+
+  return (
+    <div className='mb-2 border-2 border-border bg-muted/20 p-2 text-xs space-y-1.5'>
+      <p className='font-black uppercase tracking-wider text-[10px] text-muted-foreground'>
+        {title}
+      </p>
+      <p className='font-bold'>{flowLabel}</p>
+      {output.summary && <p className='text-muted-foreground'>{output.summary}</p>}
+      {output.warning && (
+        <p className='text-orange-600 dark:text-orange-400 font-bold'>{output.warning}</p>
+      )}
+      {output.error && <p className='text-destructive font-bold'>{output.error}</p>}
+      {output.missing && output.missing.length > 0 && (
+        <div>
+          <p className='font-black uppercase tracking-wider text-[10px] text-muted-foreground mb-1'>
+            Missing fields
+          </p>
+          <ul className='list-disc pl-4 space-y-0.5'>
+            {output.missing.map((item) => (
+              <li key={item.field}>
+                <span className='font-bold'>{item.field}</span>
+                {item.prompt ? ` — ${item.prompt}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {output.result && (
+        <div className='border border-border/60 bg-background p-1.5 space-y-0.5'>
+          <p className='font-black uppercase tracking-wider text-[10px] text-muted-foreground'>
+            Result
+          </p>
+          {output.result.title && <p>{output.result.title}</p>}
+          {output.result.weekStart && <p>Week: {output.result.weekStart}</p>}
+          {output.result.goalEvent && <p>Goal: {output.result.goalEvent}</p>}
+          {output.result.goalDate && <p>Date: {output.result.goalDate}</p>}
+          {typeof output.result.totalWeeks === 'number' && (
+            <p>Length: {output.result.totalWeeks} weeks</p>
+          )}
+          {output.result.id && <p className='text-muted-foreground'>ID: {output.result.id}</p>}
+        </div>
+      )}
+      {output.status && (
+        <p className='text-[11px] font-bold text-secondary'>Status: {output.status}</p>
+      )}
+    </div>
+  );
+};
+
 const ToolCallGroup = ({chips}: {chips: ToolChipData[]}) => {
   const [expanded, setExpanded] = useState(false);
   const allDone = chips.every((c) => c.done);
@@ -262,9 +340,9 @@ const ToolCallGroup = ({chips}: {chips: ToolChipData[]}) => {
   if (!allDone) {
     return (
       <div className='flex flex-wrap gap-1 mb-1.5'>
-        {chips.map((chip) => (
+        {chips.map((chip, index) => (
           <ToolCallChip
-            key={chip.toolName}
+            key={`${chip.toolName}-${index}`}
             label={chip.label}
             done={chip.done}
           />
@@ -291,9 +369,9 @@ const ToolCallGroup = ({chips}: {chips: ToolChipData[]}) => {
       </button>
       {expanded && (
         <div className='flex flex-wrap gap-1 mt-1.5 pl-[18px]'>
-          {chips.map((chip) => (
+          {chips.map((chip, index) => (
             <ToolCallChip
-              key={chip.toolName}
+              key={`${chip.toolName}-${index}`}
               label={chip.label}
               done={chip.done}
             />
@@ -427,10 +505,16 @@ const usePersistentChat = (sessionId: string | null) => {
 
 // ----- Main component -----
 
-const AITeamChat = () => {
+interface AITeamChatProps {
+  initialDraft?: WeeklyPlanQuickAskDraft | null;
+  onInitialDraftConsumed?: () => void;
+}
+
+const AITeamChat = ({
+  initialDraft = null,
+  onInitialDraftConsumed,
+}: AITeamChatProps) => {
   const [activePersona, setActivePersona] = useState<PersonaId>('coach');
-  const [requestedCoachIntake, setRequestedCoachIntake] =
-    useState<CoachIntakeIntent | null>(null);
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
@@ -456,11 +540,6 @@ const AITeamChat = () => {
   );
   const [activeTrainingBlock, setActiveTrainingBlock] =
     useState<CachedTrainingBlock | null>(null);
-  const [savedTrainingFeedbackByWeek, setSavedTrainingFeedbackByWeek] = useState<
-    Record<string, CachedTrainingFeedback>
-  >({});
-  const [submittingTrainingFeedbackWeek, setSubmittingTrainingFeedbackWeek] =
-    useState<string | null>(null);
   const [isWeeklyPlanGenerating, setIsWeeklyPlanGenerating] = useState(false);
   const [weeklyPlanProgress, setWeeklyPlanProgress] = useState<AiProgressEvent[]>(
     [],
@@ -475,7 +554,17 @@ const AITeamChat = () => {
   >(null);
   const [pendingSendPayload, setPendingSendPayload] =
     useState<PendingSendPayload | null>(null);
+  const [chatInputPrefill, setChatInputPrefill] =
+    useState<ChatInputPrefillDraft | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const handledDraftIdRef = useRef<string | null>(null);
+  const processingDraftIdRef = useRef<string | null>(null);
+  const activeSessionIdOnUnmountRef = useRef<string | null>(null);
+  const activeSessionMessageCountOnUnmountRef = useRef(0);
+  const activeChatMessageCountOnUnmountRef = useRef(0);
+  const activeDeleteSessionOnUnmountRef = useRef<((id: string) => Promise<void>) | null>(
+    null,
+  );
 
   const {athlete} = useStravaAuth();
   const {settings} = useSettings();
@@ -487,28 +576,20 @@ const AITeamChat = () => {
   const coachSessions = useChatSessions(athleteId, 'coach');
   const nutritionistSessions = useChatSessions(athleteId, 'nutritionist');
   const physioSessions = useChatSessions(athleteId, 'physio');
-  const orchestratorSessions = useChatSessions(athleteId, 'orchestrator');
 
   const sessionManagers = useMemo(
     () => ({
       coach: coachSessions,
       nutritionist: nutritionistSessions,
       physio: physioSessions,
-      orchestrator: orchestratorSessions,
     }),
-    [coachSessions, nutritionistSessions, physioSessions, orchestratorSessions],
+    [coachSessions, nutritionistSessions, physioSessions],
   );
 
   const activeSM = sessionManagers[activePersona];
   const activeSession = activeSM.activeSession;
   const currentPersona =
     visiblePersonas.find((p) => p.id === activePersona) ?? visiblePersonas[0];
-
-  useEffect(() => {
-    if (activePersona === 'orchestrator') {
-      setActivePersona('coach');
-    }
-  }, [activePersona]);
 
   // Persistence
   const {loadMessages, persistMessage, getMemorySummary, maybeTriggerSummary} =
@@ -575,7 +656,7 @@ const AITeamChat = () => {
   }, [activeSession?.id, athleteId]);
 
   useEffect(() => {
-    if (activePersona !== 'orchestrator' || !activeSession?.id || !athleteId) {
+    if ((activePersona as string) !== 'orchestrator' || !activeSession?.id || !athleteId) {
       setOrchestratorGoals([]);
       setOrchestratorPlanItems([]);
       setOrchestratorBlockers([]);
@@ -680,14 +761,6 @@ const AITeamChat = () => {
         return;
       }
 
-      if (activePersona === 'coach') {
-        const intakeIntent = detectCoachIntakeIntent(text);
-        if (intakeIntent) {
-          setRequestedCoachIntake(intakeIntent);
-          return;
-        }
-      }
-
       // For long sessions, trim messages to context window
       const messages = activeChat.messages;
       const trimmedMessages =
@@ -740,7 +813,6 @@ const AITeamChat = () => {
       activeSM,
       athleteId,
       resolveAll,
-      setRequestedCoachIntake,
       setPendingSendPayload,
     ],
   );
@@ -792,6 +864,69 @@ const AITeamChat = () => {
     lastPersistedCount.current = 0;
   }, []);
 
+  useEffect(() => {
+    activeSessionIdOnUnmountRef.current = activeSession?.id ?? null;
+    activeSessionMessageCountOnUnmountRef.current = activeSession?.messageCount ?? 0;
+    activeChatMessageCountOnUnmountRef.current = activeChat.messages.length;
+    activeDeleteSessionOnUnmountRef.current = activeSM.deleteSession;
+  }, [
+    activeSession?.id,
+    activeSession?.messageCount,
+    activeChat.messages.length,
+    activeSM.deleteSession,
+  ]);
+
+  useEffect(
+    () => () => {
+      const sessionId = activeSessionIdOnUnmountRef.current;
+      const persistedCount = activeSessionMessageCountOnUnmountRef.current;
+      const inMemoryCount = activeChatMessageCountOnUnmountRef.current;
+      const deleteSession = activeDeleteSessionOnUnmountRef.current;
+      if (!sessionId || !deleteSession) return;
+      if (persistedCount > 0 || inMemoryCount > 0) return;
+      void deleteSession(sessionId);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!initialDraft) return;
+    if (handledDraftIdRef.current === initialDraft.id) return;
+    if (processingDraftIdRef.current === initialDraft.id) return;
+
+    if (activePersona !== initialDraft.persona) {
+      handlePersonaSwitch(initialDraft.persona);
+      return;
+    }
+
+    processingDraftIdRef.current = initialDraft.id;
+
+    const bootstrapDraft = async () => {
+      try {
+        if (initialDraft.startNewConversation) {
+          await handleNewConversation();
+        }
+        setChatInputPrefill({
+          id: initialDraft.id,
+          text: initialDraft.text,
+          mentions: initialDraft.mentions,
+        });
+        handledDraftIdRef.current = initialDraft.id;
+        onInitialDraftConsumed?.();
+      } finally {
+        processingDraftIdRef.current = null;
+      }
+    };
+
+    void bootstrapDraft();
+  }, [
+    activePersona,
+    handleNewConversation,
+    handlePersonaSwitch,
+    initialDraft,
+    onInitialDraftConsumed,
+  ]);
+
   const isStreaming = activeChat.status === 'streaming';
   const hasError = activeChat.error;
   const parsedChatError = useMemo(() => {
@@ -806,48 +941,6 @@ const AITeamChat = () => {
       return parseAiErrorFromUnknown({error: rawMessage}, rawMessage);
     }
   }, [activeChat.error]);
-
-  const handleSubmitTrainingFeedback = useCallback(
-    async (
-      weekStart: string,
-      values: {
-        adherence: number;
-        effort: number;
-        fatigue: number;
-        soreness: number;
-        mood: number;
-        confidence: number;
-        notes?: string;
-      },
-    ) => {
-      if (!athleteId || !weekStart) return;
-      setSubmittingTrainingFeedbackWeek(weekStart);
-      try {
-        const now = Date.now();
-        const existing = savedTrainingFeedbackByWeek[weekStart];
-        const record: CachedTrainingFeedback = {
-          id: `${athleteId}:${weekStart}`,
-          athleteId,
-          weekStart,
-          adherence: values.adherence,
-          effort: values.effort,
-          fatigue: values.fatigue,
-          soreness: values.soreness,
-          mood: values.mood,
-          confidence: values.confidence,
-          notes: values.notes?.trim() ? values.notes.trim() : null,
-          source: 'coach_chat',
-          createdAt: existing?.createdAt ?? now,
-          updatedAt: now,
-        };
-        await neonSyncTrainingFeedback(record);
-        setSavedTrainingFeedbackByWeek((prev) => ({...prev, [weekStart]: record}));
-      } finally {
-        setSubmittingTrainingFeedbackWeek(null);
-      }
-    },
-    [athleteId, savedTrainingFeedbackByWeek],
-  );
 
   const handleGenerateWeeklyPlanFromOrchestrator = useCallback(async () => {
     if (!athleteId || !activeSession?.id || isWeeklyPlanGenerating) return;
@@ -1059,7 +1152,7 @@ const AITeamChat = () => {
   );
 
   useEffect(() => {
-    if (activePersona !== 'orchestrator') {
+    if ((activePersona as string) !== 'orchestrator') {
       setMobileOrchestratorExpanded(false);
       setDesktopOrchestratorExpanded(false);
     }
@@ -1378,24 +1471,6 @@ const AITeamChat = () => {
           })}
         </div>
 
-        <CoachGuidedIntakePanel
-          activePersonaId={activePersona}
-          athleteId={athleteId}
-          selectedModel={selectedModel}
-          launchIntent={requestedCoachIntake}
-          onLaunchHandled={() => setRequestedCoachIntake(null)}
-          onWeeklyPlanCreated={async () => {
-            if (!athleteId) return;
-            const weeklyPlan = await neonGetActiveWeeklyPlan(athleteId);
-            setActiveWeeklyPlan(weeklyPlan ?? null);
-          }}
-          onTrainingBlockCreated={async () => {
-            if (!athleteId) return;
-            const trainingBlock = await neonGetActiveTrainingBlock(athleteId);
-            setActiveTrainingBlock(trainingBlock ?? null);
-          }}
-        />
-
         {/* Desktop header — new chat button top-right */}
         <div
           className={`hidden md:flex items-center justify-between px-3 py-2 border-b-[5px] border-border bg-neo-stripe ${currentPersona.color}`}
@@ -1427,7 +1502,7 @@ const AITeamChat = () => {
           </div>
         )}
 
-        {activePersona === 'orchestrator' && (
+        {(activePersona as string) === 'orchestrator' && (
           <>
             {/* Mobile: compact summary, collapsed by default */}
             <div className='md:hidden border-b-3 border-border bg-background p-2'>
@@ -1543,7 +1618,7 @@ const AITeamChat = () => {
                       'Ask about fueling, hydration, and recovery nutrition'}
                     {activePersona === 'physio' &&
                       'Ask about injury prevention, mobility, and recovery'}
-                    {activePersona === 'orchestrator' &&
+                    {(activePersona as string) === 'orchestrator' &&
                       'Coordinate goals, plan queue, blockers, and specialist handoffs'}
                   </p>
                 </div>
@@ -1609,34 +1684,39 @@ const AITeamChat = () => {
                 };
               });
 
-            const trainingFeedbackRequestPart = (msg.parts ?? []).find(
-              (part) =>
-                part.type === 'tool-requestTrainingFeedback' &&
-                'state' in part &&
-                (part as {state: string}).state === 'output-available',
-            ) as
-              | {
-                  input?: {weekStart?: string; prompt?: string};
-                  output?: {weekStart?: string; prompt?: string};
-                }
-              | undefined;
-            const requestedWeekStart =
-              trainingFeedbackRequestPart?.output?.weekStart ??
-              trainingFeedbackRequestPart?.input?.weekStart ??
-              null;
-            const trainingFeedbackPrompt =
-              trainingFeedbackRequestPart?.output?.prompt ??
-              trainingFeedbackRequestPart?.input?.prompt ??
-              'Share how your training week felt.';
-            const savedTrainingFeedback = requestedWeekStart
-              ? savedTrainingFeedbackByWeek[requestedWeekStart]
-              : null;
+            const planningToolResults = (msg.parts ?? [])
+              .filter(
+                (part) =>
+                  part.type.startsWith('tool-') &&
+                  (part.type === 'tool-startPlanningFlow' ||
+                    part.type === 'tool-setPlanningField' ||
+                    part.type === 'tool-getPlanningState' ||
+                    part.type === 'tool-confirmPlanningState' ||
+                    part.type === 'tool-executePlanningGeneration') &&
+                  'state' in part &&
+                  (part as {state?: string}).state === 'output-available' &&
+                  'output' in part,
+              )
+              .map((part, idx) => ({
+                id: `${msg.id}-planning-${idx}`,
+                toolName: part.type.replace(/^tool-/, ''),
+                output: (part as {output?: PlanningToolOutput}).output ?? {},
+              }));
+            const hasPlanningStateResult = planningToolResults.some(
+              (result) => result.toolName === 'getPlanningState',
+            );
+            const visiblePlanningToolResults = hasPlanningStateResult
+              ? planningToolResults.filter(
+                  (result) => result.toolName !== 'setPlanningField',
+                )
+              : planningToolResults;
 
             // Skip if no content at all (suggestFollowUps-only messages are hidden)
             if (
               !textContent &&
               !hasSuggestionTool &&
-              allToolChipParts.length === 0
+              allToolChipParts.length === 0 &&
+              visiblePlanningToolResults.length === 0
             )
               return null;
             // If the only parts are suggestFollowUps with no text or other tools, skip the bubble
@@ -1705,6 +1785,11 @@ const AITeamChat = () => {
                       {allToolChipParts.length > 0 && (
                         <ToolCallGroup chips={allToolChipParts} />
                       )}
+                      {visiblePlanningToolResults.map((result) => (
+                        <div key={result.id}>
+                          {renderPlanningToolResult(result.toolName, result.output)}
+                        </div>
+                      ))}
                       {textContent && (
                         <div className='prose prose-sm dark:prose-invert overflow-hidden max-w-full prose-p:mb-2 prose-p:last:mb-0'>
                           <MarkdownContent content={textContent} />
@@ -1714,27 +1799,6 @@ const AITeamChat = () => {
                             msg.role === 'assistant' && (
                               <span className='inline-block w-2 h-4 bg-primary animate-neo-blink ml-0.5 align-middle' />
                             )}
-                        </div>
-                      )}
-                      {requestedWeekStart && (
-                        <div className='mt-2'>
-                          <WeeklyReflectionForm
-                            weekStart={requestedWeekStart}
-                            prompt={trainingFeedbackPrompt}
-                            initialValues={savedTrainingFeedback}
-                            compact
-                            isSubmitting={
-                              submittingTrainingFeedbackWeek === requestedWeekStart
-                            }
-                            submitLabel={
-                              savedTrainingFeedback
-                                ? 'Update reflection'
-                                : 'Submit reflection'
-                            }
-                            onSubmit={(values) =>
-                              handleSubmitTrainingFeedback(requestedWeekStart, values)
-                            }
-                          />
                         </div>
                       )}
                     </>
@@ -1788,6 +1852,8 @@ const AITeamChat = () => {
           onSend={handleSend}
           onStop={activeChat.stop}
           isStreaming={isStreaming}
+          prefillDraft={chatInputPrefill}
+          onPrefillApplied={() => setChatInputPrefill(null)}
         />
       </div>
 

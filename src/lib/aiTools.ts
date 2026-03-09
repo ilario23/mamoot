@@ -7,6 +7,10 @@
 // are re-exported for client-side rendering of tool results.
 
 import {z} from 'zod';
+import type {
+  OptimizationPriority,
+  TrainingStrategyPreset,
+} from '@/lib/trainingStrategy';
 
 // ----- Plan Session -----
 
@@ -128,46 +132,6 @@ export const saveWeeklyPreferencesSchema = z.object({
     ),
 });
 
-// ----- Training Feedback -----
-
-export const requestTrainingFeedbackSchema = z.object({
-  weekStart: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional()
-    .describe('ISO Monday date for the training week being reviewed'),
-  prompt: z
-    .string()
-    .optional()
-    .describe('Short coach prompt asking the athlete to reflect on the week'),
-});
-
-export const saveTrainingFeedbackSchema = z.object({
-  weekStart: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .describe('ISO Monday date for the training week being reviewed'),
-  adherence: z.number().min(1).max(5),
-  effort: z.number().min(1).max(5),
-  fatigue: z.number().min(1).max(5),
-  soreness: z.number().min(1).max(5),
-  mood: z.number().min(1).max(5),
-  confidence: z.number().min(1).max(5),
-  notes: z
-    .string()
-    .optional()
-    .describe('Optional free-text summary of how training felt'),
-});
-
-export const getTrainingFeedbackSchema = z.object({
-  weekStart: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional()
-    .describe('ISO Monday date for exact lookup'),
-  limit: z.number().int().min(1).max(12).optional(),
-});
-
 // ----- Update Training Block -----
 
 export const updateTrainingBlockSchema = z.object({
@@ -183,13 +147,6 @@ export const updateTrainingBlockSchema = z.object({
 });
 
 export type UpdateTrainingBlockInput = z.infer<typeof updateTrainingBlockSchema>;
-export type RequestTrainingFeedbackInput = z.infer<
-  typeof requestTrainingFeedbackSchema
->;
-export type SaveTrainingFeedbackInput = z.infer<
-  typeof saveTrainingFeedbackSchema
->;
-export type GetTrainingFeedbackInput = z.infer<typeof getTrainingFeedbackSchema>;
 
 export const adaptTrainingBlockSchema = z.object({
   adaptationType: z.enum([
@@ -285,3 +242,255 @@ export type OrchestratorHandoffInput = z.infer<typeof orchestratorHandoffSchema>
 export type OrchestratorHandoffUpdateInput = z.infer<
   typeof orchestratorHandoffUpdateSchema
 >;
+
+// ----- Chat planning flow tools (Coach) -----
+
+export const planningFlowIntentSchema = z.enum([
+  'weekly_plan',
+  'weekly_plan_edit',
+  'training_block',
+]);
+
+const ensureNonEmptyPatch = <T extends z.ZodRawShape>(shape: T) =>
+  z
+    .object(shape)
+    .partial()
+    .refine(
+      (value) =>
+        Object.values(value).some(
+          (fieldValue) => fieldValue !== undefined && fieldValue !== null,
+        ),
+      'At least one field must be provided in patch',
+    );
+
+const normalizeIsoDate = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const directMatch = /^\d{4}-\d{2}-\d{2}$/.test(trimmed);
+  if (directMatch) return trimmed;
+  const embeddedMatch = trimmed.match(/\d{4}-\d{2}-\d{2}/);
+  return embeddedMatch?.[0];
+};
+
+const normalizeTrainingBlockPatch = (
+  patch: unknown,
+): Record<string, unknown> | unknown => {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return patch;
+  }
+
+  const value = patch as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {...value};
+
+  if (typeof normalized.goalEvent !== 'string' || !normalized.goalEvent.trim()) {
+    const aliasedGoalEvent = [
+      value.goal_event,
+      value.eventName,
+      value.event,
+      value.goal,
+    ].find((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0);
+    if (aliasedGoalEvent) {
+      normalized.goalEvent = aliasedGoalEvent.trim();
+    }
+  }
+
+  if (typeof normalized.goalDate !== 'string' || !normalized.goalDate.trim()) {
+    const aliasedGoalDate = [
+      value.goal_date,
+      value.eventDate,
+      value.raceDate,
+      value.date,
+    ].find((candidate) => candidate !== undefined);
+    const parsedGoalDate = normalizeIsoDate(aliasedGoalDate);
+    if (parsedGoalDate) {
+      normalized.goalDate = parsedGoalDate;
+    }
+  } else {
+    const parsedGoalDate = normalizeIsoDate(normalized.goalDate);
+    if (parsedGoalDate) {
+      normalized.goalDate = parsedGoalDate;
+    }
+  }
+
+  return normalized;
+};
+
+const weeklyPlanPatchSchema = ensureNonEmptyPatch({
+  targetWeek: z.enum(['current', 'next']),
+  runDaysPerWeek: z.number().int().min(3).max(7),
+  unavailableDays: z.array(z.string()).max(7),
+  preferredLongRunDay: z.string().min(2),
+  intensity: z.enum(['conservative', 'balanced', 'aggressive']),
+  focus: z.string().min(1),
+  generationMode: z.enum(['full', 'remaining_days']),
+  notes: z.string(),
+  strategySelectionMode: z.enum(['auto', 'preset']),
+  strategyPreset: z
+    .enum([
+      'polarized_80_20',
+      'pyramidal',
+      'daniels_periodized',
+      'lydiard_periodized',
+    ] as const)
+    .optional(),
+  optimizationPriority: z.enum([
+    'race_performance',
+    'fitness_growth',
+    'injury_risk',
+  ] as const),
+});
+
+const weeklyPlanEditPatchSchema = ensureNonEmptyPatch({
+  sourcePlanId: z.string().min(1),
+  generationMode: z.enum(['full', 'remaining_days']),
+  editFocus: z.enum([
+    'small_adjustments',
+    'moderate_adjustments',
+    'major_rework',
+  ]),
+  editGoal: z.string().min(1),
+  constraints: z.string().min(1),
+  daySpecificNotes: z.string(),
+  notes: z.string(),
+  strategySelectionMode: z.enum(['auto', 'preset']),
+  strategyPreset: z
+    .enum([
+      'polarized_80_20',
+      'pyramidal',
+      'daniels_periodized',
+      'lydiard_periodized',
+    ] as const)
+    .optional(),
+  optimizationPriority: z.enum([
+    'race_performance',
+    'fitness_growth',
+    'injury_risk',
+  ] as const),
+});
+
+const trainingBlockPatchSchema = ensureNonEmptyPatch({
+  goalEvent: z.string().min(1),
+  goalDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .describe('ISO date, e.g. 2026-12-01'),
+  totalWeeks: z.number().int().min(4).max(24),
+  runDaysPerWeek: z.number().int().min(3).max(7),
+  unavailableDays: z.array(z.string()).max(7),
+  weeklyKmBackground: z.string(),
+  notes: z.string(),
+  strategySelectionMode: z.enum(['auto', 'preset']),
+  strategyPreset: z
+    .enum([
+      'polarized_80_20',
+      'pyramidal',
+      'daniels_periodized',
+      'lydiard_periodized',
+    ] as const)
+    .optional(),
+  optimizationPriority: z.enum([
+    'race_performance',
+    'fitness_growth',
+    'injury_risk',
+  ] as const),
+});
+
+export const startPlanningFlowSchema = z.object({
+  flow: planningFlowIntentSchema,
+  reset: z.boolean().default(true),
+});
+
+export const setPlanningFieldSchema = z
+  .preprocess((rawInput) => {
+    if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+      return rawInput;
+    }
+
+    const value = rawInput as {
+      flow?: PlanningFlowIntent;
+      patch?: unknown;
+    };
+
+    if (value.flow !== 'training_block') {
+      return rawInput;
+    }
+
+    return {
+      ...value,
+      patch: normalizeTrainingBlockPatch(value.patch),
+    };
+  }, z.object({
+    flow: planningFlowIntentSchema,
+    patch: z.union([
+      trainingBlockPatchSchema,
+      weeklyPlanEditPatchSchema,
+      weeklyPlanPatchSchema,
+    ]),
+  }))
+  .superRefine((value, ctx) => {
+    if (value.flow === 'weekly_plan') {
+      const parsed = weeklyPlanPatchSchema.safeParse(value.patch);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['patch', ...issue.path],
+            message: issue.message,
+          });
+        }
+      }
+      return;
+    }
+
+    if (value.flow === 'weekly_plan_edit') {
+      const parsed = weeklyPlanEditPatchSchema.safeParse(value.patch);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['patch', ...issue.path],
+            message: issue.message,
+          });
+        }
+      }
+      return;
+    }
+
+    const parsed = trainingBlockPatchSchema.safeParse(value.patch);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['patch', ...issue.path],
+          message: issue.message,
+        });
+      }
+    }
+  });
+
+export const getPlanningStateSchema = z.object({
+  flow: planningFlowIntentSchema.optional(),
+});
+
+export const confirmPlanningStateSchema = z.object({
+  flow: planningFlowIntentSchema.optional(),
+  confirmed: z.boolean().default(true),
+});
+
+export const executePlanningGenerationSchema = z.object({
+  flow: planningFlowIntentSchema.optional(),
+  dryRun: z.boolean().default(false),
+});
+
+export type PlanningFlowIntent = z.infer<typeof planningFlowIntentSchema>;
+export type StartPlanningFlowInput = z.infer<typeof startPlanningFlowSchema>;
+export type SetPlanningFieldInput = z.infer<typeof setPlanningFieldSchema>;
+export type GetPlanningStateInput = z.infer<typeof getPlanningStateSchema>;
+export type ConfirmPlanningStateInput = z.infer<typeof confirmPlanningStateSchema>;
+export type ExecutePlanningGenerationInput = z.infer<
+  typeof executePlanningGenerationSchema
+>;
+
+export type PlanningStrategyPreset = TrainingStrategyPreset;
+export type PlanningOptimizationPriority = OptimizationPriority;

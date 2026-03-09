@@ -6,12 +6,8 @@ import {
   userSettings,
   trainingBlocks,
   athleteReadinessSignals,
-  chatSessions,
-  orchestratorGoals,
-  orchestratorPlanItems,
-  orchestratorHandoffs,
 } from '@/db/schema';
-import {eq, desc, and, ne, isNull, sql} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull, sql, gte} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
 import {
@@ -50,6 +46,7 @@ import {createAiErrorPayload} from '@/lib/aiErrors';
 import {resolveMultiAgentRuntimeConfig} from '@/lib/multiAgentContracts';
 
 export const maxDuration = 120;
+const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
 
 const ALLOWED_MODELS: Record<string, () => ReturnType<typeof openai | typeof anthropic>> = {
   'gpt-4o-mini': () => openai('gpt-4o-mini'),
@@ -83,6 +80,12 @@ const getNextMonday = (): string => {
   const monday = new Date(now);
   monday.setDate(now.getDate() + daysUntilMonday);
   return monday.toISOString().slice(0, 10);
+};
+
+const getActivityContextStartDate = (): string => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - ACTIVITY_CONTEXT_WINDOW_DAYS);
+  return cutoff.toISOString().slice(0, 10);
 };
 
 const weeksUntil = (startIso: string, endIso: string): number => {
@@ -166,7 +169,6 @@ export async function POST(req: Request) {
     strategySelectionMode?: StrategySelectionMode;
     strategyPreset?: TrainingStrategyPreset;
     optimizationPriority?: OptimizationPriority;
-    orchestratorSessionId?: string;
     useMultiAgent?: boolean;
   };
   const {
@@ -184,7 +186,6 @@ export async function POST(req: Request) {
     strategySelectionMode,
     strategyPreset,
     optimizationPriority,
-    orchestratorSessionId,
     useMultiAgent,
   } = parsedData;
 
@@ -253,22 +254,6 @@ export async function POST(req: Request) {
     let collaborationSummary =
       'Coach-led macro periodization with physio safety review.';
 
-    const resolveOrchestratorSessionId = async (): Promise<string | null> => {
-      if (orchestratorSessionId) return orchestratorSessionId;
-      const latestOrchestratorSessions = await db
-        .select()
-        .from(chatSessions)
-        .where(
-          and(
-            eq(chatSessions.athleteId, athleteId),
-            eq(chatSessions.persona, 'orchestrator'),
-          ),
-        )
-        .orderBy(desc(chatSessions.updatedAt))
-        .limit(1);
-      return latestOrchestratorSessions[0]?.id ?? null;
-    };
-
     const maybeApplyPhysioSafetyReview = async (
       candidate: TrainingBlockOutput,
       context: {
@@ -317,67 +302,6 @@ ${JSON.stringify(candidate)}
       return reviewed;
     };
 
-    const persistOrchestratorSummary = async (input: {
-      blockId: string;
-      weekCount: number;
-      mode: 'create' | 'adapt';
-      goalEventValue: string;
-      goalDateValue: string;
-    }): Promise<void> => {
-      const resolvedOrchestratorSessionId = await resolveOrchestratorSessionId();
-      if (!resolvedOrchestratorSessionId) return;
-      const nowMs = Date.now();
-      const detail = JSON.stringify({
-        type: 'training_block_multi_agent_summary',
-        blockId: input.blockId,
-        mode: input.mode,
-        goalEvent: input.goalEventValue,
-        goalDate: input.goalDateValue,
-        weekCount: input.weekCount,
-        roundCount,
-        specialistTurnsUsed,
-        repairTurnsUsed,
-        repairApplied,
-        collaborationSummary,
-      });
-
-      await db.insert(orchestratorPlanItems).values({
-        id: crypto.randomUUID(),
-        athleteId,
-        sessionId: resolvedOrchestratorSessionId,
-        title: `Training block ${input.mode}d (${input.goalEventValue})`,
-        detail,
-        status: 'done',
-        ownerPersona: 'coach',
-        dueDate: input.goalDateValue,
-        createdAt: nowMs,
-        updatedAt: nowMs,
-      });
-
-      await db.insert(orchestratorHandoffs).values({
-        id: crypto.randomUUID(),
-        athleteId,
-        sessionId: resolvedOrchestratorSessionId,
-        targetPersona: 'physio',
-        title: `Block safety review (${input.goalEventValue})`,
-        detail,
-        status: 'done',
-        createdAt: nowMs,
-        updatedAt: nowMs,
-      });
-
-      await db.insert(orchestratorGoals).values({
-        id: crypto.randomUUID(),
-        athleteId,
-        sessionId: resolvedOrchestratorSessionId,
-        title: `Safely progress toward ${input.goalEventValue}`,
-        detail,
-        status: 'active',
-        createdAt: nowMs,
-        updatedAt: nowMs,
-      });
-    };
-
     if (resolvedMode === 'adapt') {
       const sourceRows = sourceBlockId
         ? await db
@@ -415,12 +339,18 @@ ${JSON.stringify(candidate)}
         );
       }
 
+      const activityContextStartDate = getActivityContextStartDate();
       const [settingsRows, activityRows, readinessRows] = await Promise.all([
         db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
         db
           .select()
           .from(activitiesTable)
-          .where(eq(activitiesTable.athleteId, athleteId))
+          .where(
+            and(
+              eq(activitiesTable.athleteId, athleteId),
+              gte(activitiesTable.date, activityContextStartDate),
+            ),
+          )
           .orderBy(desc(activitiesTable.date)),
         db
           .select()
@@ -457,12 +387,9 @@ ${JSON.stringify(candidate)}
       const effectiveWeek = Math.max(1, effectiveFromWeek ?? currentWeek);
       const eventPriority = event?.priority ?? 'B';
 
-      const recentActivities = allActivities.filter((a) => {
-        const d = new Date(a.date);
-        return d >= new Date(now.getTime() - 28 * 86400000);
-      });
+      const recentActivities = allActivities;
       const recentVolume = recentActivities.reduce((sum, a) => sum + a.distance, 0);
-      const avgWeeklyVolume = recentVolume > 0 ? recentVolume / 4 : 0;
+      const avgWeeklyVolume = recentVolume > 0 ? recentVolume / (ACTIVITY_CONTEXT_WINDOW_DAYS / 7) : 0;
       let latestSnapshot = getLatestMetricsSnapshot([]);
       if (settings) {
         try {
@@ -546,7 +473,7 @@ ${adaptationType === 'shift_target_date' ? `- New goal date requested: ${goalDat
 - Total Weeks: ${sourceBlock.totalWeeks}
 - Start Date: ${sourceBlock.startDate}
 - Current Week: ${currentWeek}
-- Avg weekly volume (last 4 weeks): ${avgWeeklyVolume.toFixed(1)} km
+- Avg weekly volume (last 4 months): ${avgWeeklyVolume.toFixed(1)} km
 - Current CTL/ATL/TSB: ${latestSnapshot.ctl ?? 'n/a'} / ${latestSnapshot.atl ?? 'n/a'} / ${latestSnapshot.tsb ?? 'n/a'}
 - Current ACWR: ${latestSnapshot.acwr ?? 'n/a'}
 
@@ -632,14 +559,6 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
             isNull(trainingBlocks.deletedAt),
           ),
         );
-      await persistOrchestratorSummary({
-        blockId,
-        weekCount: sourceBlock.totalWeeks,
-        mode: resolvedMode,
-        goalEventValue: resolvedGoalEvent,
-        goalDateValue: resolvedGoalDate,
-      });
-
       logAiTrace(trace, 'request_finished', {
         athleteId,
         model: resolvedModel,
@@ -704,12 +623,18 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
     let settingsRows: Array<typeof userSettings.$inferSelect> = [];
     let activityRows: Array<typeof activitiesTable.$inferSelect> = [];
     let readinessRows: Array<typeof athleteReadinessSignals.$inferSelect> = [];
+    const activityContextStartDate = getActivityContextStartDate();
     [settingsRows, activityRows, readinessRows] = await Promise.all([
       db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
       db
         .select()
         .from(activitiesTable)
-        .where(eq(activitiesTable.athleteId, athleteId))
+        .where(
+          and(
+            eq(activitiesTable.athleteId, athleteId),
+            gte(activitiesTable.date, activityContextStartDate),
+          ),
+        )
         .orderBy(desc(activitiesTable.date)),
       readinessTableExists
         ? db
@@ -744,11 +669,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
       (settings?.strategyPreset as TrainingStrategyPreset | undefined) ??
       'polarized_80_20';
 
-    const now = new Date();
-    const fourWeeksAgo = new Date(now.getTime() - 28 * 86400000);
-    const recentActivities = allActivities.filter(
-      (a) => new Date(a.date) >= fourWeeksAgo,
-    );
+    const recentActivities = allActivities;
 
     const weeklyVolumes: Record<string, {distance: number; count: number}> = {};
     for (const act of recentActivities) {
@@ -866,7 +787,7 @@ ${settings?.trainingBalance != null ? `- Training Balance: ${settings.trainingBa
 - Risk level: ${riskIntelligence.riskLevel} (${riskIntelligence.riskScore}/100)
 - Current avg weekly volume: ${avgWeeklyKm.toFixed(1)} km
 
-## Recent Training (last 4 weeks)
+## Recent Training (last 4 months)
 ${recentTrainingLines || 'No recent training data'}${acwrText}
 - Current CTL/ATL/TSB: ${latestSnapshot.ctl ?? 'n/a'} / ${latestSnapshot.atl ?? 'n/a'} / ${latestSnapshot.tsb ?? 'n/a'}
 
@@ -958,14 +879,6 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
           isNull(trainingBlocks.deletedAt),
         ),
       );
-    await persistOrchestratorSummary({
-      blockId,
-      weekCount: totalWeeks,
-      mode: resolvedMode,
-      goalEventValue: goalEvent,
-      goalDateValue: goalDate,
-    });
-
     console.log(`[TrainingBlock] Block saved: ${blockId}`);
     console.log(`[TrainingBlock] ========================================\n`);
     logAiTrace(trace, 'request_finished', {

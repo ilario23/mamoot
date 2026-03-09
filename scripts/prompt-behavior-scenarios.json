@@ -2,10 +2,11 @@
   {
     "id": "coach-redirection-weekly-plan-page",
     "persona": "coach",
-    "description": "Coach redirects weekly-plan requests to Weekly Plan page",
+    "description": "Coach handles weekly-plan requests via chat planning tools",
     "mustInclude": [
       "You **MUST NOT** write out weekly training plans",
-      "Head over to the **Weekly Plan** page and tap **Generate Weekly Plan**"
+      "startPlanningFlow",
+      "executePlanningGeneration"
     ]
   },
   {
@@ -22,6 +23,17 @@
     "description": "Coach persists weekly constraints with tool",
     "mustInclude": [
       "ALWAYS call the **saveWeeklyPreferences** tool"
+    ]
+  },
+  {
+    "id": "coach-chat-native-training-block-flow",
+    "persona": "coach",
+    "description": "Coach runs chat-native training-block planning flow",
+    "mustInclude": [
+      "startPlanningFlow",
+      "training_block",
+      "confirmPlanningState",
+      "executePlanningGeneration"
     ]
   },
   {
