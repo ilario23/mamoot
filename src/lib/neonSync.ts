@@ -19,6 +19,7 @@ import type {
   CachedZoneBreakdown,
   CachedDashboardCache,
 } from './cacheTypes';
+import {dbFetch} from './dbClient';
 
 const API = '/api/db';
 
@@ -27,7 +28,7 @@ const API = '/api/db';
 /** Awaitable POST to Neon. Resolves silently on success, logs on failure. */
 const postToNeon = async (table: string, data: unknown): Promise<void> => {
   try {
-    const res = await fetch(`${API}/${table}`, {
+    const res = await dbFetch(`${API}/${table}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data),
@@ -47,7 +48,7 @@ const getFromNeon = async <T>(
 ): Promise<T | null> => {
   try {
     const url = pk != null ? `${API}/${table}?pk=${pk}` : `${API}/${table}`;
-    const res = await fetch(url);
+    const res = await dbFetch(url);
     if (!res.ok) return null;
     const data = await res.json();
     // For array endpoints, return null if empty
@@ -74,8 +75,10 @@ export const neonGetRecentActivities = async (
   afterDate: string,
 ): Promise<CachedActivity[] | null> => {
   try {
-    const res = await fetch(
+    const res = await dbFetch(
       `${API}/activities?athleteId=${athleteId}&after=${afterDate}`,
+      {},
+      athleteId,
     );
     if (!res.ok) return null;
     const data = await res.json();
@@ -96,8 +99,10 @@ export const neonGetActivitiesPaginated = async (
   offset = 0,
 ): Promise<CachedActivity[] | null> => {
   try {
-    const res = await fetch(
+    const res = await dbFetch(
       `${API}/activities?athleteId=${athleteId}&limit=${limit}&offset=${offset}`,
+      {},
+      athleteId,
     );
     if (!res.ok) return null;
     const data = await res.json();
@@ -151,8 +156,10 @@ export const neonGetActivityDetailsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(
+      const res = await dbFetch(
         `${API}/activity-details?athleteId=${athleteId}&pks=${pks}`,
+        {},
+        athleteId,
       );
       if (!res.ok) continue;
       const data: CachedActivityDetail[] = await res.json();
@@ -191,8 +198,10 @@ export const neonGetActivityLabelsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(
+      const res = await dbFetch(
         `${API}/activity-labels?athleteId=${athleteId}&pks=${pks}`,
+        {},
+        athleteId,
       );
       if (!res.ok) continue;
       const data: CachedActivityLabel[] = await res.json();
@@ -254,8 +263,10 @@ export const neonGetActivityStreamsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(
+      const res = await dbFetch(
         `${API}/activity-streams?athleteId=${athleteId}&pks=${pks}`,
+        {},
+        athleteId,
       );
       if (!res.ok) continue;
       const data: CachedActivityStreams[] = await res.json();
@@ -330,7 +341,11 @@ export const neonGetAllZoneBreakdowns = async (
   athleteId: number,
 ): Promise<CachedZoneBreakdown[]> => {
   try {
-    const res = await fetch(`${API}/zone-breakdowns?athleteId=${athleteId}`);
+    const res = await dbFetch(
+      `${API}/zone-breakdowns?athleteId=${athleteId}`,
+      {},
+      athleteId,
+    );
     if (!res.ok) return [];
     const data: CachedZoneBreakdown[] = await res.json();
     return Array.isArray(data) ? data : [];
@@ -355,8 +370,10 @@ export const neonGetZoneBreakdownsBulk = async (
     const chunk = ids.slice(i, i + BULK_CHUNK_SIZE);
     const pks = chunk.join(',');
     try {
-      const res = await fetch(
+      const res = await dbFetch(
         `${API}/zone-breakdowns?athleteId=${athleteId}&pks=${pks}`,
+        {},
+        athleteId,
       );
       if (!res.ok) continue;
       const data: CachedZoneBreakdown[] = await res.json();
@@ -406,7 +423,7 @@ export const neonSyncAthleteProfile = async (
   city: string | null,
 ): Promise<void> => {
   try {
-    const res = await fetch(`${API}/user-settings`, {
+    const res = await dbFetch(`${API}/user-settings`, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -414,7 +431,7 @@ export const neonSyncAthleteProfile = async (
         weight: weight ?? null,
         city: city ?? null,
       }),
-    });
+    }, athleteId);
     if (!res.ok) {
       console.warn(`[neonSync] PATCH /user-settings (profile) failed: ${res.status}`);
     }

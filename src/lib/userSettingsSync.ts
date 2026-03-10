@@ -1,3 +1,5 @@
+import {dbFetch} from '@/lib/dbClient';
+
 const settingsInflight = new Map<number, Promise<Record<string, unknown> | null>>();
 const settingsCache = new Map<number, {value: Record<string, unknown> | null; cachedAt: number}>();
 const CACHE_TTL_MS = 5000;
@@ -24,7 +26,11 @@ export const fetchUserSettingsRow = async (
   }
 
   const request = (async () => {
-    const res = await fetch(`/api/db/user-settings?athleteId=${athleteId}`);
+    const res = await dbFetch(
+      `/api/db/user-settings?athleteId=${athleteId}`,
+      {},
+      athleteId,
+    );
     if (!res.ok) {
       throw new Error(`Failed to fetch settings: ${res.status}`);
     }

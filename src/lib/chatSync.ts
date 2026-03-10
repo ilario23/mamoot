@@ -18,6 +18,7 @@ import type {
   WeekOutline,
   TrainingPhase,
 } from './cacheTypes';
+import {dbFetch} from './dbClient';
 
 const API = '/api/db';
 
@@ -26,7 +27,7 @@ const API = '/api/db';
 /** Awaitable POST to Neon. Resolves silently on success, logs on failure. */
 const postToNeon = async (table: string, data: unknown): Promise<void> => {
   try {
-    const res = await fetch(`${API}/${table}`, {
+    const res = await dbFetch(`${API}/${table}`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(data),
@@ -42,7 +43,7 @@ const postToNeon = async (table: string, data: unknown): Promise<void> => {
 /** Awaitable GET from Neon. Returns parsed JSON or null on any error. */
 const getFromNeon = async <T>(url: string): Promise<T | null> => {
   try {
-    const res = await fetch(url);
+    const res = await dbFetch(url);
     if (!res.ok) return null;
     const data = await res.json();
     if (Array.isArray(data) && data.length === 0) return null;
@@ -92,11 +93,14 @@ export const neonSyncChatMessages = async (
 };
 
 /** Awaitable delete of a chat session and all its data (messages, plans, memory). */
-export const neonDeleteChatSession = async (sessionId: string): Promise<void> => {
+export const neonDeleteChatSession = async (
+  sessionId: string,
+  athleteId?: number,
+): Promise<void> => {
   try {
-    await fetch(`${API}/chat-sessions?id=${sessionId}`, {
+    await dbFetch(`${API}/chat-sessions?id=${sessionId}`, {
       method: 'DELETE',
-    });
+    }, athleteId ?? null);
   } catch (err) {
     console.warn('[chatSync] DELETE chat-session error:', err);
   }
@@ -126,11 +130,14 @@ export const neonSyncWeeklyPlan = async (record: CachedWeeklyPlan): Promise<void
 };
 
 /** Awaitable delete of a weekly plan by ID. */
-export const neonDeleteWeeklyPlan = async (planId: string): Promise<void> => {
+export const neonDeleteWeeklyPlan = async (
+  planId: string,
+  athleteId?: number,
+): Promise<void> => {
   try {
-    await fetch(`${API}/weekly-plans?id=${planId}`, {
+    await dbFetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId ?? ''}`, {
       method: 'DELETE',
-    });
+    }, athleteId ?? null);
   } catch (err) {
     console.warn('[chatSync] DELETE weekly-plan error:', err);
   }
@@ -142,11 +149,11 @@ export const neonActivateWeeklyPlan = async (
   athleteId: number,
 ): Promise<boolean> => {
   try {
-    const res = await fetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
+    const res = await dbFetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
-    });
+    }, athleteId);
     return res.ok;
   } catch (err) {
     console.warn('[chatSync] PATCH weekly-plan activate error:', err);
@@ -161,14 +168,14 @@ export const neonUpdateWeeklyPlanSessions = async (
   content?: string,
 ): Promise<boolean> => {
   try {
-    const res = await fetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
+    const res = await dbFetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         sessions,
         ...(typeof content === 'string' ? {content} : {}),
       }),
-    });
+    }, athleteId);
     return res.ok;
   } catch (err) {
     console.warn('[chatSync] PATCH weekly-plan sessions error:', err);
@@ -201,9 +208,9 @@ export const neonDeleteTrainingBlock = async (
   athleteId: number,
 ): Promise<void> => {
   try {
-    await fetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
+    await dbFetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
       method: 'DELETE',
-    });
+    }, athleteId);
   } catch (err) {
     console.warn('[chatSync] DELETE training-block error:', err);
   }
@@ -214,11 +221,11 @@ export const neonActivateTrainingBlock = async (
   athleteId: number,
 ): Promise<boolean> => {
   try {
-    const res = await fetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
+    const res = await dbFetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
-    });
+    }, athleteId);
     return res.ok;
   } catch (err) {
     console.warn('[chatSync] PATCH training-block activate error:', err);
@@ -232,7 +239,7 @@ export const neonUpdateTrainingBlockOutlines = async (
   phases?: TrainingPhase[],
 ): Promise<void> => {
   try {
-    await fetch(`${API}/training-blocks?id=${blockId}`, {
+    await dbFetch(`${API}/training-blocks?id=${blockId}`, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({

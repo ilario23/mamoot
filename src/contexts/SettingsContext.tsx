@@ -7,6 +7,7 @@ import {
 } from 'react';
 import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/activityModel';
 import {clearUserSettingsRowCache, fetchUserSettingsRow} from '@/lib/userSettingsSync';
+import {dbFetch} from '@/lib/dbClient';
 
 const LS_KEY = 'mamoot-settings';
 const getSettingsStorageKey = (athleteId: number): string =>
@@ -118,7 +119,7 @@ const saveToNeon = async (
     // Non-blocking — proceed without existing profile data
   }
 
-  const res = await fetch('/api/db/user-settings', {
+  const res = await dbFetch('/api/db/user-settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -139,7 +140,7 @@ const saveToNeon = async (
       city: existingCity,
       updatedAt: Date.now(),
     }),
-  });
+  }, athleteId);
   if (!res.ok) {
     throw new Error(`Failed to save settings: ${res.status}`);
   }

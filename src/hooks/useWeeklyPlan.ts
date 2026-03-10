@@ -12,6 +12,7 @@ import {
   neonUpdateWeeklyPlanSessions,
 } from '@/lib/chatSync';
 import {fetchUserSettingsRow} from '@/lib/userSettingsSync';
+import {dbFetch} from '@/lib/dbClient';
 import {type AiClientError, parseAiErrorFromUnknown} from '@/lib/aiErrors';
 import {
   parseSseChunks,
@@ -204,11 +205,11 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   const savePreferences = useCallback(async () => {
     if (!athleteId) return;
     try {
-      await fetch('/api/db/user-settings', {
+      await dbFetch('/api/db/user-settings', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({athleteId, weeklyPreferences: preferences}),
-      });
+      }, athleteId);
     } catch {
       // Non-blocking
     }
