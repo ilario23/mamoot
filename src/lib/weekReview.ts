@@ -17,6 +17,7 @@ import {
   type WorkoutLabel,
 } from './workoutLabel';
 import type {StravaDetailedActivity} from './strava';
+import {addDaysIso} from './weekTime';
 
 type UnifiedSessionShape = {
   day: string;
@@ -128,9 +129,7 @@ export async function buildWeekReview(
     }));
 
   const weekStartDate = plan.weekStart;
-  const sundayDate = new Date(weekStartDate);
-  sundayDate.setDate(sundayDate.getDate() + 6);
-  const weekEndDate = sundayDate.toISOString().slice(0, 10);
+  const weekEndDate = addDaysIso(weekStartDate, 6);
 
   const weekSessions = sessions.filter((s) => {
     if (!s.date) return false;

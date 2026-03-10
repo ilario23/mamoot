@@ -11,6 +11,9 @@ export type AiErrorCode =
   | 'source_plan_not_found'
   | 'source_block_not_found'
   | 'multi_agent_runtime_budget_exceeded'
+  | 'allergy_confirmation_required'
+  | 'chat_guardrail_blocked'
+  | 'acwr_risk_override_required'
   | 'generation_failed';
 
 export interface AiErrorPayload {
@@ -42,6 +45,18 @@ const AI_ERROR_RECOVERY_ACTIONS: Record<AiErrorCode, string[]> = {
     'Retry generation',
     'Reduce constraints and retry',
     'Try again in a new request',
+  ],
+  allergy_confirmation_required: [
+    'Update allergy profile',
+    'Retry with explicit override',
+  ],
+  chat_guardrail_blocked: [
+    'Retry request',
+    'Ensure retrieval tools are called first',
+  ],
+  acwr_risk_override_required: [
+    'Reduce intensity targets',
+    'Retry with explicit risk override',
   ],
   generation_failed: ['Retry generation', 'Try another model', 'Use x-trace-id for support'],
 };

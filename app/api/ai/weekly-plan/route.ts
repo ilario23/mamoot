@@ -63,6 +63,13 @@ import {
   type AiProgressEvent,
   type AiProgressPhase,
 } from '@/lib/aiProgress';
+import {
+  getCurrentMondayInTimeZone,
+  getNextMondayInTimeZone,
+  getSundayIsoForMonday,
+  getWeekDatesFromMonday,
+  getTodayIsoInTimeZone,
+} from '@/lib/weekTime';
 
 export const maxDuration = 120;
 const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
@@ -94,41 +101,6 @@ const getModel = (clientModel?: string) => {
   const modelOverride = process.env.AI_MODEL;
   if (provider === 'anthropic') return anthropic(modelOverride ?? 'claude-sonnet-4-5');
   return openai(modelOverride ?? 'gpt-4o-mini');
-};
-
-const getNextMonday = (): string => {
-  const now = new Date();
-  const day = now.getDay();
-  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + daysUntilMonday);
-  return monday.toISOString().slice(0, 10);
-};
-
-const getCurrentMonday = (): string => {
-  const now = new Date();
-  const day = now.getDay();
-  const daysSinceMonday = day === 0 ? 6 : day - 1;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - daysSinceMonday);
-  return monday.toISOString().slice(0, 10);
-};
-
-const getSunday = (mondayStr: string): string => {
-  const d = new Date(mondayStr);
-  d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
-};
-
-const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-const getDatesForWeek = (mondayStr: string): {day: string; date: string}[] => {
-  const monday = new Date(mondayStr);
-  return DAY_NAMES.map((name, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    return {day: name, date: d.toISOString().slice(0, 10)};
-  });
 };
 
 const getActivityContextStartDate = (): string => {
@@ -211,6 +183,8 @@ export async function POST(req: Request) {
     mode?: 'full' | 'remaining_days';
     sourcePlanId?: string;
     today?: string;
+    riskOverride?: boolean;
+    timeZone?: string;
     strategySelectionMode?: StrategySelectionMode;
     strategyPreset?: TrainingStrategyPreset;
     optimizationPriority?: OptimizationPriority;
@@ -226,6 +200,8 @@ export async function POST(req: Request) {
     mode: generationMode,
     sourcePlanId,
     today,
+    riskOverride = false,
+    timeZone,
     strategySelectionMode,
     strategyPreset,
     optimizationPriority,
@@ -242,7 +218,8 @@ export async function POST(req: Request) {
   }
 
   const mode = generationMode ?? 'full';
-  const todayIso = today ?? new Date().toISOString().slice(0, 10);
+  const resolvedTimeZone = timeZone?.trim() || 'UTC';
+  const todayIso = today ?? getTodayIsoInTimeZone(resolvedTimeZone);
   const multiAgentConfig = resolveMultiAgentRuntimeConfig();
   const multiAgentEnabled = false;
   let model = getModel(clientModel);
@@ -262,6 +239,8 @@ export async function POST(req: Request) {
     sessionId: null,
     multiAgentEnabled,
     multiAgentConfig,
+    timeZone: resolvedTimeZone,
+    riskOverride,
   });
   const requestStartedAt = Date.now();
   const encoder = new TextEncoder();
@@ -328,14 +307,16 @@ export async function POST(req: Request) {
     sendProgress('context', 'Loaded athlete context and historical plans.');
 
     let effectiveMode: 'full' | 'remaining_days' = mode;
-    const currentMonday = getCurrentMonday();
+    const currentMonday = getCurrentMondayInTimeZone(resolvedTimeZone);
     const hasActiveCurrentWeekPlan = planRows.some(
       (plan) => plan.isActive && plan.weekStart === currentMonday,
     );
     const weekStart = weekStartDate
-      ?? (hasActiveCurrentWeekPlan ? getNextMonday() : currentMonday);
-    const weekEnd = getSunday(weekStart);
-    const weekDates = getDatesForWeek(weekStart);
+      ?? (hasActiveCurrentWeekPlan
+        ? getNextMondayInTimeZone(resolvedTimeZone)
+        : currentMonday);
+    const weekEnd = getSundayIsoForMonday(weekStart);
+    const weekDates = getWeekDatesFromMonday(weekStart);
     const elapsedMs = () => Date.now() - requestStartedAt;
     const hasRuntimeBudget = () => elapsedMs() < multiAgentConfig.maxRuntimeMs;
     let specialistTurnsUsed = 0;
@@ -489,6 +470,23 @@ export async function POST(req: Request) {
     }
 
     const recentTraining = `${recentTrainingLines}${acwrText}`;
+    const acwrValue = latestSnapshot.acwr ?? null;
+    const aggressiveTargetRequested = /aggressive|high[-\s]?intensity|hard week/i.test(
+      `${clientPreferences ?? ''}`,
+    );
+    let riskPolicyBanner: string | null = null;
+    if (
+      acwrValue != null &&
+      acwrValue >= 1.5 &&
+      aggressiveTargetRequested &&
+      !riskOverride
+    ) {
+      throw new Error('ACWR_RISK_OVERRIDE_REQUIRED');
+    }
+    if (acwrValue != null && acwrValue >= 1.5 && !riskOverride) {
+      riskPolicyBanner =
+        `High ACWR (${acwrValue.toFixed(2)}) detected; intensity reduced by default unless riskOverride=true.`;
+    }
     const resolvedPriority: OptimizationPriority =
       optimizationPriority ??
       (settings?.optimizationPriority as OptimizationPriority | undefined) ??
@@ -500,12 +498,16 @@ export async function POST(req: Request) {
     const defaultPreset =
       (settings?.strategyPreset as TrainingStrategyPreset | undefined) ??
       'polarized_80_20';
+    const effectivePriorityForRisk: OptimizationPriority =
+      acwrValue != null && acwrValue >= 1.5 && !riskOverride
+        ? 'injury_risk'
+        : resolvedPriority;
     const strategyRecommendation = recommendStrategy({
       acwr: latestSnapshot.acwr,
       tsb: latestSnapshot.tsb,
       monotony: latestSnapshot.monotony,
       goal: settings?.goal ?? null,
-      priority: resolvedPriority,
+      priority: effectivePriorityForRisk,
     });
     let resolvedPreset: TrainingStrategyPreset =
       resolvedStrategyMode === 'preset'
@@ -515,7 +517,8 @@ export async function POST(req: Request) {
     let strategyDescription = `${describeStrategyPreset(
       resolvedPreset,
     )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${strategyRecommendation.rationale}` : ''}`.trim();
-    let optimizationPriorityLabel = OPTIMIZATION_PRIORITY_LABELS[resolvedPriority];
+    let optimizationPriorityLabel =
+      OPTIMIZATION_PRIORITY_LABELS[effectivePriorityForRisk];
 
     // Step 1b: Build last-week review (only for new-week generation, not retries)
     let lastWeekReview: string | null = null;
@@ -583,7 +586,9 @@ export async function POST(req: Request) {
       risk: riskIntelligence,
     });
     const calibratedPriority =
-      resolvedStrategyMode === 'auto' ? calibration.recommendedPriority : resolvedPriority;
+      resolvedStrategyMode === 'auto'
+        ? calibration.recommendedPriority
+        : effectivePriorityForRisk;
     optimizationPriorityLabel = OPTIMIZATION_PRIORITY_LABELS[calibratedPriority];
     const counterfactualRanking: CounterfactualOption[] = rankCounterfactualStrategies({
       twin: twinProfile,
@@ -725,6 +730,7 @@ export async function POST(req: Request) {
     sendProgress('coach', 'Coach is drafting running sessions.');
     const generationPreferences = [
       preferences,
+      riskPolicyBanner ? `Risk policy: ${riskPolicyBanner}` : null,
       isEditRequest
         ? 'Generation mode: guided edit of an existing weekly plan.'
         : null,
@@ -1011,6 +1017,9 @@ export async function POST(req: Request) {
     markdownLines.push(
       `- Runtime counters: rounds ${roundCount}, specialist turns ${specialistTurnsUsed}, repairs ${repairTurnsUsed}.`,
     );
+    if (riskPolicyBanner) {
+      markdownLines.push(`- Risk policy: ${riskPolicyBanner}`);
+    }
     if (physioFallbackReason) {
       markdownLines.push('- Fallback applied: coach-only fallback was activated.');
     }
@@ -1054,7 +1063,7 @@ export async function POST(req: Request) {
         mode: resolvedStrategyMode,
         preset: resolvedPreset,
         strategyLabel,
-        optimizationPriority: resolvedPriority,
+        optimizationPriority: effectivePriorityForRisk,
         optimizationPriorityLabel,
         calibratedPriority,
         calibrationReason: calibration.reason,
@@ -1157,6 +1166,11 @@ export async function POST(req: Request) {
         physioFallbackReason,
       },
       distribution: finalDistributionEvaluation,
+      riskPolicy: {
+        acwr: acwrValue,
+        override: riskOverride,
+        banner: riskPolicyBanner,
+      },
       createdAt: now2,
     };
     sendProgress('save', 'Plan saved successfully.');
@@ -1182,6 +1196,20 @@ export async function POST(req: Request) {
         {
           code: 'multi_agent_runtime_budget_exceeded',
           status: 503,
+        },
+      );
+      controller.close();
+      return;
+    }
+    if (
+      error instanceof Error &&
+      error.message === 'ACWR_RISK_OVERRIDE_REQUIRED'
+    ) {
+      sendError(
+        'High ACWR risk detected (>=1.5). Reduce intensity or retry with riskOverride=true.',
+        {
+          code: 'acwr_risk_override_required',
+          status: 409,
         },
       );
       controller.close();

@@ -8,7 +8,7 @@ const uiMessagePartSchema = z.object({
 
 const uiMessageSchema = z.object({
   id: z.string().optional(),
-  role: z.enum(['user', 'assistant', 'system']),
+  role: z.enum(['user', 'assistant']),
   parts: z.array(uiMessagePartSchema).optional(),
 }).passthrough();
 
@@ -19,6 +19,9 @@ export const chatRequestSchema = z.object({
   model: z.string().optional(),
   athleteId: z.number().int().positive().nullable().optional(),
   sessionId: z.string().nullable().optional(),
+  allowUnknownAllergies: z.boolean().optional(),
+  riskOverride: z.boolean().optional(),
+  timeZone: z.string().optional(),
   explicitContext: z.array(
     z.object({
       categoryId: z.string(),
@@ -34,6 +37,8 @@ export const weeklyPlanRequestSchema = z.object({
   model: z.string().optional(),
   preferences: z.string().optional(),
   mode: z.enum(['full', 'remaining_days']).optional(),
+  riskOverride: z.boolean().optional(),
+  timeZone: z.string().optional(),
   sourcePlanId: z.string().optional(),
   today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   strategySelectionMode: z.enum(['auto', 'preset']).optional(),
@@ -151,4 +156,6 @@ export const trainingBlockRequestSchema = z.object({
   strategyPreset: z.string().optional(),
   optimizationPriority: z.string().optional(),
   useMultiAgent: z.boolean().optional(),
+  riskOverride: z.boolean().optional(),
+  timeZone: z.string().optional(),
 });

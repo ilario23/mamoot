@@ -39,55 +39,62 @@ export interface StravaAthlete {
   profile: string;
 }
 
-const STORAGE_KEY = "mamoot-strava-tokens";
-const ACTIVE_ATHLETE_KEY = "mamoot-active-athlete-id";
-const getTokenStorageKey = (athleteId: number) => `${STORAGE_KEY}:${athleteId}`;
+const ATHLETE_STORAGE_KEY = "mamoot-strava-athlete";
+const CSRF_STORAGE_KEY = "mamoot-strava-csrf-token";
 
-const getActiveAthleteId = (): number | null => {
+const getStoredCsrfToken = (): string | null => {
   try {
-    const raw = localStorage.getItem(ACTIVE_ATHLETE_KEY);
-    if (!raw) return null;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
+    return localStorage.getItem(CSRF_STORAGE_KEY);
   } catch {
     return null;
   }
 };
 
-const setActiveAthleteId = (athleteId: number): void => {
-  localStorage.setItem(ACTIVE_ATHLETE_KEY, String(athleteId));
+const setStoredCsrfToken = (value: string): void => {
+  localStorage.setItem(CSRF_STORAGE_KEY, value);
+};
+
+const ensureCsrfToken = async (): Promise<string> => {
+  const stored = getStoredCsrfToken();
+  if (stored) return stored;
+  const res = await fetch("/api/strava/session");
+  const csrfHeader = res.headers.get("x-csrf-token");
+  if (!csrfHeader) throw new Error("Missing CSRF token from broker");
+  setStoredCsrfToken(csrfHeader);
+  return csrfHeader;
 };
 
 export const getStoredTokens = (athleteId?: number): StravaTokens | null => {
   try {
-    const targetAthleteId = athleteId ?? getActiveAthleteId();
-    const raw = targetAthleteId
-      ? localStorage.getItem(getTokenStorageKey(targetAthleteId))
-      : localStorage.getItem(STORAGE_KEY);
+    void athleteId;
+    const raw = localStorage.getItem(ATHLETE_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as StravaTokens;
-    if (parsed?.athlete?.id) {
-      setActiveAthleteId(parsed.athlete.id);
-    }
-    return parsed;
+    const athlete = JSON.parse(raw) as StravaAthlete;
+    return {
+      access_token: "broker",
+      refresh_token: "broker",
+      expires_at: 0,
+      athlete,
+    };
   } catch {
     return null;
   }
 };
 
 export const storeTokens = (tokens: StravaTokens): void => {
-  localStorage.setItem(getTokenStorageKey(tokens.athlete.id), JSON.stringify(tokens));
-  setActiveAthleteId(tokens.athlete.id);
+  localStorage.setItem(ATHLETE_STORAGE_KEY, JSON.stringify(tokens.athlete));
 };
 
 export const clearTokens = (athleteId?: number): void => {
-  const targetAthleteId = athleteId ?? getActiveAthleteId();
-  if (targetAthleteId) {
-    localStorage.removeItem(getTokenStorageKey(targetAthleteId));
-  } else {
-    localStorage.removeItem(STORAGE_KEY);
-  }
-  localStorage.removeItem(ACTIVE_ATHLETE_KEY);
+  void athleteId;
+  localStorage.removeItem(ATHLETE_STORAGE_KEY);
+  localStorage.removeItem(CSRF_STORAGE_KEY);
+  void fetch("/api/strava/session?action=logout", {
+    method: "POST",
+    headers: {
+      "x-csrf-token": getStoredCsrfToken() ?? "",
+    },
+  }).catch(() => {});
 };
 
 // ----- OAuth helpers -----
@@ -133,9 +140,13 @@ export const exchangeCodeForTokens = async (
 export const refreshAccessToken = async (
   refreshToken: string
 ): Promise<StravaTokens> => {
+  const csrfToken = await ensureCsrfToken();
   const res = await fetch("/api/strava/token", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-csrf-token": csrfToken,
+    },
     body: JSON.stringify({
       refresh_token: refreshToken,
       grant_type: "refresh_token",
@@ -162,17 +173,19 @@ export const refreshAccessToken = async (
 // ----- Authenticated fetch -----
 
 const getValidAccessToken = async (): Promise<string> => {
-  const tokens = getStoredTokens();
-  if (!tokens) throw new Error("Not authenticated with Strava");
-
-  const now = Math.floor(Date.now() / 1000);
-  // Refresh if token expires within 5 minutes
-  if (tokens.expires_at - now < 300) {
-    const refreshed = await refreshAccessToken(tokens.refresh_token);
-    return refreshed.access_token;
+  const csrfToken = await ensureCsrfToken();
+  const response = await fetch("/api/strava/session/access-token", {
+    method: "POST",
+    headers: {"x-csrf-token": csrfToken},
+  });
+  if (!response.ok) {
+    throw new Error("Not authenticated with Strava");
   }
-
-  return tokens.access_token;
+  const data = (await response.json()) as {accessToken?: string};
+  if (!data.accessToken) {
+    throw new Error("Missing access token from broker");
+  }
+  return data.accessToken;
 };
 
 const stravaFetch = async <T>(
