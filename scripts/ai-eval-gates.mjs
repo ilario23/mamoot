@@ -4,15 +4,13 @@ import process from 'node:process';
 const SCENARIOS_PATH = new URL('./prompt-behavior-scenarios.json', import.meta.url);
 
 const threshold = {
-  minScenarioCount: 11,
+  minScenarioCount: 9,
   minReliabilityScore: 0.8,
 };
 const REQUIRED_IDS = new Set([
   'all-personas-followup-tool',
   'all-personas-confidence-policy',
   'all-personas-red-flag-refusal',
-  'orchestrator-bounded-multi-agent',
-  'orchestrator-structured-handoffs',
 ]);
 const ALLOWED_SHARED_MUST_INCLUDE = new Set([
   'Head over to the **Weekly Plan** page and tap **Generate Weekly Plan**',

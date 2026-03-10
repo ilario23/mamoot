@@ -4,7 +4,7 @@
 
 - `AI Quality Gates` (`.github/workflows/ai-quality-gates.yml`)
   - Runs on PRs touching AI/prompt/gate files and on pushes to `main`/`master`.
-  - Runs `lint`, `typecheck`, offline tests (`npm run test:offline`), `build`, and AI gate scripts.
+  - Uses Bun (`bun install --frozen-lockfile`) and runs `lint`, `typecheck`, offline tests (`bun run test:offline`), `build`, and AI gate scripts.
 - `Vercel Git Deploy` (managed in Vercel)
   - Production deploys are triggered by Vercel's Git integration on `main`/`master`.
   - GitHub Actions are used for CI checks only.
@@ -25,12 +25,12 @@ No Vercel deploy secrets are required in GitHub for production deploys when usin
 Run the same checks as CI:
 
 ```bash
-npm ci
-npm run lint
-npm run typecheck
-npm run test:offline
-npm run build
-npm run test:ai-gates
-npm run test:ai-evals
-npm run test:cohort-replay
+bun install --frozen-lockfile
+bun run lint
+bun run typecheck
+bun run test:offline
+bun run build
+bun run test:ai-gates
+bun run test:ai-evals
+bun run test:cohort-replay
 ```
