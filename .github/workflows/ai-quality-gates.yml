@@ -53,7 +53,8 @@ jobs:
           DATABASE_URL: postgres://ci:ci@localhost:5432/ci
         run: bun run test:offline
 
-      - name: Build
+      - name: Build (main branch only)
+        if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
         run: bun run build
 
       - name: Run AI gate checks
