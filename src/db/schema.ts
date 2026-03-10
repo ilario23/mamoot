@@ -182,6 +182,18 @@ export const aiTelemetryEvents = pgTable('ai_telemetry_events', {
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
 });
 
+// ----- AI Planning State -----
+// Durable chat planning state for coach intake flows.
+export const aiPlanningState = pgTable('ai_planning_state', {
+  key: text('key').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  sessionId: text('session_id').notNull(),
+  state: jsonb('state').notNull(),
+  expiresAt: bigint('expires_at', {mode: 'number'}).notNull(),
+  createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+  updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+});
+
 // ----- Activity Labels -----
 // Maps to CachedActivityLabel (src/lib/db.ts)
 // Rule-based workout classification labels (e.g., "Intervals: 5x1000m @ 4:10/km Z4")
@@ -274,4 +286,15 @@ export const weeklyPlans = pgTable('weekly_plans', {
   /** 1-indexed week number within the training block */
   weekNumber: integer('week_number'),
   createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+});
+
+// ----- Weekly Zone Rollups -----
+// Precomputed zone/time summaries by athlete+week for fast retrieval.
+export const weeklyZoneRollups = pgTable('weekly_zone_rollups', {
+  key: text('key').primaryKey(),
+  athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  weekStart: text('week_start').notNull(),
+  data: jsonb('data').notNull(),
+  computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
+  expiresAt: bigint('expires_at', {mode: 'number'}).notNull(),
 });

@@ -18,6 +18,7 @@ import {
   athleteGear,
   trainingBlocks,
   weeklyPlans,
+  weeklyZoneRollups,
 } from '@/db/schema';
 import {eq, desc, and, inArray, isNull} from 'drizzle-orm';
 import type {ActivitySummary, UserSettings} from './activityModel';
@@ -36,6 +37,11 @@ import {
   formatLabelForAI,
   type WorkoutLabel,
 } from './workoutLabel';
+import {
+  addDaysIso,
+  getCurrentMondayInTimeZone,
+  getMondayIsoForDate,
+} from './weekTime';
 
 // ----- Helpers -----
 
@@ -93,11 +99,7 @@ const fetchActivitiesWithRaw = async (
 
 /** Get week start (Monday) for a date string. */
 const getWeekStart = (dateStr: string): string => {
-  const d = new Date(dateStr);
-  const day = d.getDay();
-  const diff = (day + 6) % 7;
-  d.setDate(d.getDate() - diff);
-  return d.toISOString().slice(0, 10);
+  return getMondayIsoForDate(dateStr);
 };
 
 /** Filter activities to a time window. */
@@ -206,14 +208,61 @@ const fetchOrComputeLabels = async (
  * Creates all retrieval tools bound to a specific athleteId.
  * Returns a tool map compatible with the Vercel AI SDK `tools` parameter.
  */
-export const createRetrievalTools = (athleteId: number) => ({
+type RetrievalToolsOptions = {
+  requestCache?: Map<string, Promise<unknown>>;
+  onCacheEvent?: (event: 'hit' | 'miss', key: string) => void;
+};
+
+export const createRetrievalTools = (
+  athleteId: number,
+  options: RetrievalToolsOptions = {},
+) => {
+  const requestCache = options.requestCache ?? new Map<string, Promise<unknown>>();
+  const onCacheEvent = options.onCacheEvent;
+
+  const memoize = <T>(key: string, loader: () => Promise<T>): Promise<T> => {
+    const cached = requestCache.get(key);
+    if (cached) {
+      onCacheEvent?.('hit', key);
+      return cached as Promise<T>;
+    }
+    onCacheEvent?.('miss', key);
+    const next = loader();
+    requestCache.set(key, next as Promise<unknown>);
+    return next;
+  };
+
+  const fetchSettingsCached = () =>
+    memoize(`settings:${athleteId}`, () => fetchSettings(athleteId));
+  const fetchActivitiesCached = () =>
+    memoize(`activities:${athleteId}`, () => fetchActivities(athleteId));
+  const fetchActivitiesWithRawCached = () =>
+    memoize(`activities-with-raw:${athleteId}`, () =>
+      fetchActivitiesWithRaw(athleteId),
+    );
+  const fetchActivityDetailCached = (activityId: number) =>
+    memoize(`activity-detail:${athleteId}:${activityId}`, async () => {
+      const detailRows = await db
+        .select()
+        .from(activityDetailsTable)
+        .where(
+          and(
+            eq(activityDetailsTable.id, activityId),
+            eq(activityDetailsTable.athleteId, athleteId),
+          ),
+        )
+        .limit(1);
+      return detailRows[0] ?? null;
+    });
+
+  return {
   // ---- 1. Training Goal ----
   getTrainingGoal: tool({
     description:
       "Get the athlete's stated training goal (e.g. race target, mileage goal).",
     inputSchema: z.object({}),
     execute: async () => {
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       return {goal: settings?.goal ?? 'No training goal set.'};
     },
   }),
@@ -224,7 +273,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       "Get the athlete's current reported injuries with notes. Always check before prescribing workouts.",
     inputSchema: z.object({}),
     execute: async () => {
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const injuries = (settings?.injuries ?? []) as Array<{
         name: string;
         notes?: string;
@@ -243,7 +292,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       "Get the athlete's allergies and food preferences. CRITICAL for nutritionist — always check before suggesting meals.",
     inputSchema: z.object({}),
     execute: async () => {
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const allergies = (settings?.allergies ?? []) as string[];
       const prefs = settings?.foodPreferences ?? '';
       const lines: string[] = [];
@@ -270,7 +319,7 @@ export const createRetrievalTools = (athleteId: number) => ({
         .describe('Number of weeks to summarize. Default 4.'),
     }),
     execute: async ({weeks = 4}: {weeks?: number}) => {
-      const allActivities = await fetchActivities(athleteId);
+      const allActivities = await fetchActivitiesCached();
       const recent = filterByWeeks(allActivities, weeks);
       const prior = filterByWeeks(allActivities, weeks, weeks);
 
@@ -303,7 +352,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       const trendSign = volumeTrend >= 0 ? '+' : '';
 
       // Workout type distribution from labels
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const zones = settings?.zones as UserSettings['zones'] | undefined;
       const activityIds = recent.map((a) => Number(a.id));
       const labels = zones
@@ -414,11 +463,11 @@ export const createRetrievalTools = (athleteId: number) => ({
       weeks: z.number().optional().describe('Number of weeks. Default 4.'),
     }),
     execute: async ({weeks = 4}: {weeks?: number}) => {
-      const allActivities = await fetchActivities(athleteId);
+      const allActivities = await fetchActivitiesCached();
       const recent = filterByWeeks(allActivities, weeks);
 
       // Fetch workout labels for all recent activities
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const zones = settings?.zones as UserSettings['zones'] | undefined;
       const allIds = recent.map((a) => Number(a.id));
       const labels = zones
@@ -485,7 +534,7 @@ export const createRetrievalTools = (athleteId: number) => ({
     }),
     execute: async ({weeks = 4}: {weeks?: number}) => {
       // Get recent activity IDs
-      const allActivities = await fetchActivities(athleteId);
+      const allActivities = await fetchActivitiesCached();
       const recent = filterByWeeks(allActivities, weeks);
       const activityIds = recent.map((a) => Number(a.id));
 
@@ -493,26 +542,10 @@ export const createRetrievalTools = (athleteId: number) => ({
         return {zones: 'No activities found in the last ' + weeks + ' weeks.'};
       }
 
-      // Fetch all zone breakdowns from Neon and filter in JS
-      const breakdowns = await db
-        .select()
-        .from(zoneBreakdownsTable)
-        .where(eq(zoneBreakdownsTable.athleteId, athleteId))
-        .catch(() => [] as Array<typeof zoneBreakdownsTable.$inferSelect>);
-
-      // Filter to matching activity IDs
-      const idSet = new Set(activityIds);
-      const matching = (breakdowns ?? []).filter((b) =>
-        idSet.has(b.activityId),
+      // Prefer precomputed weekly rollups when available.
+      const recentWeekStarts = Array.from(
+        new Set(recent.map((activity) => getWeekStart(activity.date))),
       );
-
-      if (matching.length === 0) {
-        return {
-          zones: 'No zone breakdown data available for recent activities.',
-        };
-      }
-
-      // Aggregate zone times and distances
       const zoneTimes: Record<number, number> = {
         1: 0,
         2: 0,
@@ -530,18 +563,58 @@ export const createRetrievalTools = (athleteId: number) => ({
         6: 0,
       };
       let totalTime = 0;
+      let usedPrecomputed = false;
 
-      for (const b of matching) {
-        const zones = b.zones as Record<
-          string,
-          {time: number; distance: number}
-        >;
-        for (const [zoneNum, data] of Object.entries(zones)) {
-          const zn = Number(zoneNum);
-          if (zn >= 1 && zn <= 6 && data?.time) {
-            zoneTimes[zn] += data.time;
-            zoneDists[zn] += data.distance ?? 0;
-            totalTime += data.time;
+      if (recentWeekStarts.length > 0) {
+        const rollups = await db
+          .select()
+          .from(weeklyZoneRollups)
+          .where(
+            and(
+              eq(weeklyZoneRollups.athleteId, athleteId),
+              inArray(weeklyZoneRollups.weekStart, recentWeekStarts),
+            ),
+          )
+          .catch(() => [] as Array<typeof weeklyZoneRollups.$inferSelect>);
+        if (rollups.length > 0) {
+          for (const rollup of rollups) {
+            const zones = rollup.data as Record<string, {time: number; distance: number}>;
+            for (const [zoneNum, data] of Object.entries(zones)) {
+              const zn = Number(zoneNum);
+              if (zn >= 1 && zn <= 6 && data?.time) {
+                zoneTimes[zn] += data.time;
+                zoneDists[zn] += data.distance ?? 0;
+                totalTime += data.time;
+              }
+            }
+          }
+          usedPrecomputed = totalTime > 0;
+        }
+      }
+
+      if (!usedPrecomputed) {
+        // Fallback: fetch all zone breakdowns from Neon and filter in JS.
+        const breakdowns = await db
+          .select()
+          .from(zoneBreakdownsTable)
+          .where(eq(zoneBreakdownsTable.athleteId, athleteId))
+          .catch(() => [] as Array<typeof zoneBreakdownsTable.$inferSelect>);
+        const idSet = new Set(activityIds);
+        const matching = (breakdowns ?? []).filter((b) => idSet.has(b.activityId));
+        if (matching.length === 0) {
+          return {
+            zones: 'No zone breakdown data available for recent activities.',
+          };
+        }
+        for (const b of matching) {
+          const zones = b.zones as Record<string, {time: number; distance: number}>;
+          for (const [zoneNum, data] of Object.entries(zones)) {
+            const zn = Number(zoneNum);
+            if (zn >= 1 && zn <= 6 && data?.time) {
+              zoneTimes[zn] += data.time;
+              zoneDists[zn] += data.distance ?? 0;
+              totalTime += data.time;
+            }
           }
         }
       }
@@ -576,14 +649,14 @@ export const createRetrievalTools = (athleteId: number) => ({
       'Get current training load metrics: Base Fitness (BF), Load Impact (LI), Intensity Trend (IT), and ACWR injury risk ratio.',
     inputSchema: z.object({}),
     execute: async () => {
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       if (!settings) {
         return {
           metrics: 'No athlete settings found. Cannot compute fitness metrics.',
         };
       }
 
-      const allActivities = await fetchActivities(athleteId);
+      const allActivities = await fetchActivitiesCached();
       const zones = settings.zones as UserSettings['zones'];
 
       const fitnessResult = calcFitnessData(
@@ -648,7 +721,7 @@ export const createRetrievalTools = (athleteId: number) => ({
         .describe('Number of activities to return. Default 10.'),
     }),
     execute: async ({count = 10}: {count?: number}) => {
-      const allActivities = await fetchActivitiesWithRaw(athleteId);
+      const allActivities = await fetchActivitiesWithRawCached();
       const recent = allActivities.slice(0, count);
 
       if (recent.length === 0) {
@@ -656,7 +729,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       }
 
       // Fetch athlete zones for label computation
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const zones = settings?.zones as UserSettings['zones'] | undefined;
 
       // Fetch/compute labels for all recent activities
@@ -872,15 +945,9 @@ export const createRetrievalTools = (athleteId: number) => ({
         }));
 
       // 2. Determine the target week date range (Mon-Sun)
-      const now = new Date();
-      const todayMs = now.getTime();
-      const dayOfWeek = (now.getDay() + 6) % 7; // 0=Mon, 6=Sun
-      const mondayMs =
-        todayMs - dayOfWeek * 86400000 + weekOffset * 7 * 86400000;
-      const sundayMs = mondayMs + 6 * 86400000;
-
-      const weekStartDate = new Date(mondayMs).toISOString().slice(0, 10);
-      const weekEndDate = new Date(sundayMs).toISOString().slice(0, 10);
+      const baseMonday = getCurrentMondayInTimeZone('UTC');
+      const weekStartDate = addDaysIso(baseMonday, weekOffset * 7);
+      const weekEndDate = addDaysIso(weekStartDate, 6);
 
       // 3. Filter planned sessions to this week
       const weekSessions = sessions.filter((s) => {
@@ -889,13 +956,13 @@ export const createRetrievalTools = (athleteId: number) => ({
       });
 
       // 4. Fetch actual activities in this date range
-      const allActivities = await fetchActivities(athleteId);
+      const allActivities = await fetchActivitiesCached();
       const weekActivities = allActivities.filter(
         (a) => a.date >= weekStartDate && a.date <= weekEndDate,
       );
 
       // 5. Get workout labels for actual activities
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const zones = settings?.zones as UserSettings['zones'] | undefined;
       const activityIds = weekActivities.map((a) => Number(a.id));
       const labels = zones
@@ -1049,25 +1116,15 @@ export const createRetrievalTools = (athleteId: number) => ({
     }),
     execute: async ({activityId}: {activityId: number}) => {
       // 1. Fetch the activity detail from Neon
-      const detailRows = await db
-        .select()
-        .from(activityDetailsTable)
-        .where(
-          and(
-            eq(activityDetailsTable.id, activityId),
-            eq(activityDetailsTable.athleteId, athleteId),
-          ),
-        )
-        .limit(1);
-
-      if (detailRows.length === 0) {
+      const detailRow = await fetchActivityDetailCached(activityId);
+      if (!detailRow) {
         return {
           detail:
             'No detailed data found for this activity. It may not have been synced yet.',
         };
       }
 
-      const detail = detailRows[0].data as StravaDetailedActivity;
+      const detail = detailRow.data as StravaDetailedActivity;
       const distKm = detail.distance / 1000;
       const avgPace =
         distKm > 0 && detail.moving_time > 0
@@ -1120,7 +1177,7 @@ export const createRetrievalTools = (athleteId: number) => ({
       }
 
       // 2. Workout label (full phases)
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const zones = settings?.zones as UserSettings['zones'] | undefined;
       if (zones) {
         const label = classifyWorkout(detail, zones);
@@ -1337,7 +1394,7 @@ export const createRetrievalTools = (athleteId: number) => ({
     }),
     execute: async ({days = 5, city}: {days?: number; city?: string}) => {
       // Resolve city from explicit tool input first, then athlete profile.
-      const settings = await fetchSettings(athleteId);
+      const settings = await fetchSettingsCached();
       const profileCity = (
         settings as Record<string, unknown> | null
       )?.city as string | null;
@@ -1599,4 +1656,5 @@ export const createRetrievalTools = (athleteId: number) => ({
       return {block: lines.join('\n')};
     },
   }),
-});
+  };
+};

@@ -44,6 +44,7 @@ import {validateTrainingBlockWeekOutlines} from '@/lib/planSemanticValidators';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
 import {resolveMultiAgentRuntimeConfig} from '@/lib/multiAgentContracts';
+import {getNextMondayInTimeZone} from '@/lib/weekTime';
 
 export const maxDuration = 120;
 const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
@@ -71,15 +72,6 @@ const getModel = (clientModel?: string) => {
   const modelOverride = process.env.AI_MODEL;
   if (provider === 'anthropic') return anthropic(modelOverride ?? 'claude-sonnet-4-5');
   return openai(modelOverride ?? 'gpt-4o-mini');
-};
-
-const getNextMonday = (): string => {
-  const now = new Date();
-  const day = now.getDay();
-  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + daysUntilMonday);
-  return monday.toISOString().slice(0, 10);
 };
 
 const getActivityContextStartDate = (): string => {
@@ -170,6 +162,8 @@ export async function POST(req: Request) {
     strategyPreset?: TrainingStrategyPreset;
     optimizationPriority?: OptimizationPriority;
     useMultiAgent?: boolean;
+    riskOverride?: boolean;
+    timeZone?: string;
   };
   const {
     athleteId,
@@ -187,7 +181,10 @@ export async function POST(req: Request) {
     strategyPreset,
     optimizationPriority,
     useMultiAgent,
+    riskOverride = false,
+    timeZone,
   } = parsedData;
+  const resolvedTimeZone = timeZone?.trim() || 'UTC';
 
   if (!athleteId) {
     return NextResponse.json(
@@ -414,8 +411,18 @@ ${JSON.stringify(candidate)}
         tsb: latestSnapshot.tsb,
         monotony: latestSnapshot.monotony,
         goal: (settings?.goal as string | null | undefined) ?? null,
-        priority: resolvedPriority,
+        priority:
+          (latestSnapshot.acwr ?? 0) >= 1.5 && !riskOverride
+            ? 'injury_risk'
+            : resolvedPriority,
       });
+      if (
+        (latestSnapshot.acwr ?? 0) >= 1.5 &&
+        resolvedPriority === 'race_performance' &&
+        !riskOverride
+      ) {
+        throw new Error('ACWR_RISK_OVERRIDE_REQUIRED');
+      }
       const resolvedPreset: TrainingStrategyPreset =
         resolvedStrategyMode === 'preset'
           ? strategyPreset ?? defaultPreset
@@ -603,7 +610,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
       }, {headers: {'x-trace-id': trace.traceId}});
     }
 
-    const startDate = getNextMonday();
+    const startDate = getNextMondayInTimeZone(resolvedTimeZone);
     const totalWeeks = clientWeeks ?? weeksUntil(startDate, goalDate);
     console.log(`[TrainingBlock] Goal: ${goalEvent} on ${goalDate}`);
     console.log(`[TrainingBlock] Weeks: ${totalWeeks}, starts ${startDate}`);
@@ -715,12 +722,18 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         }
       } catch { /* non-blocking */ }
     }
+    const acwrRiskHigh = (latestSnapshot.acwr ?? 0) >= 1.5;
+    if (acwrRiskHigh && resolvedPriority === 'race_performance' && !riskOverride) {
+      throw new Error('ACWR_RISK_OVERRIDE_REQUIRED');
+    }
+    const effectivePriorityForRisk: OptimizationPriority =
+      acwrRiskHigh && !riskOverride ? 'injury_risk' : resolvedPriority;
     const strategyRecommendation = recommendStrategy({
       acwr: latestSnapshot.acwr,
       tsb: latestSnapshot.tsb,
       monotony: latestSnapshot.monotony,
       goal: (settings?.goal as string | null | undefined) ?? null,
-      priority: resolvedPriority,
+      priority: effectivePriorityForRisk,
     });
     const resolvedPreset: TrainingStrategyPreset =
       resolvedStrategyMode === 'preset'
@@ -753,7 +766,9 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
     const strategyDescription = `${describeStrategyPreset(
       selectedPreset,
     )} ${resolvedStrategyMode === 'auto' ? `Auto-selected rationale: ${counterfactualRanking[0]?.rationale ?? strategyRecommendation.rationale}` : ''}`.trim();
-    const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[effectivePriority];
+    const priorityLabel = OPTIMIZATION_PRIORITY_LABELS[
+      acwrRiskHigh && !riskOverride ? 'injury_risk' : effectivePriority
+    ];
     const strategyRationale =
       resolvedStrategyMode === 'auto'
         ? counterfactualRanking[0]?.rationale ?? strategyRecommendation.rationale
@@ -946,6 +961,18 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
           'Training-block generation exceeded the bounded runtime budget. Please retry.',
         ),
         {status: 503, headers: {'x-trace-id': trace.traceId}},
+      );
+    }
+    if (
+      error instanceof Error &&
+      error.message === 'ACWR_RISK_OVERRIDE_REQUIRED'
+    ) {
+      return NextResponse.json(
+        createAiErrorPayload(
+          'acwr_risk_override_required',
+          'High ACWR risk detected (>=1.5). Reduce aggressiveness or retry with riskOverride=true.',
+        ),
+        {status: 409, headers: {'x-trace-id': trace.traceId}},
       );
     }
     return NextResponse.json(

@@ -24,8 +24,9 @@ import {db} from '@/db';
 import {
   userSettings,
   trainingBlocks,
+  aiPlanningState,
 } from '@/db/schema';
-import {eq, and, isNull} from 'drizzle-orm';
+import {eq, and, isNull, lt, sql} from 'drizzle-orm';
 import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 import {chatRequestSchema} from '@/lib/aiRequestSchemas';
@@ -47,6 +48,17 @@ import {
   type WeeklyPlanEditRequirements,
   type TrainingBlockRequirements,
 } from '@/lib/coachIntake';
+import {
+  getCurrentMondayInTimeZone,
+  getNextMondayInTimeZone,
+} from '@/lib/weekTime';
+import {
+  sanitizeExplicitContext,
+  isAdvisoryIntent,
+  shouldRequireRetrieval,
+  buildFallbackFollowUps,
+  getMessageText,
+} from '@/lib/chatChainPolicies';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -101,7 +113,6 @@ type PlanningState = {
   lastUpdatedAt: number;
 };
 
-const planningStateStore = new Map<string, PlanningState>();
 const PLANNING_TTL_MS = 60 * 60 * 1000;
 
 const isPlanningToolsEnabled = () =>
@@ -110,31 +121,14 @@ const isPlanningToolsEnabled = () =>
 const getPlanningSessionKey = (athleteId: number, sessionId: string) =>
   `${athleteId}:${sessionId}`;
 
-const getCurrentMondayIso = (): string => {
-  const now = new Date();
-  const day = now.getDay();
-  const daysSinceMonday = day === 0 ? 6 : day - 1;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - daysSinceMonday);
-  return monday.toISOString().slice(0, 10);
-};
-
-const getNextMondayIso = (): string => {
-  const now = new Date();
-  const day = now.getDay();
-  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 7 : 8 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + daysUntilMonday);
-  return monday.toISOString().slice(0, 10);
-};
-
 const inferTargetWeekFromNotes = (
   notes: string | undefined,
+  timeZone: string,
 ): 'current' | 'next' | null => {
   if (!notes?.trim()) return null;
   const normalized = notes.toLowerCase();
-  const currentMonday = getCurrentMondayIso();
-  const nextMonday = getNextMondayIso();
+  const currentMonday = getCurrentMondayInTimeZone(timeZone);
+  const nextMonday = getNextMondayInTimeZone(timeZone);
 
   const embeddedIso = normalized.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
   if (embeddedIso === currentMonday) return 'current';
@@ -176,6 +170,7 @@ const inferGenerationModeFromNotes = (
   }
   return null;
 };
+
 
 const getMissingRequiredPlanningFields = (
   state: PlanningState,
@@ -294,13 +289,12 @@ const readWeeklyPlanStreamPayload = async (response: Response) => {
   return donePayload as Record<string, unknown>;
 };
 
-const cleanupPlanningStateStore = () => {
+const cleanupExpiredPlanningState = async () => {
   const now = Date.now();
-  for (const [key, state] of planningStateStore.entries()) {
-    if (now - state.lastUpdatedAt > PLANNING_TTL_MS) {
-      planningStateStore.delete(key);
-    }
-  }
+  await db
+    .delete(aiPlanningState)
+    .where(lt(aiPlanningState.expiresAt, now))
+    .catch(() => {});
 };
 
 // ----- Route handler -----
@@ -344,6 +338,9 @@ export async function POST(req: Request) {
     model: clientModel,
     athleteId,
     sessionId,
+    allowUnknownAllergies = false,
+    riskOverride = false,
+    timeZone,
     explicitContext,
   }: {
     messages: UIMessage[];
@@ -352,6 +349,9 @@ export async function POST(req: Request) {
     model?: string;
     athleteId?: number | null;
     sessionId?: string | null;
+    allowUnknownAllergies?: boolean;
+    riskOverride?: boolean;
+    timeZone?: string;
     explicitContext?: ResolvedMention[] | null;
   } = parsedBody.data as {
     messages: UIMessage[];
@@ -360,12 +360,23 @@ export async function POST(req: Request) {
     model?: string;
     athleteId?: number | null;
     sessionId?: string | null;
+    allowUnknownAllergies?: boolean;
+    riskOverride?: boolean;
+    timeZone?: string;
     explicitContext?: ResolvedMention[] | null;
   };
 
-  cleanupPlanningStateStore();
+  const clientMessages = messages.filter(
+    (message) => message.role === 'user' || message.role === 'assistant',
+  );
+  const droppedSystemMessages = messages.length - clientMessages.length;
+  const explicitContextBudget = sanitizeExplicitContext(explicitContext);
+  const sanitizedExplicitContext = explicitContextBudget.context;
+
+  await cleanupExpiredPlanningState();
   const planningSessionKey =
     athleteId && sessionId ? getPlanningSessionKey(athleteId, sessionId) : null;
+  const resolvedTimeZone = timeZone?.trim() || 'UTC';
 
   const resolvedModel =
     clientModel && ALLOWED_MODELS[clientModel]
@@ -377,8 +388,32 @@ export async function POST(req: Request) {
     model: resolvedModel,
     sessionId: sessionId ?? null,
     athleteId: athleteId ?? null,
-    messageCount: messages.length,
+    messageCount: clientMessages.length,
+    timeZone: resolvedTimeZone,
+    riskOverride,
+    allowUnknownAllergies,
   });
+  if (droppedSystemMessages > 0) {
+    logAiTrace(trace, 'system_role_dropped', {
+      persona,
+      model: resolvedModel,
+      athleteId: athleteId ?? null,
+      sessionId: sessionId ?? null,
+      droppedSystemMessages,
+    });
+  }
+  if (explicitContextBudget.capped) {
+    logAiTrace(trace, 'explicit_context_capped', {
+      persona,
+      model: resolvedModel,
+      athleteId: athleteId ?? null,
+      sessionId: sessionId ?? null,
+      originalItems: explicitContextBudget.originalItems,
+      finalItems: explicitContextBudget.finalItems,
+      originalChars: explicitContextBudget.originalChars,
+      finalChars: explicitContextBudget.finalChars,
+    });
+  }
 
   // --- AI Debug Logging ---
   console.log(`\n[AI] ========== New Chat Request ==========`);
@@ -386,13 +421,13 @@ export async function POST(req: Request) {
   console.log(`[AI] Persona: ${persona}`);
   console.log(`[AI] Session: ${sessionId ?? 'none'}`);
   console.log(`[AI] Athlete: ${athleteId ?? 'none'}`);
-  console.log(`[AI] Messages in context: ${messages?.length ?? 0}`);
+  console.log(`[AI] Messages in context: ${clientMessages?.length ?? 0}`);
   console.log(
     `[AI] Memory: ${memory ? 'yes (' + memory.length + ' chars)' : 'none'}`,
   );
-  if (explicitContext?.length) {
+  if (sanitizedExplicitContext?.length) {
     console.log(`[AI] Explicit context (@-mentions):`);
-    for (const m of explicitContext) {
+    for (const m of sanitizedExplicitContext) {
       console.log(
         `[AI]   - @${m.categoryId}: ${m.label} (${m.data.length} chars)`,
       );
@@ -418,7 +453,11 @@ export async function POST(req: Request) {
   }
 
   // Validate messages
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+  if (
+    !clientMessages ||
+    !Array.isArray(clientMessages) ||
+    clientMessages.length === 0
+  ) {
     return new Response(
       JSON.stringify(
         createAiErrorPayload(
@@ -438,6 +477,7 @@ export async function POST(req: Request) {
   let hrZonesText: string | null = null;
   let athleteWeight: number | null = null;
   let trainingBalance: number | null = null;
+  let knownAllergies: string[] = [];
   if (athleteId) {
     try {
       const settingsRows = await db
@@ -452,9 +492,29 @@ export async function POST(req: Request) {
           .join(' | ');
         athleteWeight = s.weight ?? null;
         trainingBalance = s.trainingBalance ?? 50;
+        knownAllergies = Array.isArray(s.allergies)
+          ? (s.allergies as string[]).filter((value) => typeof value === 'string')
+          : [];
       }
     } catch {
       // Non-blocking — proceed without minimal context
+    }
+  }
+
+  if (persona === 'nutritionist' && athleteId) {
+    if (knownAllergies.length === 0 && !allowUnknownAllergies) {
+      return new Response(
+        JSON.stringify(
+          createAiErrorPayload(
+            'allergy_confirmation_required',
+            'Nutrition guidance is blocked until allergies are confirmed. Update dietary info or send allowUnknownAllergies=true to override explicitly.',
+          ),
+        ),
+        {
+          status: 412,
+          headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
+        },
+      );
     }
   }
 
@@ -477,7 +537,7 @@ export async function POST(req: Request) {
   // Strip client-side mention metadata (<!-- mentions:... -->) from all user messages
   // so the LLM never sees the raw HTML comment markers
   const mentionMetaRe = /^<!-- mentions:.*? -->\n/;
-  let processedMessages = messages.map((msg) => {
+  let processedMessages = clientMessages.map((msg) => {
     if (msg.role !== 'user') return msg;
     const text =
       msg.parts
@@ -492,13 +552,13 @@ export async function POST(req: Request) {
   });
 
   // Inject explicit @-mention context into the last user message
-  if (explicitContext && explicitContext.length > 0) {
+  if (sanitizedExplicitContext && sanitizedExplicitContext.length > 0) {
     processedMessages = [...processedMessages];
     const lastIdx = processedMessages.length - 1;
     const lastMsg = processedMessages[lastIdx];
 
     if (lastMsg && lastMsg.role === 'user') {
-      const contextBlock = explicitContext
+      const contextBlock = sanitizedExplicitContext
         .map((m) => `### @${m.categoryId}: ${m.label}\n${m.data}`)
         .join('\n\n');
 
@@ -520,13 +580,20 @@ export async function POST(req: Request) {
 
   const latestUserText = processedMessages
     .filter((message) => message.role === 'user')
-    .at(-1)
-    ?.parts?.filter((p): p is {type: 'text'; text: string} => p.type === 'text')
-    .map((p) => p.text)
-    .join('') ?? '';
+    .map((message) => getMessageText(message))
+    .at(-1) ?? '';
+  const advisoryIntent = isAdvisoryIntent(latestUserText);
+  const requiresRetrieval = shouldRequireRetrieval({
+    persona,
+    athleteId,
+    advisoryIntent,
+  });
   const reliability = buildReliabilityEnvelope({
     userText: latestUserText,
-    hasGroundingData: Boolean((explicitContext && explicitContext.length > 0) || athleteId),
+    hasGroundingData: Boolean(
+      (sanitizedExplicitContext && sanitizedExplicitContext.length > 0) ||
+        athleteId,
+    ),
     citesNumbers: /\d/.test(latestUserText),
   });
   logAiTrace(trace, 'reliability_envelope', {
@@ -538,6 +605,8 @@ export async function POST(req: Request) {
     citationRequired: reliability.citationRequired,
     refusalRequired: reliability.refusalRequired,
     rationale: reliability.rationale,
+    advisoryIntent,
+    requiresRetrieval,
   });
   if (detectRedFlagInput(latestUserText) || reliability.refusalRequired) {
     logAiTrace(trace, 'safety_refusal', {
@@ -560,7 +629,25 @@ export async function POST(req: Request) {
   }
 
   // Build tools — retrieval tools (all personas) + follow-up suggestions
-  const allRetrievalTools = athleteId ? createRetrievalTools(athleteId) : null;
+  const retrievalRequestCache = new Map<string, Promise<unknown>>();
+  const allRetrievalTools = athleteId
+    ? createRetrievalTools(athleteId, {
+        requestCache: retrievalRequestCache,
+        onCacheEvent: (event, key) => {
+          logAiTrace(
+            trace,
+            event === 'hit' ? 'retrieval_cache_hit' : 'retrieval_cache_miss',
+            {
+              persona,
+              model: resolvedModel,
+              athleteId: athleteId ?? null,
+              sessionId: sessionId ?? null,
+              cacheKey: key,
+            },
+          );
+        },
+      })
+    : null;
   const retrievalTools = allRetrievalTools ?? {};
 
   const suggestFollowUps = {
@@ -581,25 +668,58 @@ export async function POST(req: Request) {
     Boolean(planningSessionKey) &&
     isPlanningToolsEnabled();
 
-  const getState = (): PlanningState | null => {
-    if (!planningSessionKey) return null;
-    return planningStateStore.get(planningSessionKey) ?? null;
+  const getState = async (): Promise<PlanningState | null> => {
+    if (!planningSessionKey || !athleteId || !sessionId) return null;
+    const rows = await db
+      .select()
+      .from(aiPlanningState)
+      .where(eq(aiPlanningState.key, planningSessionKey))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    if (row.expiresAt < Date.now()) {
+      await db
+        .delete(aiPlanningState)
+        .where(eq(aiPlanningState.key, planningSessionKey))
+        .catch(() => {});
+      return null;
+    }
+    return row.state as PlanningState;
   };
 
-  const upsertState = (next: PlanningState): PlanningState => {
-    if (!planningSessionKey) return next;
+  const upsertState = async (next: PlanningState): Promise<PlanningState> => {
+    if (!planningSessionKey || !athleteId || !sessionId) return next;
+    const now = Date.now();
     const withTimestamp: PlanningState = {
       ...next,
-      lastUpdatedAt: Date.now(),
+      lastUpdatedAt: now,
     };
-    planningStateStore.set(planningSessionKey, withTimestamp);
+    await db
+      .insert(aiPlanningState)
+      .values({
+        key: planningSessionKey,
+        athleteId,
+        sessionId,
+        state: withTimestamp,
+        expiresAt: now + PLANNING_TTL_MS,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: aiPlanningState.key,
+        set: {
+          state: sql`excluded.state`,
+          expiresAt: sql`excluded.expires_at`,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
     return withTimestamp;
   };
 
-  const resolveState = (
+  const resolveState = async (
     requestedFlow?: PlanningFlowIntent,
-  ): PlanningState | null => {
-    const state = getState();
+  ): Promise<PlanningState | null> => {
+    const state = await getState();
     if (!state) return null;
     if (!requestedFlow || requestedFlow === state.flow) return state;
     return {
@@ -622,7 +742,7 @@ export async function POST(req: Request) {
             flow: PlanningFlowIntent;
             reset: boolean;
           }) => {
-            const existing = getState();
+            const existing = await getState();
             const shouldReset = reset || !existing;
             const next: PlanningState =
               shouldReset || !existing
@@ -647,7 +767,7 @@ export async function POST(req: Request) {
                     confirmed: false,
                     lastUpdatedAt: Date.now(),
                   };
-            const saved = upsertState(next);
+            const saved = await upsertState(next);
             return {
               ok: true,
               action: 'started',
@@ -655,6 +775,7 @@ export async function POST(req: Request) {
               confirmed: saved.confirmed,
               missing: getMissingRequiredPlanningFields(saved),
               summary: summarizePlanningState(saved),
+              resumeToken: planningSessionKey,
             };
           },
         },
@@ -663,7 +784,7 @@ export async function POST(req: Request) {
             'Set one or more structured planning fields for the active chat planning flow.',
           inputSchema: setPlanningFieldSchema,
           execute: async (input: SetPlanningFieldInput) => {
-            const existing = resolveState(input.flow) ?? {
+            const existing = (await resolveState(input.flow)) ?? {
               flow: input.flow,
               confirmed: false,
               weeklyPlan: defaultWeeklyPlanRequirements(),
@@ -682,7 +803,8 @@ export async function POST(req: Request) {
             if (input.flow === 'weekly_plan') {
               const weeklyPatch = input.patch as Partial<WeeklyPlanRequirements>;
               const inferredTargetWeek =
-                weeklyPatch.targetWeek ?? inferTargetWeekFromNotes(weeklyPatch.notes);
+                weeklyPatch.targetWeek ??
+                inferTargetWeekFromNotes(weeklyPatch.notes, resolvedTimeZone);
               const inferredGenerationMode =
                 weeklyPatch.generationMode ??
                 inferGenerationModeFromNotes(weeklyPatch.notes);
@@ -722,7 +844,7 @@ export async function POST(req: Request) {
               };
             }
 
-            const saved = upsertState(updated);
+            const saved = await upsertState(updated);
             return {
               ok: true,
               action: 'updated',
@@ -730,6 +852,7 @@ export async function POST(req: Request) {
               confirmed: saved.confirmed,
               summary: summarizePlanningState(saved),
               missing: getMissingRequiredPlanningFields(saved),
+              resumeToken: planningSessionKey,
             };
           },
         },
@@ -738,14 +861,14 @@ export async function POST(req: Request) {
             'Return the current planning state summary, confirmation status, and missing fields.',
           inputSchema: getPlanningStateSchema,
           execute: async (input?: {flow?: PlanningFlowIntent}) => {
-            const state = resolveState(input?.flow);
+            const state = await resolveState(input?.flow);
             if (!state) {
               return {
                 ok: false,
                 error: 'No planning flow started yet. Call startPlanningFlow first.',
               };
             }
-            const saved = upsertState(state);
+            const saved = await upsertState(state);
             return {
               ok: true,
               flow: saved.flow,
@@ -758,6 +881,7 @@ export async function POST(req: Request) {
                 trainingBlock: saved.trainingBlock,
                 sourcePlanId: saved.sourcePlanId ?? null,
               },
+              resumeToken: planningSessionKey,
             };
           },
         },
@@ -772,7 +896,7 @@ export async function POST(req: Request) {
             flow?: PlanningFlowIntent;
             confirmed: boolean;
           }) => {
-            const state = resolveState(flow);
+            const state = await resolveState(flow);
             if (!state) {
               return {
                 ok: false,
@@ -781,7 +905,7 @@ export async function POST(req: Request) {
             }
             const missing = getMissingRequiredPlanningFields(state);
             const nextConfirmed = confirmed && missing.length === 0;
-            const saved = upsertState({
+            const saved = await upsertState({
               ...state,
               confirmed: nextConfirmed,
             });
@@ -795,6 +919,7 @@ export async function POST(req: Request) {
                 confirmed && missing.length > 0
                   ? 'Cannot confirm yet; required fields are still missing.'
                   : null,
+              resumeToken: planningSessionKey,
             };
           },
         },
@@ -809,7 +934,7 @@ export async function POST(req: Request) {
             flow?: PlanningFlowIntent;
             dryRun: boolean;
           }) => {
-            const state = resolveState(flow);
+            const state = await resolveState(flow);
             if (!state) {
               return {
                 ok: false,
@@ -868,6 +993,8 @@ export async function POST(req: Request) {
                   strategyPreset: state.trainingBlock.strategyPreset,
                   optimizationPriority:
                     state.trainingBlock.optimizationPriority,
+                  riskOverride,
+                  timeZone: resolvedTimeZone,
                 };
                 const response = await fetch(
                   new URL('/api/ai/training-block', baseUrl),
@@ -895,7 +1022,7 @@ export async function POST(req: Request) {
                 }
 
                 const data = (await response.json()) as Record<string, unknown>;
-                const resetState = upsertState({
+                const resetState = await upsertState({
                   ...state,
                   confirmed: false,
                 });
@@ -916,12 +1043,14 @@ export async function POST(req: Request) {
               const weekStartDate =
                 state.flow === 'weekly_plan'
                   ? state.weeklyPlan.targetWeek === 'current'
-                    ? getCurrentMondayIso()
-                    : getNextMondayIso()
+                    ? getCurrentMondayInTimeZone(resolvedTimeZone)
+                    : getNextMondayInTimeZone(resolvedTimeZone)
                   : undefined;
               const weeklyPayload = {
                 athleteId,
                 model: clientModel,
+                riskOverride,
+                timeZone: resolvedTimeZone,
                 weekStartDate,
                 mode:
                   state.flow === 'weekly_plan'
@@ -984,7 +1113,7 @@ export async function POST(req: Request) {
               const donePayload = await readWeeklyPlanStreamPayload(
                 weeklyResponse,
               );
-              const resetState = upsertState({
+              const resetState = await upsertState({
                 ...state,
                 confirmed: false,
               });
@@ -1101,6 +1230,12 @@ export async function POST(req: Request) {
     tools: toolNames,
   });
 
+  const retrievalToolNames = new Set(Object.keys(retrievalTools));
+  let sawRetrievalCall = false;
+  let sawFollowUpsCall = false;
+  let retrievalGuardrailViolated = false;
+  let fallbackFollowUps: string[] | null = null;
+
   let result;
   const maxToolSteps = canUsePlanningTools ? 8 : 5;
   try {
@@ -1126,6 +1261,12 @@ export async function POST(req: Request) {
         const calls = event.toolCalls;
         if (Array.isArray(calls) && calls.length > 0) {
           for (const tc of calls) {
+            if (retrievalToolNames.has(tc.toolName)) {
+              sawRetrievalCall = true;
+            }
+            if (tc.toolName === 'suggestFollowUps') {
+              sawFollowUpsCall = true;
+            }
             console.log(`[AI]   Tool call: ${tc.toolName}`);
             console.log(`[AI]     Args: ${JSON.stringify(tc.input)}`);
           }
@@ -1145,6 +1286,16 @@ export async function POST(req: Request) {
         if (txt) {
           const preview = txt.length > 200 ? txt.slice(0, 200) + '...' : txt;
           console.log(`[AI]   Text: ${preview}`);
+          if (requiresRetrieval && !sawRetrievalCall) {
+            logAiTrace(trace, 'guardrail_violation', {
+              type: 'retrieval_first_missing',
+              persona,
+              model: resolvedModel,
+              athleteId: athleteId ?? null,
+              sessionId: sessionId ?? null,
+            });
+            retrievalGuardrailViolated = true;
+          }
         }
         const u = event.usage;
         if (u) {
@@ -1154,6 +1305,35 @@ export async function POST(req: Request) {
         }
       },
       onFinish(event) {
+        if (requiresRetrieval && !sawRetrievalCall) {
+          logAiTrace(trace, 'guardrail_violation', {
+            type: 'retrieval_first_missing_at_finish',
+            persona,
+            model: resolvedModel,
+            athleteId: athleteId ?? null,
+            sessionId: sessionId ?? null,
+          });
+          retrievalGuardrailViolated = true;
+        }
+        if (!sawFollowUpsCall) {
+          fallbackFollowUps = buildFallbackFollowUps(persona);
+          logAiTrace(trace, 'followups_fallback_used', {
+            persona,
+            model: resolvedModel,
+            athleteId: athleteId ?? null,
+            sessionId: sessionId ?? null,
+            suggestions: fallbackFollowUps,
+          });
+        }
+        if (retrievalGuardrailViolated) {
+          logAiTrace(trace, 'guardrail_flagged', {
+            type: 'retrieval_required_but_missing',
+            persona,
+            model: resolvedModel,
+            athleteId: athleteId ?? null,
+            sessionId: sessionId ?? null,
+          });
+        }
         logAiTrace(trace, 'request_finished', {
           persona,
           model: resolvedModel,
@@ -1163,6 +1343,12 @@ export async function POST(req: Request) {
           steps: Array.isArray(event.steps) ? event.steps.length : null,
           inputTokens: event.usage?.inputTokens ?? null,
           outputTokens: event.usage?.outputTokens ?? null,
+          advisoryIntent,
+          requiresRetrieval,
+          sawRetrievalCall,
+          sawFollowUpsCall,
+          retrievalGuardrailViolated,
+          followUpsFallbackUsed: Boolean(fallbackFollowUps),
         });
         console.log(`[AI] ========== Request Complete ==========`);
         console.log(`[AI] Final reason: ${event.finishReason}`);
@@ -1179,12 +1365,28 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown error';
+    if (message.startsWith('GUARDRAIL_')) {
+      return new Response(
+        JSON.stringify(
+          createAiErrorPayload(
+            'chat_guardrail_blocked',
+            'Assistant response blocked by runtime guardrails. A repair retry is required.',
+            {clarification: message},
+          ),
+        ),
+        {
+          status: 422,
+          headers: {'Content-Type': 'application/json', 'x-trace-id': trace.traceId},
+        },
+      );
+    }
     logAiTrace(trace, 'request_failed', {
       persona,
       model: resolvedModel,
       sessionId: sessionId ?? null,
       athleteId: athleteId ?? null,
-      message: error instanceof Error ? error.message : 'unknown error',
+      message,
     });
     return new Response(
       JSON.stringify(

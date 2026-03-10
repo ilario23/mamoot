@@ -34,8 +34,16 @@ type RouteContext = {params: Promise<{table: string}>};
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DB_ROUTE_ENFORCE_AUTH =
-  (process.env.DB_ROUTE_ENFORCE_AUTH ?? 'false').toLowerCase() === 'true';
+  (process.env.DB_ROUTE_ENFORCE_AUTH ??
+    (process.env.NODE_ENV === 'production' ? 'true' : 'false')
+  ).toLowerCase() === 'true';
 const DB_ROUTE_API_KEY = process.env.DB_ROUTE_API_KEY ?? null;
+
+if (process.env.NODE_ENV === 'production' && !DB_ROUTE_ENFORCE_AUTH) {
+  throw new Error(
+    'DB_ROUTE_ENFORCE_AUTH must be true in production for /api/db/[table]',
+  );
+}
 
 const parseAthleteIdHeader = (req: NextRequest): number | null => {
   const raw = req.headers.get('x-athlete-id');

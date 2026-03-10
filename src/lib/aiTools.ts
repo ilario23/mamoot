@@ -53,6 +53,14 @@ export const planSessionSchema = z.object({
     .optional()
     .describe('Target heart rate zone, e.g. "Z2", "Z4"'),
   notes: z.string().optional().describe('Additional notes or instructions'),
+}).superRefine((value, ctx) => {
+  if (value.type !== 'rest' && !value.date?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['date'],
+      message: 'Date is required for non-rest sessions (YYYY-MM-DD).',
+    });
+  }
 });
 
 export type PlanSessionInput = z.infer<typeof planSessionSchema>;
@@ -104,6 +112,14 @@ export const physioSessionSchema = z.object({
     .optional()
     .describe('Expected duration, e.g. "30 min", "15 min"'),
   notes: z.string().optional().describe('Additional notes or instructions'),
+}).superRefine((value, ctx) => {
+  if (value.type !== 'recovery' && !value.date?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['date'],
+      message: 'Date is required for non-recovery sessions (YYYY-MM-DD).',
+    });
+  }
 });
 
 export type PhysioSessionInput = z.infer<typeof physioSessionSchema>;
@@ -118,6 +134,18 @@ export const suggestFollowUpsSchema = z.object({
     .min(2)
     .max(3)
     .describe('2-3 short follow-up suggestions for the user'),
+}).superRefine((value, ctx) => {
+  for (let i = 0; i < value.suggestions.length; i += 1) {
+    const text = value.suggestions[i]?.trim() ?? '';
+    const wordCount = text.length === 0 ? 0 : text.split(/\s+/).length;
+    if (wordCount > 8) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['suggestions', i],
+        message: 'Each suggestion must be 8 words or fewer.',
+      });
+    }
+  }
 });
 
 export type SuggestFollowUpsInput = z.infer<typeof suggestFollowUpsSchema>;

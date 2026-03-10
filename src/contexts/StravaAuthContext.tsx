@@ -65,7 +65,7 @@ export const StravaAuthProvider = ({children}: {children: ReactNode}) => {
     }
   }, []);
 
-  const isAuthenticated = !!tokens?.access_token;
+  const isAuthenticated = !!tokens;
   const athlete = tokens?.athlete ?? null;
 
   return (
