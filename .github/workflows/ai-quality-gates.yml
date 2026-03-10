@@ -3,12 +3,15 @@ name: AI Quality Gates
 on:
   pull_request:
     paths:
+      - 'scripts/lib/**'
+      - 'scripts/prompt-contracts.json'
       - 'src/lib/aiPrompts.ts'
       - 'src/lib/promptContracts.ts'
       - 'scripts/check-prompt-contracts.mjs'
       - 'scripts/check-prompt-scenarios.mjs'
       - 'scripts/ai-eval-gates.mjs'
       - 'scripts/check-multi-agent-telemetry.mjs'
+      - 'scripts/check-weekly-distribution-logic.mjs'
       - 'scripts/run-cohort-replay-benchmark.mjs'
       - 'scripts/prompt-behavior-scenarios.json'
       - 'docs/AI_CONTEXT.md'
@@ -25,6 +28,9 @@ on:
 jobs:
   quality-gates:
     runs-on: ubuntu-latest
+    concurrency:
+      group: ai-quality-gates-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,6 +49,11 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Run offline tests
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+        run: npm run test:offline
 
       - name: Build
         run: npm run build

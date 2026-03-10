@@ -2,11 +2,20 @@
   {
     "id": "coach-redirection-weekly-plan-page",
     "persona": "coach",
-    "description": "Coach handles weekly-plan requests via chat planning tools",
+    "description": "Coach routes planning through embedded intake form",
     "mustInclude": [
-      "You **MUST NOT** write out weekly training plans",
-      "startPlanningFlow",
-      "executePlanningGeneration"
+      {
+        "id": "coach-no-plan-table",
+        "phrase": "You **MUST NOT** write out weekly training plans"
+      },
+      {
+        "id": "coach-embedded-form",
+        "phrase": "embedded coach form in chat"
+      },
+      {
+        "id": "coach-intake-form",
+        "phrase": "coach intake form in chat"
+      }
     ]
   },
   {
@@ -14,7 +23,10 @@
     "persona": "coach",
     "description": "Coach avoids medical diagnosis and medication",
     "mustInclude": [
-      "Never prescribe medication or diagnose injuries"
+      {
+        "id": "coach-medical-boundary",
+        "phrase": "Never prescribe medication or diagnose injuries"
+      }
     ]
   },
   {
@@ -22,18 +34,25 @@
     "persona": "coach",
     "description": "Coach persists weekly constraints with tool",
     "mustInclude": [
-      "ALWAYS call the **saveWeeklyPreferences** tool"
+      {
+        "id": "coach-save-preferences-tool",
+        "phrase": "ALWAYS call the **saveWeeklyPreferences** tool"
+      }
     ]
   },
   {
     "id": "coach-chat-native-training-block-flow",
     "persona": "coach",
-    "description": "Coach runs chat-native training-block planning flow",
+    "description": "Coach routes training-block setup through embedded form",
     "mustInclude": [
-      "startPlanningFlow",
-      "training_block",
-      "confirmPlanningState",
-      "executePlanningGeneration"
+      {
+        "id": "coach-training-block-form",
+        "phrase": "coach intake form in chat"
+      },
+      {
+        "id": "coach-training-block-intent",
+        "phrase": "training_block"
+      }
     ]
   },
   {
@@ -41,8 +60,14 @@
     "persona": "nutritionist",
     "description": "Nutritionist must prevent allergy-unsafe advice",
     "mustInclude": [
-      "CRITICAL: Always check the athlete's allergies list",
-      "NEVER suggest foods containing ingredients the athlete is allergic to"
+      {
+        "id": "nutrition-allergy-check",
+        "phrase": "CRITICAL: Always check the athlete's allergies list"
+      },
+      {
+        "id": "nutrition-allergy-refusal",
+        "phrase": "NEVER suggest foods containing ingredients the athlete is allergic to"
+      }
     ]
   },
   {
@@ -50,7 +75,10 @@
     "persona": "nutritionist",
     "description": "Nutritionist starts from unified weekly plan context",
     "mustInclude": [
-      "ALWAYS call getWeeklyPlan as your first action when creating a nutrition plan or giving daily advice."
+      {
+        "id": "nutrition-weekly-plan-first",
+        "phrase": "ALWAYS call getWeeklyPlan as your first action when creating a nutrition plan or giving daily advice."
+      }
     ]
   },
   {
@@ -58,8 +86,14 @@
     "persona": "physio",
     "description": "Physio redirects full weekly strength tables to Weekly Plan page",
     "mustInclude": [
-      "You **MUST NOT** write out full weekly strength/mobility programs",
-      "Head over to the **Weekly Plan** page and tap **Generate Weekly Plan**"
+      {
+        "id": "physio-no-plan-table",
+        "phrase": "You **MUST NOT** write out full weekly strength/mobility programs"
+      },
+      {
+        "id": "physio-weekly-plan-redirect",
+        "phrase": "Head over to the **Weekly Plan** page and tap **Generate Weekly Plan**"
+      }
     ]
   },
   {
@@ -67,7 +101,10 @@
     "persona": "physio",
     "description": "Physio avoids diagnosis and clinical replacement claims",
     "mustInclude": [
-      "Never diagnose specific injuries or replace professional medical assessment"
+      {
+        "id": "physio-no-diagnosis",
+        "phrase": "Never diagnose specific injuries or replace professional medical assessment"
+      }
     ]
   },
   {
@@ -75,8 +112,14 @@
     "persona": "shared",
     "description": "Personas must end with follow-up tool behavior",
     "mustInclude": [
-      "ALWAYS call the suggestFollowUps tool at the end of your response",
-      "After calling it, stop writing."
+      {
+        "id": "shared-followups-tool",
+        "phrase": "ALWAYS call the suggestFollowUps tool at the end of your response"
+      },
+      {
+        "id": "shared-followups-stop-writing",
+        "phrase": "After calling it, stop writing."
+      }
     ]
   },
   {
@@ -84,7 +127,10 @@
     "persona": "shared",
     "description": "Confidence-aware fallback policy is explicit",
     "mustInclude": [
-      "If data is missing or uncertain, ask one clarifying question or provide a safe fallback."
+      {
+        "id": "shared-confidence-fallback",
+        "phrase": "If data is missing or uncertain, ask one clarifying question or provide a safe fallback."
+      }
     ]
   },
   {
@@ -92,25 +138,21 @@
     "persona": "shared",
     "description": "Red-flag safety refusal policy exists",
     "mustInclude": [
-      "If user asks for diagnosis/medication or presents red-flag symptoms, refuse safely and advise urgent professional care."
+      {
+        "id": "shared-red-flag-refusal",
+        "phrase": "If user asks for diagnosis/medication or presents red-flag symptoms, refuse safely and advise urgent professional care."
+      }
     ]
   },
   {
-    "id": "orchestrator-bounded-multi-agent",
-    "persona": "orchestrator",
-    "description": "Orchestrator enforces bounded delegation over open-ended execution",
+    "id": "coach-form-only-planning-intake",
+    "persona": "coach",
+    "description": "Coach uses deterministic form for missing planning fields",
     "mustInclude": [
-      "You coordinate; specialists execute.",
-      "Keep each plan item small, action-oriented, and status-driven."
-    ]
-  },
-  {
-    "id": "orchestrator-structured-handoffs",
-    "persona": "orchestrator",
-    "description": "Orchestrator should use handoff tools for specialist collaboration",
-    "mustInclude": [
-      "createOrchestratorHandoff / updateOrchestratorHandoff",
-      "clear ownership (coach, nutritionist, physio)"
+      {
+        "id": "coach-form-only-intake",
+        "phrase": "Use chat for clarifications and rationale, but do not run planning-intake tool workflows in free-form turns."
+      }
     ]
   }
 ]

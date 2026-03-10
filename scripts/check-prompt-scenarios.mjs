@@ -1,5 +1,9 @@
 import {readFile} from 'node:fs/promises';
 import process from 'node:process';
+import {
+  evaluateClause,
+  findBestSegmentMatch,
+} from './lib/text-match.mjs';
 
 const AI_PROMPTS_PATH = new URL('../src/lib/aiPrompts.ts', import.meta.url);
 const SCENARIOS_PATH = new URL(
@@ -23,16 +27,19 @@ const run = async () => {
   for (const scenario of scenarios) {
     if (!scenario || typeof scenario !== 'object') continue;
     const id = typeof scenario.id === 'string' ? scenario.id : 'unknown-scenario';
-    const mustInclude = Array.isArray(scenario.mustInclude)
-      ? scenario.mustInclude.filter((item) => typeof item === 'string')
-      : [];
-
-    const missingPhrases = mustInclude.filter(
-      (phrase) => !promptSource.includes(phrase),
-    );
-
-    if (missingPhrases.length > 0) {
-      failures.push({id, missingPhrases});
+    const checks = Array.isArray(scenario.mustInclude) ? scenario.mustInclude : [];
+    const scenarioFailures = [];
+    for (let index = 0; index < checks.length; index += 1) {
+      const check = checks[index];
+      const result = evaluateClause(
+        promptSource,
+        check,
+        `${id}#mustInclude-${index + 1}`,
+      );
+      if (!result.ok) scenarioFailures.push(result);
+    }
+    if (scenarioFailures.length > 0) {
+      failures.push({id, scenarioFailures});
     }
   }
 
@@ -44,8 +51,15 @@ const run = async () => {
   console.error('[prompt-scenarios] FAIL missing scenario clauses:');
   for (const failure of failures) {
     console.error(`- ${failure.id}`);
-    for (const phrase of failure.missingPhrases) {
-      console.error(`  - "${phrase}"`);
+    for (const scenarioFailure of failure.scenarioFailures) {
+      console.error(`  - clause ${scenarioFailure.clause.id}`);
+      for (const phrase of scenarioFailure.missing) {
+        const nearest = findBestSegmentMatch(promptSource, phrase);
+        console.error(`    - missing "${phrase}"`);
+        console.error(
+          `      nearest (${nearest.score.toFixed(2)}): "${nearest.segment}"`,
+        );
+      }
     }
   }
   process.exit(1);
