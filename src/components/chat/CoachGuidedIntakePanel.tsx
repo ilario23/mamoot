@@ -118,6 +118,11 @@ const logIntakeEvent = (
   console.info('[CoachIntake]', event, payload ?? {});
 };
 
+const buildIdempotencyKey = (
+  scope: 'weekly_plan' | 'weekly_plan_edit' | 'training_block',
+  athleteId: number,
+) => `${scope}:${athleteId}:${Date.now()}:${crypto.randomUUID()}`;
+
 interface CoachGuidedIntakePanelProps {
   activePersonaId: string;
   athleteId: number | null;
@@ -1262,6 +1267,7 @@ const CoachGuidedIntakePanel = ({
     }`;
     const payload = {
       athleteId,
+      idempotencyKey: buildIdempotencyKey('weekly_plan', athleteId),
       model: selectedModel,
       weekStartDate:
         weeklyReq.targetWeek === 'current'
@@ -1277,7 +1283,10 @@ const CoachGuidedIntakePanel = ({
     try {
       const response = await fetch('/api/ai/weekly-plan', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': payload.idempotencyKey,
+        },
         body: JSON.stringify(payload),
       });
 
@@ -1447,6 +1456,7 @@ const CoachGuidedIntakePanel = ({
     }`;
     const payload = {
       athleteId,
+      idempotencyKey: buildIdempotencyKey('weekly_plan_edit', athleteId),
       model: selectedModel,
       weekStartDate: activePlanForEdit.weekStart,
       mode: editReq.generationMode,
@@ -1461,7 +1471,10 @@ const CoachGuidedIntakePanel = ({
     try {
       const response = await fetch('/api/ai/weekly-plan', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': payload.idempotencyKey,
+        },
         body: JSON.stringify(payload),
       });
 
@@ -1638,12 +1651,17 @@ const CoachGuidedIntakePanel = ({
       notes ? `\nAdditional notes:\n${notes}` : ''
     }`;
 
+    const idempotencyKey = buildIdempotencyKey('training_block', athleteId);
     try {
       const response = await fetch('/api/ai/training-block', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKey,
+        },
         body: JSON.stringify({
           athleteId,
+          idempotencyKey,
           model: selectedModel,
           goalEvent: blockReq.goalEvent,
           goalDate: blockReq.goalDate,

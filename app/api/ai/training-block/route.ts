@@ -6,8 +6,9 @@ import {
   userSettings,
   trainingBlocks,
   athleteReadinessSignals,
+  aiPlanningState,
 } from '@/db/schema';
-import {eq, desc, and, ne, isNull, sql, gte} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull, sql, gte, lt} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
 import {
@@ -43,11 +44,11 @@ import {generateObjectWithRetry} from '@/lib/aiGeneration';
 import {validateTrainingBlockWeekOutlines} from '@/lib/planSemanticValidators';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
-import {resolveMultiAgentRuntimeConfig} from '@/lib/multiAgentContracts';
 import {getNextMondayInTimeZone} from '@/lib/weekTime';
 
 export const maxDuration = 120;
 const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
+const GENERATION_LOCK_TTL_MS = 2 * 60 * 1000;
 
 const ALLOWED_MODELS: Record<string, () => ReturnType<typeof openai | typeof anthropic>> = {
   'gpt-4o-mini': () => openai('gpt-4o-mini'),
@@ -118,6 +119,62 @@ const withStrategyStamp = <T extends {notes?: string}>(
   });
 };
 
+const buildTrainingBlockGenerationLockKey = (input: {
+  athleteId: number;
+  idempotencyKey?: string;
+  goalEvent: string;
+  goalDate: string;
+  mode?: 'create' | 'adapt';
+  sourceBlockId?: string;
+}): string => {
+  const explicit = input.idempotencyKey?.trim();
+  if (explicit) {
+    return `generation-lock:training-block:${input.athleteId}:${explicit}`;
+  }
+  return [
+    'generation-lock:training-block',
+    input.athleteId,
+    input.mode ?? 'create',
+    input.goalEvent.trim().toLowerCase(),
+    input.goalDate,
+    input.sourceBlockId ?? 'none',
+  ].join(':');
+};
+
+const acquireGenerationLock = async (
+  athleteId: number,
+  key: string,
+): Promise<boolean> => {
+  const now = Date.now();
+  await db
+    .delete(aiPlanningState)
+    .where(and(eq(aiPlanningState.key, key), lt(aiPlanningState.expiresAt, now)))
+    .catch(() => {});
+
+  const inserted = await db
+    .insert(aiPlanningState)
+    .values({
+      key,
+      athleteId,
+      sessionId: 'generation-lock',
+      state: {kind: 'generation-lock', scope: 'training-block'},
+      expiresAt: now + GENERATION_LOCK_TTL_MS,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({target: aiPlanningState.key})
+    .returning({key: aiPlanningState.key});
+
+  return inserted.length > 0;
+};
+
+const releaseGenerationLock = async (key: string): Promise<void> => {
+  await db
+    .delete(aiPlanningState)
+    .where(eq(aiPlanningState.key, key))
+    .catch(() => {});
+};
+
 export async function POST(req: Request) {
   const trace = createTraceContext('ai.training-block', req);
   let body: unknown;
@@ -140,6 +197,7 @@ export async function POST(req: Request) {
   }
   const parsedData = parsedBody.data as {
     athleteId: number;
+    idempotencyKey?: string;
     mode?: 'create' | 'adapt';
     goalEvent: string;
     goalDate: string;
@@ -161,12 +219,12 @@ export async function POST(req: Request) {
     strategySelectionMode?: StrategySelectionMode;
     strategyPreset?: TrainingStrategyPreset;
     optimizationPriority?: OptimizationPriority;
-    useMultiAgent?: boolean;
     riskOverride?: boolean;
     timeZone?: string;
   };
   const {
     athleteId,
+    idempotencyKey,
     mode,
     goalEvent,
     goalDate,
@@ -180,7 +238,6 @@ export async function POST(req: Request) {
     strategySelectionMode,
     strategyPreset,
     optimizationPriority,
-    useMultiAgent,
     riskOverride = false,
     timeZone,
   } = parsedData;
@@ -193,10 +250,26 @@ export async function POST(req: Request) {
     );
   }
 
+  const lockKey = buildTrainingBlockGenerationLockKey({
+    athleteId,
+    idempotencyKey: idempotencyKey ?? req.headers.get('x-idempotency-key') ?? undefined,
+    goalEvent,
+    goalDate,
+    mode,
+    sourceBlockId,
+  });
+  const lockAcquired = await acquireGenerationLock(athleteId, lockKey);
+  if (!lockAcquired) {
+    return NextResponse.json(
+      createAiErrorPayload(
+        'generation_inflight_duplicate',
+        'A training block generation request is already in progress for this payload. Please wait.',
+      ),
+      {status: 409, headers: {'x-trace-id': trace.traceId}},
+    );
+  }
+
   const resolvedMode = mode ?? 'create';
-  const multiAgentConfig = resolveMultiAgentRuntimeConfig();
-  const multiAgentEnabled =
-    multiAgentConfig.enabled && (useMultiAgent ?? true);
   const model = getModel(clientModel);
   const resolvedModel =
     clientModel && ALLOWED_MODELS[clientModel]
@@ -232,8 +305,6 @@ export async function POST(req: Request) {
     model: resolvedModel,
     persona: 'pipeline',
     sessionId: null,
-    multiAgentEnabled,
-    multiAgentConfig,
   });
   const requestStartedAt = Date.now();
 
@@ -243,61 +314,11 @@ export async function POST(req: Request) {
 
   try {
     const elapsedMs = () => Date.now() - requestStartedAt;
-    const hasRuntimeBudget = () => elapsedMs() < multiAgentConfig.maxRuntimeMs;
     let roundCount = 0;
     let specialistTurnsUsed = 0;
     let repairTurnsUsed = 0;
     let repairApplied = false;
-    let collaborationSummary =
-      'Coach-led macro periodization with physio safety review.';
-
-    const maybeApplyPhysioSafetyReview = async (
-      candidate: TrainingBlockOutput,
-      context: {
-        goalEvent: string;
-        goalDate: string;
-        totalWeeks: number;
-        injuriesText: string;
-      },
-    ): Promise<TrainingBlockOutput> => {
-      if (!multiAgentEnabled) return candidate;
-      if (specialistTurnsUsed >= multiAgentConfig.maxSpecialistTurns) return candidate;
-      if (roundCount >= multiAgentConfig.maxRounds) return candidate;
-      if (!hasRuntimeBudget()) return candidate;
-
-      const reviewPrompt = `You are a sports physio reviewing a running training block for safety and injury risk.
-
-## Context
-- Goal event: ${context.goalEvent}
-- Goal date: ${context.goalDate}
-- Total weeks: ${context.totalWeeks}
-- Known injuries: ${context.injuriesText}
-
-## Candidate training block JSON
-${JSON.stringify(candidate)}
-
-## Review rules
-- Keep the same number of weeks and preserve periodization intent.
-- Do not increase risk in weeks marked as recovery/taper.
-- If injuries are present, reduce aggressive spikes and add conservative notes.
-- Keep race week low-volume with clear pre-race caution.
-- Return the full revised block output schema.`;
-
-      const reviewed = await generateObjectWithRetry<TrainingBlockOutput>({
-        model,
-        schema: trainingBlockOutputSchema,
-        prompt: reviewPrompt,
-        semanticCheck: (nextCandidate) =>
-          validateTrainingBlockWeekOutlines(
-            nextCandidate.weekOutlines as WeekOutline[],
-            context.totalWeeks,
-          ),
-      });
-      specialistTurnsUsed += 1;
-      roundCount += 1;
-      collaborationSummary = 'Coach draft reviewed by Physio safety specialist.';
-      return reviewed;
-    };
+    const collaborationSummary = 'Single-pass coach-led macro periodization.';
 
     if (resolvedMode === 'adapt') {
       const sourceRows = sourceBlockId
@@ -505,9 +526,6 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         promptHash: promptHash(adaptationPrompt),
         totalWeeks: sourceBlock.totalWeeks,
       });
-      if (!hasRuntimeBudget()) {
-        throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_BLOCK_ADAPT');
-      }
       const adaptedObject = await generateObjectWithRetry<TrainingBlockOutput>({
         model,
         schema: trainingBlockOutputSchema,
@@ -520,17 +538,8 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
       });
       specialistTurnsUsed += 1;
       roundCount += 1;
-      const adaptedWithReview = await maybeApplyPhysioSafetyReview(adaptedObject, {
-        goalEvent: goalEvent || sourceBlock.goalEvent,
-        goalDate: goalDate || sourceBlock.goalDate,
-        totalWeeks: sourceBlock.totalWeeks,
-        injuriesText:
-          settings?.injuries && Array.isArray(settings.injuries)
-            ? JSON.stringify(settings.injuries)
-            : 'None reported',
-      });
       const stampedWeekOutlines = withStrategyStamp(
-        adaptedWithReview.weekOutlines,
+        adaptedObject.weekOutlines,
         resolvedStrategyMode,
         strategyLabel,
         priorityLabel,
@@ -549,7 +558,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         goalDate: resolvedGoalDate,
         totalWeeks: sourceBlock.totalWeeks,
         startDate,
-        phases: adaptedWithReview.phases,
+        phases: adaptedObject.phases,
         weekOutlines: stampedWeekOutlines,
         isActive: true,
         createdAt: nowMs,
@@ -574,7 +583,6 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         blockId,
         mode: resolvedMode,
         totalWeeks: sourceBlock.totalWeeks,
-        multiAgentEnabled,
         roundCount,
         specialistTurnsUsed,
         repairTurnsUsed,
@@ -591,7 +599,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         goalDate: resolvedGoalDate,
         totalWeeks: sourceBlock.totalWeeks,
         startDate,
-        phases: adaptedWithReview.phases,
+        phases: adaptedObject.phases,
         weekOutlines: stampedWeekOutlines,
         isActive: true,
         createdAt: nowMs,
@@ -599,14 +607,6 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         risk: riskIntelligence,
         digitalTwin: twinProfile,
         counterfactualRanking,
-        multiAgent: {
-          enabled: multiAgentEnabled,
-          roundCount,
-          specialistTurnsUsed,
-          repairTurnsUsed,
-          repairApplied,
-          summary: collaborationSummary,
-        },
       }, {headers: {'x-trace-id': trace.traceId}});
     }
 
@@ -839,9 +839,6 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       promptHash: promptHash(prompt),
       totalWeeks,
     });
-    if (!hasRuntimeBudget()) {
-      throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_BLOCK_CREATE');
-    }
     const resultObject = await generateObjectWithRetry<TrainingBlockOutput>({
       model,
       schema: trainingBlockOutputSchema,
@@ -854,14 +851,8 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
     });
     specialistTurnsUsed += 1;
     roundCount += 1;
-    const resultWithReview = await maybeApplyPhysioSafetyReview(resultObject, {
-      goalEvent,
-      goalDate,
-      totalWeeks,
-      injuriesText,
-    });
     const stampedWeekOutlines = withStrategyStamp(
-      resultWithReview.weekOutlines,
+      resultObject.weekOutlines,
       resolvedStrategyMode,
       strategyLabel,
       priorityLabel,
@@ -878,7 +869,7 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       goalDate,
       totalWeeks,
       startDate,
-      phases: resultWithReview.phases,
+      phases: resultObject.phases,
       weekOutlines: stampedWeekOutlines,
       isActive: true,
       createdAt: nowMs,
@@ -905,7 +896,6 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       blockId,
       mode: resolvedMode,
       totalWeeks,
-      multiAgentEnabled,
       roundCount,
       specialistTurnsUsed,
       repairTurnsUsed,
@@ -923,7 +913,7 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       goalDate,
       totalWeeks,
       startDate,
-      phases: resultWithReview.phases,
+      phases: resultObject.phases,
       weekOutlines: stampedWeekOutlines,
       isActive: true,
       createdAt: nowMs,
@@ -931,14 +921,6 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       risk: riskIntelligence,
       digitalTwin: twinProfile,
       counterfactualRanking,
-      multiAgent: {
-        enabled: multiAgentEnabled,
-        roundCount,
-        specialistTurnsUsed,
-        repairTurnsUsed,
-        repairApplied,
-        summary: collaborationSummary,
-      },
     }, {headers: {'x-trace-id': trace.traceId}});
   } catch (error) {
     logAiTrace(trace, 'request_failed', {
@@ -951,18 +933,6 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       outputTokens: null,
     });
     console.error('[TrainingBlock] Error:', error);
-    if (
-      error instanceof Error &&
-      error.message.startsWith('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED')
-    ) {
-      return NextResponse.json(
-        createAiErrorPayload(
-          'multi_agent_runtime_budget_exceeded',
-          'Training-block generation exceeded the bounded runtime budget. Please retry.',
-        ),
-        {status: 503, headers: {'x-trace-id': trace.traceId}},
-      );
-    }
     if (
       error instanceof Error &&
       error.message === 'ACWR_RISK_OVERRIDE_REQUIRED'
@@ -982,5 +952,7 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       ),
       {status: 500, headers: {'x-trace-id': trace.traceId}},
     );
+  } finally {
+    await releaseGenerationLock(lockKey);
   }
 }

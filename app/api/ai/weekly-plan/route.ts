@@ -7,8 +7,9 @@ import {
   trainingBlocks,
   weeklyPlans,
   athleteReadinessSignals,
+  aiPlanningState,
 } from '@/db/schema';
-import {eq, desc, and, ne, isNull, sql, gte} from 'drizzle-orm';
+import {eq, desc, and, ne, isNull, sql, gte, lt} from 'drizzle-orm';
 import {transformActivity} from '@/lib/strava';
 import type {StravaSummaryActivity} from '@/lib/strava';
 import {
@@ -56,9 +57,6 @@ import {
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
 import {
-  resolveMultiAgentRuntimeConfig,
-} from '@/lib/multiAgentContracts';
-import {
   encodeSseEvent,
   type AiProgressEvent,
   type AiProgressPhase,
@@ -70,9 +68,13 @@ import {
   getWeekDatesFromMonday,
   getTodayIsoInTimeZone,
 } from '@/lib/weekTime';
+import {formatPaceRange, mergeWithDefaultPaceZones, PACE_ZONE_KEYS} from '@/lib/paceZones';
+import type {PaceZoneRange} from '@/lib/activityModel';
 
 export const maxDuration = 120;
 const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
+const GENERATION_LOCK_TTL_MS = 2 * 60 * 1000;
+const MAX_REPAIR_ROUNDS = 3;
 const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
 const PLAN_STRATEGY_PREFIX = '<!-- weekly-plan-strategy:';
@@ -155,6 +157,59 @@ const buildGeneratedSessions = (
   });
 };
 
+const buildWeeklyGenerationLockKey = (input: {
+  athleteId: number;
+  idempotencyKey?: string;
+  weekStartDate?: string;
+  mode?: 'full' | 'remaining_days';
+  sourcePlanId?: string;
+  editSourcePlanId?: string;
+}): string => {
+  const explicit = input.idempotencyKey?.trim();
+  if (explicit) return `generation-lock:weekly:${input.athleteId}:${explicit}`;
+  return [
+    'generation-lock:weekly',
+    input.athleteId,
+    input.weekStartDate ?? 'auto',
+    input.mode ?? 'full',
+    input.editSourcePlanId ?? input.sourcePlanId ?? 'none',
+  ].join(':');
+};
+
+const acquireGenerationLock = async (
+  athleteId: number,
+  key: string,
+): Promise<boolean> => {
+  const now = Date.now();
+  await db
+    .delete(aiPlanningState)
+    .where(and(eq(aiPlanningState.key, key), lt(aiPlanningState.expiresAt, now)))
+    .catch(() => {});
+
+  const inserted = await db
+    .insert(aiPlanningState)
+    .values({
+      key,
+      athleteId,
+      sessionId: 'generation-lock',
+      state: {kind: 'generation-lock', scope: 'weekly-plan'},
+      expiresAt: now + GENERATION_LOCK_TTL_MS,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoNothing({target: aiPlanningState.key})
+    .returning({key: aiPlanningState.key});
+
+  return inserted.length > 0;
+};
+
+const releaseGenerationLock = async (key: string): Promise<void> => {
+  await db
+    .delete(aiPlanningState)
+    .where(eq(aiPlanningState.key, key))
+    .catch(() => {});
+};
+
 export async function POST(req: Request) {
   const trace = createTraceContext('ai.weekly-plan', req);
   let body: unknown;
@@ -177,6 +232,7 @@ export async function POST(req: Request) {
   }
   const parsedData = parsedBody.data as {
     athleteId: number;
+    idempotencyKey?: string;
     weekStartDate?: string;
     model?: string;
     preferences?: string;
@@ -194,6 +250,7 @@ export async function POST(req: Request) {
   };
   const {
     athleteId,
+    idempotencyKey,
     weekStartDate,
     model: clientModel,
     preferences: clientPreferences,
@@ -217,11 +274,28 @@ export async function POST(req: Request) {
     );
   }
 
+  const lockKey = buildWeeklyGenerationLockKey({
+    athleteId,
+    idempotencyKey: idempotencyKey ?? req.headers.get('x-idempotency-key') ?? undefined,
+    weekStartDate,
+    mode: generationMode,
+    sourcePlanId,
+    editSourcePlanId,
+  });
+  const lockAcquired = await acquireGenerationLock(athleteId, lockKey);
+  if (!lockAcquired) {
+    return NextResponse.json(
+      createAiErrorPayload(
+        'generation_inflight_duplicate',
+        'A weekly plan generation request is already in progress for this payload. Please wait.',
+      ),
+      {status: 409, headers: {'x-trace-id': trace.traceId}},
+    );
+  }
+
   const mode = generationMode ?? 'full';
   const resolvedTimeZone = timeZone?.trim() || 'UTC';
   const todayIso = today ?? getTodayIsoInTimeZone(resolvedTimeZone);
-  const multiAgentConfig = resolveMultiAgentRuntimeConfig();
-  const multiAgentEnabled = false;
   let model = getModel(clientModel);
   let resolvedModel =
     clientModel && ALLOWED_MODELS[clientModel]
@@ -237,8 +311,6 @@ export async function POST(req: Request) {
     model: resolvedModel,
     persona: 'pipeline',
     sessionId: null,
-    multiAgentEnabled,
-    multiAgentConfig,
     timeZone: resolvedTimeZone,
     riskOverride,
   });
@@ -318,22 +390,14 @@ export async function POST(req: Request) {
     const weekEnd = getSundayIsoForMonday(weekStart);
     const weekDates = getWeekDatesFromMonday(weekStart);
     const elapsedMs = () => Date.now() - requestStartedAt;
-    const hasRuntimeBudget = () => elapsedMs() < multiAgentConfig.maxRuntimeMs;
     let specialistTurnsUsed = 0;
     const repairTurnsUsed = 0;
     let roundCount = 0;
-    const multiAgentConflicts: Array<{
-      date: string;
-      rule: string;
-      severity: 'low' | 'medium' | 'high';
-      action: string;
-    }> = [];
     const repairApplied = false;
     let distributionRepairApplied = false;
     let distributionRepairAttempts = 0;
     let coachDistributionEvaluation: DistributionEvaluation | null = null;
     let finalDistributionEvaluation: DistributionEvaluation | null = null;
-    const conflictSummary = 'Coach-only pipeline: no coach/physio conflict resolution step.';
     const isEditRequest =
       Boolean(editInstructions && editInstructions.trim()) ||
       Boolean(editSourcePlanId);
@@ -369,6 +433,23 @@ export async function POST(req: Request) {
     const hrZonesText = zonesRaw
       ? Object.entries(zonesRaw).map(([k, [min, max]]) => `${k.toUpperCase()} ${min}-${max}`).join(' | ')
       : null;
+    const paceZonesRaw = settings?.paceZones as
+      | Partial<Record<'z1' | 'z2' | 'z3' | 'z4' | 'z5' | 'z6', Partial<PaceZoneRange>>>
+      | undefined;
+    const mergedPaceZones = mergeWithDefaultPaceZones(paceZonesRaw);
+    const paceZonesText = PACE_ZONE_KEYS.map((zoneKey) => {
+      const zone = mergedPaceZones[zoneKey];
+      const range = formatPaceRange(zone.lowerSecPerKm, zone.upperSecPerKm);
+      if (!range) {
+        return `${zoneKey.toUpperCase()}: unset`;
+      }
+      const source = zone.source ?? 'none';
+      const confidence =
+        typeof zone.confidence === 'number'
+          ? `, confidence ${Math.round(zone.confidence * 100)}%`
+          : '';
+      return `${zoneKey.toUpperCase()}: ${range} (${source}${confidence})`;
+    }).join(' | ');
     const injuries = settings?.injuries as Array<{name?: string; notes?: string}> | undefined;
     const injuriesText = injuries?.length
       ? injuries.map((item) => item?.name || '').filter(Boolean).join(', ')
@@ -757,6 +838,7 @@ export async function POST(req: Request) {
     const coachPrompt = buildCoachPipelinePrompt({
       athleteName: null,
       hrZones: hrZonesText,
+      paceZones: paceZonesText,
       weight: settings?.weight ?? null,
       trainingBalance: settings?.trainingBalance ?? null,
       weekStart,
@@ -784,9 +866,6 @@ export async function POST(req: Request) {
       promptHash: promptHash(finalCoachPrompt),
       mode: effectiveMode,
     });
-    if (!hasRuntimeBudget()) {
-      throw new Error('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED_BEFORE_COACH');
-    }
     let coachObject = await generateObjectWithRetry<CoachWeekOutput>({
       model,
       schema: coachWeekOutputSchema,
@@ -809,8 +888,7 @@ export async function POST(req: Request) {
     });
     if (
       !coachDistributionEvaluation.accepted &&
-      hasRuntimeBudget() &&
-      roundCount < multiAgentConfig.maxRounds
+      roundCount < MAX_REPAIR_ROUNDS
     ) {
       sendProgress('coach', 'Applying coach distribution repair pass.');
       const repairPrompt = `${finalCoachPrompt}\n\n## Deterministic Weekly Distribution Feedback\n${summarizeDistributionForPrompt(
@@ -846,7 +924,6 @@ export async function POST(req: Request) {
 
     // Step 3: Merge by date
     sendProgress('merge', 'Building unified coach week with strength slots.');
-    const physioFallbackReason: 'runtime_budget' | null = null;
     let generatedSessions: UnifiedSession[] = buildGeneratedSessions(
       weekDates,
       coachSessions,
@@ -860,13 +937,11 @@ export async function POST(req: Request) {
       subscores: finalDistributionEvaluation.subscores,
       issueCount: finalDistributionEvaluation.issues.length,
       mode: effectiveMode,
-      physioFallbackReason,
     });
     if (
       !finalDistributionEvaluation.accepted &&
       !distributionRepairApplied &&
-      hasRuntimeBudget() &&
-      roundCount < multiAgentConfig.maxRounds
+      roundCount < MAX_REPAIR_ROUNDS
     ) {
       sendProgress('merge', 'Applying targeted coach distribution repair pass.');
       const distributionRepairPrompt = `${finalCoachPrompt}\n\n## Deterministic Weekly Distribution Repair Feedback\n${summarizeDistributionForPrompt(
@@ -1020,9 +1095,6 @@ export async function POST(req: Request) {
     if (riskPolicyBanner) {
       markdownLines.push(`- Risk policy: ${riskPolicyBanner}`);
     }
-    if (physioFallbackReason) {
-      markdownLines.push('- Fallback applied: coach-only fallback was activated.');
-    }
     if (finalDistributionEvaluation) {
       markdownLines.push(
         `- Weekly distribution score: ${finalDistributionEvaluation.score}/100 (target >= ${finalDistributionEvaluation.threshold})`,
@@ -1039,14 +1111,8 @@ export async function POST(req: Request) {
         markdownLines.push(`- Distribution note: ${issue.message}`);
       }
     }
-    markdownLines.push(`- Coordination summary: ${conflictSummary}`);
     for (const contributor of riskIntelligence.topContributors) {
       markdownLines.push(`- Contributor: ${contributor}`);
-    }
-    for (const conflict of multiAgentConflicts.slice(0, 3)) {
-      markdownLines.push(
-        `- Conflict resolved: ${conflict.date} ${conflict.rule} (${conflict.severity}) -> ${conflict.action}`,
-      );
     }
     for (const action of riskIntelligence.recommendedActions) {
       markdownLines.push(`- Mitigation: ${action}`);
@@ -1121,15 +1187,10 @@ export async function POST(req: Request) {
       weekStart,
       sessionCount: unifiedSessions.length,
       mode: effectiveMode,
-      multiAgentEnabled,
       roundCount,
       specialistTurnsUsed,
       repairTurnsUsed,
       repairApplied,
-      conflictCount: multiAgentConflicts.length,
-      highSeverityConflictCount: multiAgentConflicts.filter(
-        (conflict) => conflict.severity === 'high',
-      ).length,
       distributionScore: finalDistributionEvaluation?.score ?? null,
       distributionAccepted: finalDistributionEvaluation?.accepted ?? null,
       distributionRepairApplied,
@@ -1154,17 +1215,6 @@ export async function POST(req: Request) {
       risk: riskIntelligence,
       digitalTwin: twinProfile,
       counterfactualRanking,
-      multiAgent: {
-        enabled: multiAgentEnabled,
-        roundCount,
-        specialistTurnsUsed,
-        repairTurnsUsed,
-        repairApplied,
-        conflictCount: multiAgentConflicts.length,
-        conflicts: multiAgentConflicts,
-        summary: conflictSummary,
-        physioFallbackReason,
-      },
       distribution: finalDistributionEvaluation,
       riskPolicy: {
         acwr: acwrValue,
@@ -1187,20 +1237,6 @@ export async function POST(req: Request) {
       outputTokens: null,
     });
     console.error('[WeeklyPlan] Error:', error);
-    if (
-      error instanceof Error &&
-      error.message.startsWith('MULTI_AGENT_RUNTIME_BUDGET_EXCEEDED')
-    ) {
-      sendError(
-        'Weekly planning exceeded the bounded runtime budget. Please retry with fewer constraints.',
-        {
-          code: 'multi_agent_runtime_budget_exceeded',
-          status: 503,
-        },
-      );
-      controller.close();
-      return;
-    }
     if (
       error instanceof Error &&
       error.message === 'ACWR_RISK_OVERRIDE_REQUIRED'
@@ -1239,6 +1275,8 @@ export async function POST(req: Request) {
       status: 500,
     });
     controller.close();
+  } finally {
+    await releaseGenerationLock(lockKey);
   }
       })();
     },

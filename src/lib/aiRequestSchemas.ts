@@ -33,6 +33,7 @@ export const chatRequestSchema = z.object({
 
 export const weeklyPlanRequestSchema = z.object({
   athleteId: z.number().int().positive(),
+  idempotencyKey: z.string().min(1).max(120).optional(),
   weekStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   model: z.string().optional(),
   preferences: z.string().optional(),
@@ -44,7 +45,6 @@ export const weeklyPlanRequestSchema = z.object({
   strategySelectionMode: z.enum(['auto', 'preset']).optional(),
   strategyPreset: z.string().optional(),
   optimizationPriority: z.string().optional(),
-  useMultiAgent: z.boolean().optional(),
   editSourcePlanId: z.string().optional(),
   editInstructions: z.string().optional(),
   editTargetDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
@@ -133,6 +133,7 @@ export const weeklyPlanSessionSchema = z.object({
 
 export const trainingBlockRequestSchema = z.object({
   athleteId: z.number().int().positive(),
+  idempotencyKey: z.string().min(1).max(120).optional(),
   mode: z.enum(['create', 'adapt']).optional(),
   goalEvent: z.string().min(1),
   goalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -155,7 +156,6 @@ export const trainingBlockRequestSchema = z.object({
   strategySelectionMode: z.enum(['auto', 'preset']).optional(),
   strategyPreset: z.string().optional(),
   optimizationPriority: z.string().optional(),
-  useMultiAgent: z.boolean().optional(),
   riskOverride: z.boolean().optional(),
   timeZone: z.string().optional(),
 });

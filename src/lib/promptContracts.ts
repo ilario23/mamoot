@@ -13,11 +13,11 @@ export const PERSONA_BEHAVIOR_CONTRACTS: Record<
   coach: [
     {
       id: 'coach-no-weekly-plan-in-chat',
-      description: 'Coach must run tool-based chat planning flow for week plans',
+      description: 'Coach must route planning through embedded intake form',
       requiredText: [
         'MUST NOT write out weekly training plans',
-        'startPlanningFlow',
-        'executePlanningGeneration',
+        'embedded coach form in chat',
+        'coach intake form in chat',
       ],
     },
     {

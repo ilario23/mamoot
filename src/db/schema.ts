@@ -90,6 +90,7 @@ export const userSettings = pgTable('user_settings', {
   maxHr: integer('max_hr').notNull(),
   restingHr: integer('resting_hr').notNull(),
   zones: jsonb('zones').notNull(), // {z1: [min,max], ...z6}
+  paceZones: jsonb('pace_zones'),
   goal: text('goal'),
   allergies: jsonb('allergies').notNull().default([]),
   foodPreferences: text('food_preferences'),

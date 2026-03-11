@@ -5,7 +5,12 @@ import {
   useCallback,
   ReactNode,
 } from 'react';
-import {UserSettings, defaultSettings, DEFAULT_MODEL} from '@/lib/activityModel';
+import {
+  UserSettings,
+  defaultSettings,
+  DEFAULT_MODEL,
+  createDefaultPaceZones,
+} from '@/lib/activityModel';
 import {clearUserSettingsRowCache, fetchUserSettingsRow} from '@/lib/userSettingsSync';
 import {dbFetch} from '@/lib/dbClient';
 
@@ -65,6 +70,19 @@ const migrateSettings = (parsed: unknown): UserSettings => {
     s.zones.z5 = [z5[0], Math.round((z5Max + s.maxHr) / 2)];
     s.zones.z6 = [s.zones.z5[1] + 1, s.maxHr];
   }
+  if (!s.paceZones) {
+    s.paceZones = createDefaultPaceZones();
+  } else {
+    const defaults = createDefaultPaceZones();
+    s.paceZones = {
+      z1: {...defaults.z1, ...(s.paceZones.z1 ?? {})},
+      z2: {...defaults.z2, ...(s.paceZones.z2 ?? {})},
+      z3: {...defaults.z3, ...(s.paceZones.z3 ?? {})},
+      z4: {...defaults.z4, ...(s.paceZones.z4 ?? {})},
+      z5: {...defaults.z5, ...(s.paceZones.z5 ?? {})},
+      z6: {...defaults.z6, ...(s.paceZones.z6 ?? {})},
+    };
+  }
   if (s.goal === undefined) s.goal = '';
   if (s.allergies === undefined) s.allergies = [];
   if (s.foodPreferences === undefined) s.foodPreferences = '';
@@ -84,6 +102,7 @@ const neonRowToSettings = (row: Record<string, unknown>): UserSettings => {
     maxHr: row.maxHr ?? row.max_hr,
     restingHr: row.restingHr ?? row.resting_hr,
     zones: row.zones,
+    paceZones: row.paceZones ?? row.pace_zones,
     goal: row.goal ?? '',
     allergies: row.allergies ?? [],
     foodPreferences: row.foodPreferences ?? row.food_preferences ?? '',
@@ -127,6 +146,7 @@ const saveToNeon = async (
       maxHr: settings.maxHr,
       restingHr: settings.restingHr,
       zones: settings.zones,
+      paceZones: settings.paceZones,
       goal: settings.goal ?? null,
       allergies: settings.allergies ?? [],
       foodPreferences: settings.foodPreferences ?? null,

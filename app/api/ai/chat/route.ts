@@ -661,12 +661,9 @@ export async function POST(req: Request) {
     },
   };
 
-  const canUsePlanningTools =
-    persona === 'coach' &&
-    Boolean(athleteId) &&
-    Boolean(sessionId) &&
-    Boolean(planningSessionKey) &&
-    isPlanningToolsEnabled();
+  // Planning intake/execution is handled by the deterministic in-chat form UI.
+  // Keep chat route focused on advisory assistance and retrieval-grounded answers.
+  const canUsePlanningTools = false;
 
   const getState = async (): Promise<PlanningState | null> => {
     if (!planningSessionKey || !athleteId || !sessionId) return null;
@@ -1295,6 +1292,7 @@ export async function POST(req: Request) {
               sessionId: sessionId ?? null,
             });
             retrievalGuardrailViolated = true;
+            throw new Error('GUARDRAIL_RETRIEVAL_REQUIRED_BEFORE_ANSWER');
           }
         }
         const u = event.usage;

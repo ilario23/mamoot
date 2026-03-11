@@ -11,10 +11,6 @@ import type {
   CachedChatMessage,
   CachedWeeklyPlan,
   CachedTrainingBlock,
-  CachedOrchestratorGoal,
-  CachedOrchestratorPlanItem,
-  CachedOrchestratorBlocker,
-  CachedOrchestratorHandoff,
   WeekOutline,
   TrainingPhase,
 } from './cacheTypes';
@@ -252,35 +248,4 @@ export const neonUpdateTrainingBlockOutlines = async (
     console.warn('[chatSync] PATCH training-block outlines error:', err);
   }
 };
-
-// ---- Legacy orchestrator state (removed) ----
-// These helpers are intentionally no-op/empty for backward compatibility.
-export const neonGetOrchestratorGoals = async (
-  _athleteId?: number,
-  _sessionId?: string,
-): Promise<CachedOrchestratorGoal[] | null> => null;
-export const neonSyncOrchestratorGoals = async (
-  _records: CachedOrchestratorGoal | CachedOrchestratorGoal[],
-): Promise<void> => {};
-export const neonGetOrchestratorPlanItems = async (
-  _athleteId?: number,
-  _sessionId?: string,
-): Promise<CachedOrchestratorPlanItem[] | null> => null;
-export const neonSyncOrchestratorPlanItems = async (
-  _records: CachedOrchestratorPlanItem | CachedOrchestratorPlanItem[],
-): Promise<void> => {};
-export const neonGetOrchestratorBlockers = async (
-  _athleteId?: number,
-  _sessionId?: string,
-): Promise<CachedOrchestratorBlocker[] | null> => null;
-export const neonSyncOrchestratorBlockers = async (
-  _records: CachedOrchestratorBlocker | CachedOrchestratorBlocker[],
-): Promise<void> => {};
-export const neonGetOrchestratorHandoffs = async (
-  _athleteId?: number,
-  _sessionId?: string,
-): Promise<CachedOrchestratorHandoff[] | null> => null;
-export const neonSyncOrchestratorHandoffs = async (
-  _records: CachedOrchestratorHandoff | CachedOrchestratorHandoff[],
-): Promise<void> => {};
 

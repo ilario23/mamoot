@@ -10,12 +10,7 @@ import {
   MessageSquare,
   Trash2,
   Menu,
-  ChevronDown,
   ChevronRight,
-  ClipboardList,
-  Target,
-  AlertOctagon,
-  ArrowRightLeft,
   type LucideIcon,
 } from 'lucide-react';
 import {useChat} from '@ai-sdk/react';
@@ -32,27 +27,11 @@ import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {useSettings} from '@/contexts/SettingsContext';
 import {DEFAULT_MODEL} from '@/lib/activityModel';
 import type {PersonaId} from '@/lib/aiPrompts';
-import type {
-  CachedOrchestratorGoal,
-  CachedOrchestratorPlanItem,
-  CachedOrchestratorBlocker,
-  CachedOrchestratorHandoff,
-  CachedWeeklyPlan,
-  CachedTrainingBlock,
-} from '@/lib/cacheTypes';
 import {
   getMentionCategory,
   parseMentionMeta,
   type MentionReference,
 } from '@/lib/mentionTypes';
-import {
-  neonGetOrchestratorGoals,
-  neonGetOrchestratorPlanItems,
-  neonGetOrchestratorBlockers,
-  neonGetOrchestratorHandoffs,
-  neonGetActiveWeeklyPlan,
-  neonGetActiveTrainingBlock,
-} from '@/lib/chatSync';
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import {
   AlertDialog,
@@ -71,13 +50,8 @@ import ToolCallChip from '@/components/chat/ToolCallChip';
 import type {SuggestFollowUpsInput} from '@/lib/aiTools';
 import {parseAiErrorFromUnknown} from '@/lib/aiErrors';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
-import AiGenerationStatusCard from '@/components/ai/AiGenerationStatusCard';
-import {
-  parseSseChunks,
-  type AiProgressEvent,
-  type AiProgressPhase,
-} from '@/lib/aiProgress';
 import type {WeeklyPlanQuickAskDraft} from '@/lib/weeklyPlanQuickAsk';
+import CoachGuidedIntakePanel from '@/components/chat/CoachGuidedIntakePanel';
 
 // ----- Personas -----
 
@@ -205,38 +179,6 @@ const TOOL_LABELS: Record<string, string> = {
   confirmPlanningState: 'Confirming plan inputs',
   executePlanningGeneration: 'Generating from plan inputs',
 };
-
-const WEEKLY_PLAN_PROGRESS_PHASE_ORDER: AiProgressPhase[] = [
-  'context',
-  'coach',
-  'merge',
-  'save',
-];
-
-const WEEKLY_PLAN_PROGRESS_PHASE_LABELS: Record<AiProgressPhase, string> = {
-  context: 'Load context',
-  coach: 'Coach draft',
-  physio: 'Physio draft (legacy)',
-  repair: 'Repair (legacy)',
-  merge: 'Assemble week',
-  save: 'Persist plan',
-  done: 'Complete',
-  error: 'Error',
-};
-
-const createInitialPhaseStatusMap = (): Record<
-  AiProgressPhase,
-  'pending' | 'in_progress' | 'done' | 'error'
-> => ({
-  context: 'pending',
-  coach: 'pending',
-  physio: 'pending',
-  repair: 'pending',
-  merge: 'pending',
-  save: 'pending',
-  done: 'pending',
-  error: 'pending',
-});
 
 // ----- Collapsible tool call group -----
 
@@ -547,41 +489,9 @@ const AITeamChat = ({
   const [memory, setMemory] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarExpanded, setDesktopSidebarExpanded] = useState(false);
-  const [mobileOrchestratorExpanded, setMobileOrchestratorExpanded] =
-    useState(false);
-  const [desktopOrchestratorExpanded, setDesktopOrchestratorExpanded] =
-    useState(false);
   const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<
     string | null
   >(null);
-  const [orchestratorGoals, setOrchestratorGoals] = useState<
-    CachedOrchestratorGoal[]
-  >([]);
-  const [orchestratorPlanItems, setOrchestratorPlanItems] = useState<
-    CachedOrchestratorPlanItem[]
-  >([]);
-  const [orchestratorBlockers, setOrchestratorBlockers] = useState<
-    CachedOrchestratorBlocker[]
-  >([]);
-  const [orchestratorHandoffs, setOrchestratorHandoffs] = useState<
-    CachedOrchestratorHandoff[]
-  >([]);
-  const [activeWeeklyPlan, setActiveWeeklyPlan] =
-    useState<CachedWeeklyPlan | null>(null);
-  const [activeTrainingBlock, setActiveTrainingBlock] =
-    useState<CachedTrainingBlock | null>(null);
-  const [isWeeklyPlanGenerating, setIsWeeklyPlanGenerating] = useState(false);
-  const [weeklyPlanProgress, setWeeklyPlanProgress] = useState<
-    AiProgressEvent[]
-  >([]);
-  const [weeklyPlanCurrentMessage, setWeeklyPlanCurrentMessage] = useState<
-    string | null
-  >(null);
-  const [weeklyPlanPhaseStatusMap, setWeeklyPlanPhaseStatusMap] = useState<
-    Record<AiProgressPhase, 'pending' | 'in_progress' | 'done' | 'error'>
-  >(createInitialPhaseStatusMap());
-  const [weeklyPlanGenerationError, setWeeklyPlanGenerationError] =
-    useState<ReturnType<typeof parseAiErrorFromUnknown> | null>(null);
   const [pendingSendPayload, setPendingSendPayload] =
     useState<PendingSendPayload | null>(null);
   const [chatInputPrefill, setChatInputPrefill] =
@@ -665,48 +575,6 @@ const AITeamChat = ({
 
     load();
   }, [activeSession?.id, loadMessages, getMemorySummary, activeChat]);
-
-  const refreshOrchestratorSnapshot = useCallback(async () => {
-    if (!activeSession?.id || !athleteId) return;
-    const [goals, planItems, blockers, handoffs, weeklyPlan, trainingBlock] =
-      await Promise.all([
-        neonGetOrchestratorGoals(athleteId, activeSession.id),
-        neonGetOrchestratorPlanItems(athleteId, activeSession.id),
-        neonGetOrchestratorBlockers(athleteId, activeSession.id),
-        neonGetOrchestratorHandoffs(athleteId, activeSession.id),
-        neonGetActiveWeeklyPlan(athleteId),
-        neonGetActiveTrainingBlock(athleteId),
-      ]);
-    setOrchestratorGoals(goals ?? []);
-    setOrchestratorPlanItems(planItems ?? []);
-    setOrchestratorBlockers(blockers ?? []);
-    setOrchestratorHandoffs(handoffs ?? []);
-    setActiveWeeklyPlan(weeklyPlan ?? null);
-    setActiveTrainingBlock(trainingBlock ?? null);
-  }, [activeSession?.id, athleteId]);
-
-  useEffect(() => {
-    if (
-      (activePersona as string) !== 'orchestrator' ||
-      !activeSession?.id ||
-      !athleteId
-    ) {
-      setOrchestratorGoals([]);
-      setOrchestratorPlanItems([]);
-      setOrchestratorBlockers([]);
-      setOrchestratorHandoffs([]);
-      setActiveWeeklyPlan(null);
-      setActiveTrainingBlock(null);
-      return;
-    }
-    refreshOrchestratorSnapshot();
-  }, [
-    activePersona,
-    activeSession?.id,
-    athleteId,
-    activeChat.messages.length,
-    refreshOrchestratorSnapshot,
-  ]);
 
   // Auto-scroll on new messages and while tokens stream in
   const lastMsg = activeChat.messages[activeChat.messages.length - 1];
@@ -977,154 +845,6 @@ const AITeamChat = ({
     }
   }, [activeChat.error]);
 
-  const handleGenerateWeeklyPlanFromOrchestrator = useCallback(async () => {
-    if (!athleteId || !activeSession?.id || isWeeklyPlanGenerating) return;
-
-    setIsWeeklyPlanGenerating(true);
-    setWeeklyPlanProgress([]);
-    setWeeklyPlanCurrentMessage('Starting weekly plan generation...');
-    setWeeklyPlanPhaseStatusMap(createInitialPhaseStatusMap());
-    setWeeklyPlanGenerationError(null);
-
-    const payload = {
-      athleteId,
-      model: selectedModel,
-      orchestratorSessionId: activeSession.id,
-    };
-
-    try {
-      const response = await fetch('/api/ai/weekly-plan', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        let body: unknown = null;
-        try {
-          body = await response.json();
-        } catch {
-          body = null;
-        }
-        setWeeklyPlanGenerationError(
-          parseAiErrorFromUnknown(
-            body,
-            'Failed to generate weekly plan from orchestrator',
-          ),
-        );
-        return;
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        setWeeklyPlanGenerationError(
-          parseAiErrorFromUnknown(
-            null,
-            'Missing response stream while generating weekly plan',
-          ),
-        );
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let latestPhase: AiProgressPhase | null = null;
-      let streamErrored = false;
-      let completed = false;
-
-      const markPhaseInProgress = (phase: AiProgressPhase) => {
-        if (!WEEKLY_PLAN_PROGRESS_PHASE_ORDER.includes(phase)) return;
-        setWeeklyPlanPhaseStatusMap((prev) => {
-          const next = {...prev};
-          if (
-            latestPhase &&
-            latestPhase !== phase &&
-            next[latestPhase] === 'in_progress'
-          ) {
-            next[latestPhase] = 'done';
-          }
-          next[phase] = 'in_progress';
-          return next;
-        });
-        latestPhase = phase;
-      };
-
-      const markTerminalState = (state: 'done' | 'error') => {
-        setWeeklyPlanPhaseStatusMap((prev) => {
-          const next = {...prev};
-          if (latestPhase && next[latestPhase] === 'in_progress') {
-            next[latestPhase] = state;
-          }
-          next[state === 'done' ? 'done' : 'error'] = state;
-          return next;
-        });
-      };
-
-      while (true) {
-        const {done, value} = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, {stream: true});
-        const parsed = parseSseChunks<AiProgressEvent>(buffer, '');
-        buffer = parsed.remainder;
-
-        for (const event of parsed.events) {
-          setWeeklyPlanProgress((prev) => [...prev, event]);
-          setWeeklyPlanCurrentMessage(event.message);
-
-          if (event.type === 'progress') {
-            markPhaseInProgress(event.phase);
-            continue;
-          }
-
-          if (event.type === 'error') {
-            markTerminalState('error');
-            const meta =
-              (event.meta as {code?: string} | undefined) ?? undefined;
-            setWeeklyPlanGenerationError(
-              parseAiErrorFromUnknown(
-                {code: meta?.code, error: event.message},
-                event.message,
-              ),
-            );
-            streamErrored = true;
-            break;
-          }
-
-          if (event.type === 'done') {
-            markTerminalState('done');
-            completed = true;
-            break;
-          }
-        }
-
-        if (streamErrored || completed) break;
-      }
-
-      if (completed) {
-        await refreshOrchestratorSnapshot();
-      }
-    } catch (error) {
-      setWeeklyPlanGenerationError(
-        parseAiErrorFromUnknown(
-          error,
-          'Failed to generate weekly plan from orchestrator',
-        ),
-      );
-      setWeeklyPlanPhaseStatusMap((prev) => ({
-        ...prev,
-        error: 'error',
-      }));
-    } finally {
-      setIsWeeklyPlanGenerating(false);
-    }
-  }, [
-    athleteId,
-    activeSession?.id,
-    isWeeklyPlanGenerating,
-    selectedModel,
-    refreshOrchestratorSnapshot,
-  ]);
-
   // Extract follow-up suggestions from the last assistant message's tool parts
   const followUpSuggestions = useMemo(() => {
     if (isStreaming) return [];
@@ -1146,66 +866,6 @@ const AITeamChat = ({
     }
     return [];
   }, [activeChat.messages, isStreaming]);
-
-  const orchestratorNotDoneQueue = useMemo(
-    () => orchestratorPlanItems.filter((item) => item.status !== 'done'),
-    [orchestratorPlanItems],
-  );
-  const activeGoalCount = useMemo(
-    () => orchestratorGoals.filter((goal) => goal.status === 'active').length,
-    [orchestratorGoals],
-  );
-  const openBlockerCount = useMemo(
-    () =>
-      orchestratorBlockers.filter((blocker) => blocker.status === 'open')
-        .length,
-    [orchestratorBlockers],
-  );
-  const pendingHandoffCount = useMemo(
-    () =>
-      orchestratorHandoffs.filter(
-        (handoff) =>
-          handoff.status !== 'done' && handoff.status !== 'cancelled',
-      ).length,
-    [orchestratorHandoffs],
-  );
-  const recentCoordinationItems = useMemo(
-    () =>
-      orchestratorPlanItems
-        .slice()
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 3)
-        .map((item) => {
-          let coordinationSummary: string | null = null;
-          if (item.detail) {
-            try {
-              const parsed = JSON.parse(item.detail) as {
-                summary?: string;
-                conflictSummary?: string;
-              };
-              coordinationSummary =
-                parsed.summary ?? parsed.conflictSummary ?? null;
-            } catch {
-              coordinationSummary = null;
-            }
-          }
-          return {
-            id: item.id,
-            title: item.title,
-            status: item.status,
-            ownerPersona: item.ownerPersona ?? 'unassigned',
-            summary: coordinationSummary,
-          };
-        }),
-    [orchestratorPlanItems],
-  );
-
-  useEffect(() => {
-    if ((activePersona as string) !== 'orchestrator') {
-      setMobileOrchestratorExpanded(false);
-      setDesktopOrchestratorExpanded(false);
-    }
-  }, [activePersona]);
 
   // ----- Sidebar content (shared between desktop and mobile drawer) -----
 
@@ -1330,159 +990,6 @@ const AITeamChat = ({
     </div>
   );
 
-  const renderOrchestratorDetails = ({
-    denseMobile = false,
-  }: {
-    denseMobile?: boolean;
-  }) => (
-    <div className='space-y-2'>
-      <div className='border-2 border-border p-2 bg-background space-y-2'>
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          <p className='text-[10px] font-black uppercase tracking-widest text-primary'>
-            Weekly plan pipeline
-          </p>
-          <button
-            onClick={handleGenerateWeeklyPlanFromOrchestrator}
-            disabled={
-              isWeeklyPlanGenerating || !athleteId || !activeSession?.id
-            }
-            tabIndex={0}
-            aria-label='Generate weekly plan from orchestrator'
-            className='inline-flex items-center gap-1 px-2 py-1 text-[10px] font-black uppercase tracking-wider border-2 border-border bg-primary text-primary-foreground disabled:opacity-50 disabled:pointer-events-none'
-          >
-            {isWeeklyPlanGenerating ? (
-              <Loader2 className='h-3 w-3 animate-spin' />
-            ) : (
-              <ClipboardList className='h-3 w-3' />
-            )}
-            Generate plan
-          </button>
-        </div>
-        {(isWeeklyPlanGenerating || weeklyPlanProgress.length > 0) && (
-          <AiGenerationStatusCard
-            title='Pipeline status'
-            subtitle='Live coach and physio coordination progress.'
-            phaseOrder={WEEKLY_PLAN_PROGRESS_PHASE_ORDER}
-            phaseLabels={WEEKLY_PLAN_PROGRESS_PHASE_LABELS}
-            phaseStatusMap={weeklyPlanPhaseStatusMap}
-            currentMessage={weeklyPlanCurrentMessage}
-          />
-        )}
-        {weeklyPlanGenerationError && (
-          <AiErrorBanner
-            error={weeklyPlanGenerationError}
-            className='text-xs'
-          />
-        )}
-      </div>
-      <div
-        className={`grid ${denseMobile ? 'grid-cols-2 gap-1.5' : 'grid-cols-1 md:grid-cols-2 gap-2'}`}
-      >
-        <div className='border-2 border-border p-2 bg-primary/5'>
-          <div className='flex items-center gap-1.5 mb-1'>
-            <Target className='h-3.5 w-3.5 text-primary' />
-            <span className='text-[10px] font-black uppercase tracking-widest text-primary'>
-              Goals
-            </span>
-          </div>
-          <p className='text-xs font-medium'>
-            {activeGoalCount} active / {orchestratorGoals.length} total
-          </p>
-        </div>
-        <div className='border-2 border-border p-2 bg-secondary/5'>
-          <div className='flex items-center gap-1.5 mb-1'>
-            <ClipboardList className='h-3.5 w-3.5 text-secondary' />
-            <span className='text-[10px] font-black uppercase tracking-widest text-secondary'>
-              Not Done Queue
-            </span>
-          </div>
-          <p className='text-xs font-medium'>
-            {orchestratorNotDoneQueue.length} remaining items
-          </p>
-        </div>
-        <div className='border-2 border-border p-2 bg-destructive/5'>
-          <div className='flex items-center gap-1.5 mb-1'>
-            <AlertOctagon className='h-3.5 w-3.5 text-destructive' />
-            <span className='text-[10px] font-black uppercase tracking-widest text-destructive'>
-              Blockers
-            </span>
-          </div>
-          <p className='text-xs font-medium'>
-            {openBlockerCount} open / {orchestratorBlockers.length} total
-          </p>
-        </div>
-        <div className='border-2 border-border p-2 bg-accent/30'>
-          <div className='flex items-center gap-1.5 mb-1'>
-            <ArrowRightLeft className='h-3.5 w-3.5 text-foreground' />
-            <span className='text-[10px] font-black uppercase tracking-widest'>
-              Handoffs
-            </span>
-          </div>
-          <p className='text-xs font-medium'>
-            {pendingHandoffCount} pending / {orchestratorHandoffs.length} total
-          </p>
-        </div>
-      </div>
-      <div
-        className={`grid ${denseMobile ? 'grid-cols-1 gap-1.5' : 'grid-cols-1 md:grid-cols-2 gap-2'}`}
-      >
-        <div className='border-2 border-border p-2 bg-background'>
-          <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
-            Active Weekly Plan
-          </p>
-          <p className='text-xs font-medium truncate'>
-            {activeWeeklyPlan
-              ? `${activeWeeklyPlan.title} (${activeWeeklyPlan.weekStart})`
-              : 'None'}
-          </p>
-        </div>
-        <div className='border-2 border-border p-2 bg-background'>
-          <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1'>
-            Active Training Block
-          </p>
-          <p className='text-xs font-medium truncate'>
-            {activeTrainingBlock
-              ? `${activeTrainingBlock.goalEvent} (${activeTrainingBlock.totalWeeks}w)`
-              : 'None'}
-          </p>
-        </div>
-      </div>
-      <div className='border-2 border-border p-2 bg-background'>
-        <p className='text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5'>
-          Coordination timeline
-        </p>
-        {recentCoordinationItems.length === 0 ? (
-          <p className='text-xs text-muted-foreground font-medium'>
-            No coordination events yet.
-          </p>
-        ) : (
-          <div className='space-y-1.5'>
-            {recentCoordinationItems.map((item) => (
-              <div
-                key={item.id}
-                className='border border-border/70 bg-muted/30 px-2 py-1.5'
-              >
-                <div className='flex items-center justify-between gap-2'>
-                  <span className='text-xs font-bold truncate'>
-                    {item.title}
-                  </span>
-                  <span className='text-[10px] font-black uppercase tracking-wider text-muted-foreground'>
-                    {item.ownerPersona} · {item.status}
-                  </span>
-                </div>
-                {item.summary && (
-                  <p className='text-[11px] text-muted-foreground mt-1'>
-                    {item.summary}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
   // ----- Render -----
 
   return (
@@ -1517,7 +1024,7 @@ const AITeamChat = ({
           </button>
         </div>
 
-        <div className='md:hidden border-b-2 border-border bg-background p-1.5 grid grid-cols-4 gap-1'>
+        <div className='md:hidden border-b-2 border-border bg-background p-1.5 grid grid-cols-3 gap-1'>
           {visiblePersonas.map((persona) => {
             const active = activePersona === persona.id;
             return (
@@ -1569,94 +1076,13 @@ const AITeamChat = ({
           </div>
         )}
 
-        {(activePersona as string) === 'orchestrator' && (
-          <>
-            {/* Mobile: compact summary, collapsed by default */}
-            <div className='md:hidden border-b-3 border-border bg-background p-2'>
-              <button
-                onClick={() =>
-                  setMobileOrchestratorExpanded((prevExpanded) => !prevExpanded)
-                }
-                aria-label='Toggle orchestrator status summary'
-                aria-expanded={mobileOrchestratorExpanded}
-                tabIndex={0}
-                className='w-full border-2 border-border bg-primary/5 px-2 py-1.5 text-left'
-              >
-                <div className='flex items-center justify-between gap-2'>
-                  <span className='text-[10px] font-black uppercase tracking-widest text-primary'>
-                    Orchestrator status
-                  </span>
-                  <ChevronDown
-                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
-                      mobileOrchestratorExpanded ? 'rotate-180' : ''
-                    }`}
-                  />
-                </div>
-                <div className='mt-1.5 grid grid-cols-3 gap-1 text-[10px] font-bold'>
-                  <span className='border border-border/60 bg-background px-1.5 py-1'>
-                    Goals {activeGoalCount}
-                  </span>
-                  <span className='border border-border/60 bg-background px-1.5 py-1'>
-                    Queue {orchestratorNotDoneQueue.length}
-                  </span>
-                  <span className='border border-border/60 bg-background px-1.5 py-1'>
-                    Blockers {openBlockerCount}
-                  </span>
-                </div>
-              </button>
-              {mobileOrchestratorExpanded && (
-                <div className='pt-2'>
-                  {renderOrchestratorDetails({denseMobile: true})}
-                </div>
-              )}
-            </div>
-
-            {/* Desktop: compact summary, collapsed by default */}
-            <div className='hidden md:block border-b-3 border-border bg-background p-3'>
-              <button
-                onClick={() =>
-                  setDesktopOrchestratorExpanded(
-                    (prevExpanded) => !prevExpanded,
-                  )
-                }
-                aria-label='Toggle orchestrator status summary'
-                aria-expanded={desktopOrchestratorExpanded}
-                tabIndex={0}
-                className='w-full border-2 border-border bg-primary/5 px-3 py-2 text-left'
-              >
-                <div className='flex items-center justify-between gap-2'>
-                  <span className='text-[10px] font-black uppercase tracking-widest text-primary'>
-                    Orchestrator status
-                  </span>
-                  <ChevronDown
-                    className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
-                      desktopOrchestratorExpanded ? 'rotate-180' : ''
-                    }`}
-                  />
-                </div>
-                <div className='mt-2 grid grid-cols-4 gap-1.5 text-[10px] font-bold'>
-                  <span className='border border-border/60 bg-background px-2 py-1'>
-                    Goals {activeGoalCount}
-                  </span>
-                  <span className='border border-border/60 bg-background px-2 py-1'>
-                    Queue {orchestratorNotDoneQueue.length}
-                  </span>
-                  <span className='border border-border/60 bg-background px-2 py-1'>
-                    Blockers {openBlockerCount}
-                  </span>
-                  <span className='border border-border/60 bg-background px-2 py-1'>
-                    Handoffs {pendingHandoffCount}
-                  </span>
-                </div>
-              </button>
-              {desktopOrchestratorExpanded && (
-                <div className='pt-3'>
-                  {renderOrchestratorDetails({denseMobile: false})}
-                </div>
-              )}
-            </div>
-          </>
-        )}
+        <CoachGuidedIntakePanel
+          activePersonaId={activePersona}
+          athleteId={athleteId}
+          selectedModel={selectedModel}
+          launchIntent={null}
+          onLaunchHandled={() => {}}
+        />
 
         {/* Messages */}
         <div
@@ -1691,8 +1117,6 @@ const AITeamChat = ({
                       'Ask about fueling, hydration, and recovery nutrition'}
                     {activePersona === 'physio' &&
                       'Ask about injury prevention, mobility, and recovery'}
-                    {(activePersona as string) === 'orchestrator' &&
-                      'Coordinate goals, plan queue, blockers, and specialist handoffs'}
                   </p>
                 </div>
                 {/* Quick-start suggestion buttons */}

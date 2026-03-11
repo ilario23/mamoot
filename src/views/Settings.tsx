@@ -16,6 +16,11 @@ import {
   type ModelOption,
   type Injury,
 } from '@/lib/activityModel';
+import {
+  formatPaceRange,
+  formatPaceSeconds,
+  parsePaceToSeconds,
+} from '@/lib/paceZones';
 import {useQueryClient} from '@tanstack/react-query';
 import {toast} from '@/hooks/use-toast';
 import {Switch} from '@/components/ui/switch';
@@ -29,6 +34,8 @@ import {
   Plus,
   Bot,
   ChevronDown,
+  Pencil,
+  Sparkles,
 } from 'lucide-react';
 import TrainingGauge from '@/components/ui/TrainingGauge';
 import {NeoLoader} from '@/components/ui/neo-loader';
@@ -71,7 +78,10 @@ const Settings = () => {
   const [isExchangingCode, setIsExchangingCode] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isGeneratingPaceZones, setIsGeneratingPaceZones] = useState(false);
+  const [isEditingPaceZones, setIsEditingPaceZones] = useState(false);
   const [allergyInput, setAllergyInput] = useState('');
+  const [paceDrafts, setPaceDrafts] = useState<Record<string, string>>({});
   const forceRefreshActivities = useForceRefreshActivities();
   const queryClient = useQueryClient();
   const [availableProviders, setAvailableProviders] = useState<string[]>([
@@ -98,6 +108,30 @@ const Settings = () => {
       setFormState(JSON.parse(JSON.stringify(settings)));
     }
   }, [settings, isLoadingSettings]);
+
+  useEffect(() => {
+    const zoneKeys: (keyof NonNullable<UserSettings['paceZones']>)[] = [
+      'z1',
+      'z2',
+      'z3',
+      'z4',
+      'z5',
+      'z6',
+    ];
+    const next: Record<string, string> = {};
+    for (const zone of zoneKeys) {
+      const range = formState.paceZones?.[zone];
+      const lower = range?.lowerSecPerKm;
+      const upper = range?.upperSecPerKm;
+      next[`${zone}-lower`] = Number.isFinite(lower)
+        ? formatPaceSeconds(lower as number).replace('/km', '')
+        : '';
+      next[`${zone}-upper`] = Number.isFinite(upper)
+        ? formatPaceSeconds(upper as number).replace('/km', '')
+        : '';
+    }
+    setPaceDrafts(next);
+  }, [formState.paceZones]);
 
   const handleAddAllergy = (allergy: string) => {
     const trimmed = allergy.trim();
@@ -248,8 +282,7 @@ const Settings = () => {
       await updateSettings(formState);
       toast({
         title: 'Settings Saved',
-        description:
-          'Your personal information has been updated successfully.',
+        description: 'Your personal information has been updated successfully.',
       });
     } catch {
       toast({
@@ -261,6 +294,116 @@ const Settings = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleGeneratePaceZones = async () => {
+    if (!athlete?.id) {
+      toast({
+        title: 'Strava Required',
+        description:
+          'Connect Strava to auto-generate pace zones from your runs.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsGeneratingPaceZones(true);
+    try {
+      const res = await fetch('/api/settings/pace-zones', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-athlete-id': String(athlete.id),
+        },
+        body: JSON.stringify({athleteId: athlete.id}),
+      });
+      if (!res.ok) {
+        throw new Error(`Failed with status ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        paceZones?: UserSettings['paceZones'];
+      };
+      if (!data.paceZones) {
+        throw new Error('No pace zones returned');
+      }
+      setFormState((prev) => ({
+        ...prev,
+        paceZones: data.paceZones,
+      }));
+      toast({
+        title: 'Pace Zones Generated',
+        description:
+          'Auto-derived pace zones were calculated from your recent runs.',
+      });
+    } catch {
+      toast({
+        title: 'Generation Failed',
+        description:
+          'Could not auto-generate pace zones. Try refreshing Strava data.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsGeneratingPaceZones(false);
+    }
+  };
+
+  const handlePaceDraftChange = (
+    zone: keyof NonNullable<UserSettings['paceZones']>,
+    bound: 'lower' | 'upper',
+    raw: string,
+  ) => {
+    const key = `${zone}-${bound}`;
+    setPaceDrafts((prev) => ({...prev, [key]: raw}));
+    if (raw.trim() === '') {
+      setFormState((prev) => ({
+        ...prev,
+        paceZones: {
+          ...(prev.paceZones ?? settings.paceZones ?? {}),
+          [zone]: {
+            ...(prev.paceZones?.[zone] ?? settings.paceZones?.[zone]),
+            [`${bound}SecPerKm`]: null,
+            source: 'manual',
+            confidence: null,
+            sampleSize: null,
+            methodVersion: null,
+            updatedAt: Date.now(),
+          },
+        } as NonNullable<UserSettings['paceZones']>,
+      }));
+      return;
+    }
+    const parsed = parsePaceToSeconds(raw);
+    if (parsed == null) return;
+    setFormState((prev) => {
+      const current = prev.paceZones?.[zone];
+      const nextLower =
+        zone === 'z1'
+          ? null
+          : bound === 'lower'
+            ? parsed
+            : (current?.lowerSecPerKm ?? null);
+      const nextUpper =
+        zone === 'z6'
+          ? null
+          : bound === 'upper'
+            ? parsed
+            : (current?.upperSecPerKm ?? null);
+      return {
+        ...prev,
+        paceZones: {
+          ...(prev.paceZones ?? settings.paceZones ?? {}),
+          [zone]: {
+            ...(current ?? settings.paceZones?.[zone]),
+            lowerSecPerKm: nextLower,
+            upperSecPerKm: nextUpper,
+            source: 'manual',
+            confidence: null,
+            sampleSize: null,
+            methodVersion: null,
+            updatedAt: Date.now(),
+          },
+        } as NonNullable<UserSettings['paceZones']>,
+      };
+    });
   };
 
   const handleStravaConnect = () => {
@@ -399,7 +542,11 @@ const Settings = () => {
         </h3>
         {authLoading || isExchangingCode ? (
           <div className='flex items-center justify-center py-6'>
-            <NeoLoader label='Connecting to Strava' size='sm' colorClass='bg-primary' />
+            <NeoLoader
+              label='Connecting to Strava'
+              size='sm'
+              colorClass='bg-primary'
+            />
           </div>
         ) : isAuthenticated && athlete ? (
           <div className='flex items-center justify-between flex-wrap gap-4'>
@@ -590,8 +737,7 @@ const Settings = () => {
                     i < zoneKeys.length - 1
                       ? formState.zones[zoneKeys[i + 1]][0]
                       : formState.maxHr;
-                  const effectiveRange =
-                    nextStart - formState.zones[zone][0];
+                  const effectiveRange = nextStart - formState.zones[zone][0];
                   const width = (effectiveRange / totalRange) * 100;
                   return (
                     <div
@@ -610,6 +756,174 @@ const Settings = () => {
               </div>
             );
           })()}
+        </div>
+
+        {/* Pace Zone Editors */}
+        <div className='border-t-2 border-border/30 pt-5 space-y-4'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <div>
+              <label className='font-black text-xs uppercase tracking-wider block'>
+                Pace Zones
+              </label>
+              <p className='text-[11px] font-bold text-muted-foreground mt-1'>
+                HR is primary. Pace is secondary guidance and can be
+                auto-derived.
+              </p>
+            </div>
+            <div className='flex items-center gap-2'>
+              <button
+                type='button'
+                onClick={() => setIsEditingPaceZones((prev) => !prev)}
+                className='px-3 py-1.5 border-3 border-border font-black text-[10px] uppercase tracking-wider bg-background shadow-neo-sm hover:shadow-neo transition-all'
+              >
+                <span className='inline-flex items-center gap-1.5'>
+                  <Pencil className='h-3 w-3' />
+                  {isEditingPaceZones ? 'Done Editing' : 'Edit Pace Zones'}
+                </span>
+              </button>
+              <button
+                type='button'
+                onClick={handleGeneratePaceZones}
+                disabled={isGeneratingPaceZones}
+                className='px-3 py-1.5 border-3 border-border font-black text-[10px] uppercase tracking-wider bg-primary text-primary-foreground shadow-neo-sm hover:shadow-neo transition-all disabled:opacity-50'
+              >
+                <span className='inline-flex items-center gap-1.5'>
+                  <Sparkles className='h-3 w-3' />
+                  {isGeneratingPaceZones ? 'Generating…' : 'Auto-generate'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div className='space-y-4'>
+            {zoneKeys.map((zone, i) => {
+              const zoneNum = i + 1;
+              const isRecoveryZone = zoneNum === 1;
+              const isAnaerobicPowerZone = zoneNum === 6;
+              const paceZone = formState.paceZones?.[zone];
+              const source = paceZone?.source ?? 'none';
+              const isAuto = source === 'auto';
+              const label =
+                source === 'manual'
+                  ? 'Manually set'
+                  : source === 'auto'
+                    ? 'Auto-derived'
+                    : 'Not set';
+              const confidencePct = Math.round(
+                (paceZone?.confidence ?? 0) * 100,
+              );
+              return (
+                <div
+                  key={`pace-${zone}`}
+                  className={`grid grid-cols-1 md:grid-cols-[12px_120px_240px_52px_130px_44px] items-center gap-2 md:gap-2.5 justify-items-start ${isAuto ? 'opacity-75' : 'opacity-100'}`}
+                >
+                  <div
+                    className='w-2.5 md:w-3 h-8 md:h-10 shrink-0'
+                    style={{
+                      backgroundColor:
+                        ZONE_COLORS[zoneNum as keyof typeof ZONE_COLORS],
+                    }}
+                  />
+                  <span className='font-black text-xs md:text-sm leading-[1.05] w-20 md:w-[120px] shrink-0'>
+                    <span className='block'>Z{zoneNum}</span>
+                    <span className='block'>
+                      {ZONE_NAMES[zoneNum as keyof typeof ZONE_NAMES]}
+                    </span>
+                  </span>
+                  <div className='grid grid-cols-[80px_24px_80px] items-center gap-2 justify-items-center'>
+                    {isRecoveryZone ? (
+                      <>
+                        <input
+                          type='text'
+                          value=''
+                          disabled
+                          aria-hidden='true'
+                          className='w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background text-center opacity-0 pointer-events-none'
+                          tabIndex={-1}
+                        />
+                        <span className='font-black text-sm'>&gt;</span>
+                        <input
+                          type='text'
+                          value={paceDrafts[`${zone}-upper`] ?? ''}
+                          onChange={(e) =>
+                            handlePaceDraftChange(zone, 'upper', e.target.value)
+                          }
+                          disabled={!isEditingPaceZones}
+                          placeholder='5:40'
+                          aria-label={`Zone ${zoneNum} recovery pace bound (slower than)`}
+                          className='w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center disabled:opacity-60'
+                        />
+                      </>
+                    ) : isAnaerobicPowerZone ? (
+                      <>
+                        <input
+                          type='text'
+                          value={paceDrafts[`${zone}-lower`] ?? ''}
+                          onChange={(e) =>
+                            handlePaceDraftChange(zone, 'lower', e.target.value)
+                          }
+                          disabled={!isEditingPaceZones}
+                          placeholder='3:45'
+                          aria-label={`Zone ${zoneNum} anaerobic pace bound (faster than)`}
+                          className='w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center disabled:opacity-60'
+                        />
+                        <span className='font-black text-sm'>&lt;</span>
+                        <input
+                          type='text'
+                          value=''
+                          disabled
+                          aria-hidden='true'
+                          className='w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background text-center opacity-0 pointer-events-none'
+                          tabIndex={-1}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          type='text'
+                          value={paceDrafts[`${zone}-lower`] ?? ''}
+                          onChange={(e) =>
+                            handlePaceDraftChange(zone, 'lower', e.target.value)
+                          }
+                          disabled={!isEditingPaceZones}
+                          placeholder='5:10'
+                          aria-label={`Zone ${zoneNum} pace lower bound`}
+                          className='w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center disabled:opacity-60'
+                        />
+                        <span className='font-black text-sm'>—</span>
+                        <input
+                          type='text'
+                          value={paceDrafts[`${zone}-upper`] ?? ''}
+                          onChange={(e) =>
+                            handlePaceDraftChange(zone, 'upper', e.target.value)
+                          }
+                          disabled={!isEditingPaceZones}
+                          placeholder='5:40'
+                          aria-label={`Zone ${zoneNum} pace upper bound`}
+                          className='w-16 md:w-20 px-2 md:px-3 py-1.5 md:py-2 border-3 border-border font-bold text-xs md:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary text-center disabled:opacity-60'
+                        />
+                      </>
+                    )}
+                  </div>
+                  <span className='font-bold text-[10px] md:text-xs text-muted-foreground'>
+                    min/km
+                  </span>
+                  <span className='text-[10px] font-black uppercase tracking-wider px-2 py-1 border-2 border-border bg-muted text-center w-fit md:w-full'>
+                    {label}
+                  </span>
+                  {source === 'auto' ? (
+                    <span className='text-[10px] font-bold text-muted-foreground'>
+                      {confidencePct}%
+                    </span>
+                  ) : (
+                    <span className='text-[10px] font-bold text-muted-foreground'>
+                      --
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -643,8 +957,8 @@ const Settings = () => {
             Training Focus
           </h3>
           <p className='text-xs font-bold text-muted-foreground mt-1'>
-            Set how your weekly schedule should balance running and gym sessions.
-            The AI team will adjust plans accordingly.
+            Set how your weekly schedule should balance running and gym
+            sessions. The AI team will adjust plans accordingly.
           </p>
         </div>
 
@@ -922,7 +1236,11 @@ const Settings = () => {
           <span className='flex items-center justify-center gap-2'>
             <span className='flex items-end gap-0.5'>
               {[0, 1, 2].map((i) => (
-                <span key={i} className='w-1 h-4 bg-primary-foreground animate-neo-blocks' style={{ animationDelay: `${i * 0.2}s` }} />
+                <span
+                  key={i}
+                  className='w-1 h-4 bg-primary-foreground animate-neo-blocks'
+                  style={{animationDelay: `${i * 0.2}s`}}
+                />
               ))}
             </span>
             Saving…

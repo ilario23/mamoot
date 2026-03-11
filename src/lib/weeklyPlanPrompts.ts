@@ -3,6 +3,7 @@
 export const buildCoachPipelinePrompt = (context: {
   athleteName: string | null;
   hrZones: string | null;
+  paceZones: string | null;
   weight: number | null;
   trainingBalance: number | null;
   weekStart: string;
@@ -23,6 +24,7 @@ export const buildCoachPipelinePrompt = (context: {
 ## Athlete
 ${context.athleteName ? `- Name: ${context.athleteName}` : ''}
 ${context.hrZones ? `- HR Zones (6-zone model): ${context.hrZones}` : '- HR Zones model: Use a 6-zone heart-rate system (Z1, Z2, Z3, Z4, Z5, Z6).'}
+${context.paceZones ? `- Pace Zones (secondary guidance): ${context.paceZones}` : '- Pace Zones: none configured; use HR-first guidance and omit pace when uncertain.'}
 ${context.weight ? `- Weight: ${context.weight} kg` : ''}
 ${context.trainingBalance != null ? `- Training Balance: ${context.trainingBalance}/80 (20=run-focused, 80=gym-focused)` : ''}
 ${context.goal ? `- Goal: ${context.goal}` : ''}
@@ -46,6 +48,11 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 - Vary session types: include easy runs, one quality session (intervals or tempo), one long run, and appropriate rest days.
 - Use HR zones (6-zone model: Z1-Z6) as the PRIMARY intensity target for run sessions.
 - Include targetZone and targetZoneId for every run session; use targetPace only as secondary guidance when useful.
+- Pace precedence rules:
+  - HR zone is always primary.
+  - If pace zones are marked manual, use them as pace guidance.
+  - Else use auto-derived pace zones only when confidence is adequate.
+  - If pace confidence is low or unavailable, omit targetPace and keep HR-only.
 - For rest/strength days, use type "rest" or "strength" and describe what the day is for.
 - Honor the training balance: lower values (closer to 20) = more running days; higher values (closer to 80) = fewer runs, more rest/strength days.
 - Coach owns strength slot allocation: intentionally create 1-3 explicit "strength" days across the week (typically on rest or low-run-load days).

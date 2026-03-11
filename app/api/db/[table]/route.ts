@@ -746,6 +746,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
                 maxHr: sql`excluded.max_hr`,
                 restingHr: sql`excluded.resting_hr`,
                 zones: sql`excluded.zones`,
+                paceZones: sql`excluded.pace_zones`,
                 goal: sql`excluded.goal`,
                 allergies: sql`excluded.allergies`,
                 foodPreferences: sql`excluded.food_preferences`,
@@ -936,6 +937,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         if (body.weight !== undefined) updates.weight = body.weight;
         if (body.city !== undefined) updates.city = body.city;
         if (body.weeklyPreferences !== undefined) updates.weeklyPreferences = body.weeklyPreferences;
+        if (body.paceZones !== undefined) updates.paceZones = body.paceZones;
         if (body.strategySelectionMode !== undefined) updates.strategySelectionMode = body.strategySelectionMode;
         if (body.strategyPreset !== undefined) updates.strategyPreset = body.strategyPreset;
         if (body.optimizationPriority !== undefined) updates.optimizationPriority = body.optimizationPriority;
@@ -955,6 +957,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
           delete legacyUpdates.strategySelectionMode;
           delete legacyUpdates.strategyPreset;
           delete legacyUpdates.optimizationPriority;
+          delete legacyUpdates.paceZones;
           await db
             .update(userSettings)
             .set(legacyUpdates)
