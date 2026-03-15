@@ -31,7 +31,7 @@ import type {
   StravaSplit,
   StravaLap,
 } from './strava';
-import {transformActivity} from './strava';
+import {safeTransformActivity} from './strava';
 import {
   classifyWorkout,
   formatLabelForAI,
@@ -53,29 +53,41 @@ import {
 const parseActivityRow = (row: {
   data: unknown;
   date: string;
-}): ActivitySummary => {
-  return transformActivity(row.data as StravaSummaryActivity);
+}): ActivitySummary | null => {
+  const parsed = safeTransformActivity(row.data);
+  if (!parsed) return null;
+  return parsed;
 };
 
 /** Get user settings from Neon for a given athlete. */
 const fetchSettings = async (
   athleteId: number,
 ): Promise<typeof userSettings.$inferSelect | null> => {
-  const rows = await db
-    .select()
-    .from(userSettings)
-    .where(eq(userSettings.athleteId, athleteId));
-  return rows[0] ?? null;
+  try {
+    const rows = await db
+      .select()
+      .from(userSettings)
+      .where(eq(userSettings.athleteId, athleteId));
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
 };
 
 /** Get all activities from Neon, sorted by date descending. */
 const fetchActivities = async (athleteId: number): Promise<ActivitySummary[]> => {
-  const rows = await db
-    .select()
-    .from(activitiesTable)
-    .where(eq(activitiesTable.athleteId, athleteId))
-    .orderBy(desc(activitiesTable.date));
-  return rows.map(parseActivityRow);
+  try {
+    const rows = await db
+      .select()
+      .from(activitiesTable)
+      .where(eq(activitiesTable.athleteId, athleteId))
+      .orderBy(desc(activitiesTable.date));
+    return rows
+      .map(parseActivityRow)
+      .filter((activity): activity is ActivitySummary => activity !== null);
+  } catch {
+    return [];
+  }
 };
 
 /** Activity with extra raw fields not in ActivitySummary. */
@@ -85,16 +97,27 @@ type ActivityWithRaw = ActivitySummary & {elapsedTime: number};
 const fetchActivitiesWithRaw = async (
   athleteId: number,
 ): Promise<ActivityWithRaw[]> => {
-  const rows = await db
-    .select()
-    .from(activitiesTable)
-    .where(eq(activitiesTable.athleteId, athleteId))
-    .orderBy(desc(activitiesTable.date));
-  return rows.map((row) => {
-    const raw = row.data as StravaSummaryActivity;
-    const parsed = transformActivity(raw);
-    return {...parsed, elapsedTime: raw.elapsed_time ?? parsed.duration};
-  });
+  try {
+    const rows = await db
+      .select()
+      .from(activitiesTable)
+      .where(eq(activitiesTable.athleteId, athleteId))
+      .orderBy(desc(activitiesTable.date));
+    return rows
+      .map((row) => {
+        const raw = row.data as StravaSummaryActivity;
+        const parsed = safeTransformActivity(raw);
+        if (!parsed) return null;
+        const elapsedTime =
+          typeof raw?.elapsed_time === 'number' && Number.isFinite(raw.elapsed_time)
+            ? raw.elapsed_time
+            : parsed.duration;
+        return {...parsed, elapsedTime};
+      })
+      .filter((activity): activity is ActivityWithRaw => activity !== null);
+  } catch {
+    return [];
+  }
 };
 
 /** Get week start (Monday) for a date string. */
@@ -227,7 +250,10 @@ export const createRetrievalTools = (
       return cached as Promise<T>;
     }
     onCacheEvent?.('miss', key);
-    const next = loader();
+    const next = loader().catch((error) => {
+      requestCache.delete(key);
+      throw error;
+    });
     requestCache.set(key, next as Promise<unknown>);
     return next;
   };

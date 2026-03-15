@@ -1734,6 +1734,9 @@ const CoachGuidedIntakePanel = ({
       : intent === 'weekly_plan_edit'
         ? 'Weekly plan edit'
         : 'Training block';
+  const intakeContentClassName = isSubmitting
+    ? 'max-h-[40vh] overflow-y-auto overscroll-y-contain pr-1 border-l-2 border-border/70 pl-2 pb-[calc(6rem+env(safe-area-inset-bottom))] md:max-h-[48vh] md:pb-2'
+    : 'max-h-[52dvh] overflow-y-auto overscroll-y-contain pr-1 border-l-2 border-border/70 pl-2 pb-[calc(6rem+env(safe-area-inset-bottom))] md:max-h-none md:overflow-visible md:overscroll-auto md:pb-0';
 
   if (!isVisible) return null;
 
@@ -1878,13 +1881,7 @@ const CoachGuidedIntakePanel = ({
           </button>
 
           {isActiveIntakeExpanded && (
-            <div
-              className={
-                isSubmitting
-                  ? 'max-h-[40vh] overflow-y-auto pr-1 border-l-2 border-border/70 pl-2'
-                  : ''
-              }
-            >
+            <div className={intakeContentClassName}>
               {intent === 'weekly_plan_edit' && isLoadingActivePlanForEdit && (
                 <div className='border-2 border-border bg-muted/30 p-1.5 text-[11px] font-medium text-muted-foreground'>
                   Loading active weekly plan...

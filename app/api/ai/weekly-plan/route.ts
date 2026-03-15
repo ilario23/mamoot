@@ -10,8 +10,7 @@ import {
   aiPlanningState,
 } from '@/db/schema';
 import {eq, desc, and, ne, isNull, sql, gte, lt} from 'drizzle-orm';
-import {transformActivity} from '@/lib/strava';
-import type {StravaSummaryActivity} from '@/lib/strava';
+import {safeTransformActivity} from '@/lib/strava';
 import {
   calcFitnessData,
   calcACWRData,
@@ -79,6 +78,105 @@ const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
 const PLAN_STRATEGY_PREFIX = '<!-- weekly-plan-strategy:';
 const PLAN_STRATEGY_SUFFIX = '-->';
+
+const isMissingPlanningStateTableError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  const directCode = 'code' in error ? (error.code as string | undefined) : undefined;
+  const cause =
+    'cause' in error && error.cause && typeof error.cause === 'object'
+      ? (error.cause as {code?: string; message?: string})
+      : undefined;
+  const code = directCode ?? cause?.code;
+  const message = `${error.message} ${cause?.message ?? ''}`;
+  return code === '42P01' && message.includes('ai_planning_state');
+};
+
+type WeeklyPlanUserSettings = {
+  athleteId: number;
+  maxHr: number;
+  restingHr: number;
+  zones: Record<string, [number, number]>;
+  paceZones?: Partial<Record<'z1' | 'z2' | 'z3' | 'z4' | 'z5' | 'z6', Partial<PaceZoneRange>>>;
+  goal?: string | null;
+  injuries?: Array<{name?: string; notes?: string}>;
+  aiModel?: string | null;
+  weight?: number | null;
+  city?: string | null;
+  trainingBalance?: number | null;
+  weeklyPreferences?: string | null;
+  strategySelectionMode?: string | null;
+  strategyPreset?: string | null;
+  optimizationPriority?: string | null;
+};
+
+const isMissingUserSettingsTableError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  const directCode = 'code' in error ? (error.code as string | undefined) : undefined;
+  const cause =
+    'cause' in error && error.cause && typeof error.cause === 'object'
+      ? (error.cause as {code?: string; message?: string})
+      : undefined;
+  const code = directCode ?? cause?.code;
+  const message = `${error.message} ${cause?.message ?? ''}`;
+  return code === '42P01' && message.includes('user_settings');
+};
+
+const asNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
+
+const loadUserSettingsCompat = async (
+  athleteId: number,
+): Promise<WeeklyPlanUserSettings[]> => {
+  try {
+    const settingsRows = await db.execute<{payload: Record<string, unknown>}>(
+      sql`select to_jsonb(us) as payload from user_settings us where us.athlete_id = ${athleteId} limit 1`,
+    );
+    const payload = settingsRows.rows[0]?.payload;
+    if (!payload) return [];
+
+    const maxHr = asNumber(payload.max_hr);
+    const restingHr = asNumber(payload.resting_hr);
+    const zones = payload.zones as Record<string, [number, number]> | undefined;
+    if (!maxHr || !restingHr || !zones) return [];
+
+    return [
+      {
+        athleteId,
+        maxHr,
+        restingHr,
+        zones,
+        paceZones: payload.pace_zones as
+          | Partial<Record<'z1' | 'z2' | 'z3' | 'z4' | 'z5' | 'z6', Partial<PaceZoneRange>>>
+          | undefined,
+        goal: (payload.goal as string | null | undefined) ?? null,
+        injuries: (payload.injuries as Array<{name?: string; notes?: string}> | undefined) ?? [],
+        aiModel: (payload.ai_model as string | null | undefined) ?? null,
+        weight: (asNumber(payload.weight) ?? null),
+        city: (payload.city as string | null | undefined) ?? null,
+        trainingBalance: asNumber(payload.training_balance) ?? null,
+        weeklyPreferences: (payload.weekly_preferences as string | null | undefined) ?? null,
+        strategySelectionMode:
+          (payload.strategy_selection_mode as string | null | undefined) ?? null,
+        strategyPreset: (payload.strategy_preset as string | null | undefined) ?? null,
+        optimizationPriority: (payload.optimization_priority as string | null | undefined) ?? null,
+      },
+    ];
+  } catch (error) {
+    if (isMissingUserSettingsTableError(error)) {
+      console.warn(
+        '[WeeklyPlan] user_settings table missing; continuing with default settings context.',
+      );
+      return [];
+    }
+    throw error;
+  }
+};
 
 const ALLOWED_MODELS: Record<string, () => ReturnType<typeof openai | typeof anthropic>> = {
   'gpt-4o-mini': () => openai('gpt-4o-mini'),
@@ -186,28 +284,42 @@ const acquireGenerationLock = async (
     .where(and(eq(aiPlanningState.key, key), lt(aiPlanningState.expiresAt, now)))
     .catch(() => {});
 
-  const inserted = await db
-    .insert(aiPlanningState)
-    .values({
-      key,
-      athleteId,
-      sessionId: 'generation-lock',
-      state: {kind: 'generation-lock', scope: 'weekly-plan'},
-      expiresAt: now + GENERATION_LOCK_TTL_MS,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing({target: aiPlanningState.key})
-    .returning({key: aiPlanningState.key});
+  try {
+    const inserted = await db
+      .insert(aiPlanningState)
+      .values({
+        key,
+        athleteId,
+        sessionId: 'generation-lock',
+        state: {kind: 'generation-lock', scope: 'weekly-plan'},
+        expiresAt: now + GENERATION_LOCK_TTL_MS,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing({target: aiPlanningState.key})
+      .returning({key: aiPlanningState.key});
 
-  return inserted.length > 0;
+    return inserted.length > 0;
+  } catch (error) {
+    if (isMissingPlanningStateTableError(error)) {
+      console.warn(
+        '[WeeklyPlan] ai_planning_state table missing; skipping generation lock. Run db migrations to restore lock protection.',
+      );
+      return true;
+    }
+    throw error;
+  }
 };
 
 const releaseGenerationLock = async (key: string): Promise<void> => {
   await db
     .delete(aiPlanningState)
     .where(eq(aiPlanningState.key, key))
-    .catch(() => {});
+    .catch((error) => {
+      if (!isMissingPlanningStateTableError(error)) {
+        throw error;
+      }
+    });
 };
 
 export async function POST(req: Request) {
@@ -359,7 +471,7 @@ export async function POST(req: Request) {
     // Step 1: Load context
     const activityContextStartDate = getActivityContextStartDate();
     const [settingsRows, activityRows, planRows] = await Promise.all([
-      db.select().from(userSettings).where(eq(userSettings.athleteId, athleteId)),
+      loadUserSettingsCompat(athleteId),
       db
         .select()
         .from(activitiesTable)
@@ -455,9 +567,9 @@ export async function POST(req: Request) {
       ? injuries.map((item) => item?.name || '').filter(Boolean).join(', ')
       : '';
 
-    const allActivities = activityRows.map((r) =>
-      transformActivity(r.data as StravaSummaryActivity),
-    );
+    const allActivities = activityRows
+      .map((r) => safeTransformActivity(r.data))
+      .filter((activity): activity is ActivitySummary => activity !== null);
 
     // Recent 4 months summary
     const recentActivities = allActivities;

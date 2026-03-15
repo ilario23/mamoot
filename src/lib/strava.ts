@@ -569,26 +569,86 @@ export const mapSportType = (sportType: string): ActivityType => {
 export const transformActivity = (
   a: StravaSummaryActivity
 ): ActivitySummary => {
-  const distanceKm = a.distance / 1000;
+  const transformed = safeTransformActivity(a);
+  if (!transformed) {
+    throw new Error("Invalid Strava activity payload");
+  }
+  return transformed;
+};
+
+const toFiniteNumber = (value: unknown): number => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return 0;
+};
+
+const toIsoDate = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const embedded = trimmed.match(/\d{4}-\d{2}-\d{2}/);
+  return embedded?.[0] ?? null;
+};
+
+/**
+ * Defensive transformer for rows loaded from DB cache.
+ * Returns null when required fields are unusable so callers can skip bad rows.
+ */
+export const safeTransformActivity = (
+  raw: unknown
+): ActivitySummary | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as Partial<StravaSummaryActivity>;
+
+  const idValue = a.id;
+  if (
+    typeof idValue !== "number" &&
+    typeof idValue !== "string" &&
+    typeof idValue !== "bigint"
+  ) {
+    return null;
+  }
+  const id = String(idValue);
+  if (!id.trim()) return null;
+
+  const date =
+    toIsoDate(a.start_date_local) ?? toIsoDate(a.start_date) ?? null;
+  if (!date) return null;
+
+  const distanceMeters = toFiniteNumber(a.distance);
+  const movingTime = toFiniteNumber(a.moving_time);
+  const distanceKm = distanceMeters / 1000;
   const avgPace =
-    distanceKm > 0 && a.moving_time > 0
-      ? a.moving_time / 60 / distanceKm
-      : 0;
+    distanceKm > 0 && movingTime > 0 ? movingTime / 60 / distanceKm : 0;
+
+  const typeCandidate =
+    typeof a.sport_type === "string"
+      ? a.sport_type
+      : typeof a.type === "string"
+        ? a.type
+        : "Run";
+  const name =
+    typeof a.name === "string" && a.name.trim()
+      ? a.name
+      : `Activity ${id}`;
 
   return {
-    id: String(a.id),
-    name: a.name,
-    date: a.start_date_local.split("T")[0],
-    type: mapSportType(a.sport_type),
+    id,
+    name,
+    date,
+    type: mapSportType(typeCandidate),
     distance: Number(distanceKm.toFixed(2)),
-    duration: a.moving_time,
+    duration: movingTime,
     avgPace: Number(avgPace.toFixed(2)),
-    avgHr: a.average_heartrate ?? 0,
-    maxHr: a.max_heartrate ?? 0,
-    elevationGain: Math.round(a.total_elevation_gain),
-    calories: Math.round(a.calories ?? 0),
+    avgHr: toFiniteNumber(a.average_heartrate),
+    maxHr: toFiniteNumber(a.max_heartrate),
+    elevationGain: Math.round(toFiniteNumber(a.total_elevation_gain)),
+    calories: Math.round(toFiniteNumber(a.calories)),
     hasDetailedData: true,
-    polyline: a.map?.summary_polyline ?? undefined,
+    polyline:
+      typeof a.map?.summary_polyline === "string"
+        ? a.map.summary_polyline
+        : undefined,
   };
 };
 
