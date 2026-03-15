@@ -14,6 +14,7 @@ import {
   text,
   jsonb,
   boolean,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 
 // ----- Activities -----
@@ -241,6 +242,29 @@ export const bestEffortsCache = pgTable('best_efforts_cache', {
   activityCount: integer('activity_count').notNull(),
   computedAt: bigint('computed_at', {mode: 'number'}).notNull(),
 });
+
+// ----- Activity AI Reviews -----
+// Stores generated activity-level AI reviews keyed by athlete+activity+model.
+// Enables instant re-open without re-generating tokens.
+export const activityAiReviews = pgTable(
+  'activity_ai_reviews',
+  {
+    athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+    activityId: bigint('activity_id', {mode: 'number'}).notNull(),
+    model: text('model').notNull(),
+    reportText: text('report_text').notNull(),
+    rawDetailText: text('raw_detail_text'),
+    usageJson: jsonb('usage_json'),
+    weatherJson: jsonb('weather_json'),
+    createdAt: bigint('created_at', {mode: 'number'}).notNull(),
+    updatedAt: bigint('updated_at', {mode: 'number'}).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.athleteId, table.activityId, table.model],
+    }),
+  }),
+);
 
 // ----- Training Blocks -----
 // Periodized multi-week macro plans (e.g. 14-week marathon block).
