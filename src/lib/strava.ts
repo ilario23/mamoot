@@ -192,22 +192,30 @@ const stravaFetch = async <T>(
   endpoint: string,
   params?: Record<string, string>
 ): Promise<T> => {
-  const token = await getValidAccessToken();
-  const url = new URL(`${STRAVA_API_BASE}${endpoint}`);
-  if (params) {
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  }
+  const run = async (token: string) => {
+    const url = new URL(`${STRAVA_API_BASE}${endpoint}`);
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+    }
+    return fetch(url.toString(), {
+      headers: {Authorization: `Bearer ${token}`},
+    });
+  };
 
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let token = await getValidAccessToken();
+  let res = await run(token);
+
+  if (res.status === 401) {
+    token = await getValidAccessToken();
+    res = await run(token);
+  }
 
   if (!res.ok) {
     const errorBody = await res.text();
     throw new Error(`Strava API error (${res.status}): ${errorBody}`);
   }
 
-  return res.json();
+  return res.json() as Promise<T>;
 };
 
 // ----- API functions -----
@@ -446,8 +454,8 @@ export const fetchActivities = (
     page: String(page),
     per_page: String(perPage),
   };
-  if (after) params.after = String(after);
-  if (before) params.before = String(before);
+  if (after !== undefined) params.after = String(after);
+  if (before !== undefined) params.before = String(before);
   return stravaFetch<StravaSummaryActivity[]>("/athlete/activities", params);
 };
 
@@ -482,6 +490,22 @@ export const fetchAllActivities = async (
     if (chunkResults.some((result) => result.batch.length < 100)) {
       break;
     }
+  }
+  return all;
+};
+
+/**
+ * Pages through /athlete/activities with `after` (epoch seconds) for incremental sync.
+ */
+export const fetchActivitiesSinceEpoch = async (
+  afterEpoch: number,
+  maxPages = 10
+): Promise<StravaSummaryActivity[]> => {
+  const all: StravaSummaryActivity[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await fetchActivities(page, 100, afterEpoch);
+    all.push(...batch);
+    if (batch.length < 100) break;
   }
   return all;
 };

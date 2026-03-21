@@ -11,6 +11,7 @@
 // React Query provides in-memory caching for the browser session.
 
 import {
+  fetchActivitiesSinceEpoch,
   fetchAllActivities,
   fetchActivityDetail,
   fetchActivityStreams,
@@ -58,6 +59,32 @@ import {
   neonSyncDashboardCache,
   neonSyncAthleteProfile,
 } from './neonSync';
+import type {CachedActivity} from './cacheTypes';
+
+// ----- Perf (dev + light sampling) -----
+
+const CACHE_PERF_SAMPLE = 0.02;
+
+const logCachePerf = (label: string, ms: number) => {
+  if (
+    process.env.NODE_ENV === 'development' ||
+    Math.random() < CACHE_PERF_SAMPLE
+  ) {
+    console.info(`[cachePerf] ${label}: ${ms.toFixed(0)}ms`);
+  }
+};
+
+const withCachePerf = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+  const t0 =
+    typeof performance !== 'undefined' ? performance.now() : Date.now();
+  try {
+    return await fn();
+  } finally {
+    const t1 =
+      typeof performance !== 'undefined' ? performance.now() : Date.now();
+    logCachePerf(label, t1 - t0);
+  }
+};
 
 // ----- Staleness thresholds (ms) -----
 
@@ -81,6 +108,113 @@ const isFresh = (fetchedAt: number, maxAge: number): boolean => {
   return Date.now() - fetchedAt < maxAge;
 };
 
+const sortNeonToSummaries = (neonData: CachedActivity[]): ActivitySummary[] => {
+  const sorted = [...neonData].sort((a, b) =>
+    b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
+  );
+  return sorted.map((record) => transformActivity(record.data));
+};
+
+const backgroundActivitiesSyncInFlight = new Set<number>();
+const backgroundActivitiesCallbacks = new Map<number, Set<() => void>>();
+
+export type CachedActivitiesOptions = {
+  /** Dashboard: return Neon immediately when stale; sync in background */
+  staleWhileRevalidate?: boolean;
+  onBackgroundSyncComplete?: () => void;
+};
+
+export const scheduleBackgroundActivitiesSync = (
+  athleteId: number,
+  onComplete?: () => void,
+): void => {
+  if (onComplete) {
+    let set = backgroundActivitiesCallbacks.get(athleteId);
+    if (!set) {
+      set = new Set();
+      backgroundActivitiesCallbacks.set(athleteId, set);
+    }
+    set.add(onComplete);
+  }
+  if (backgroundActivitiesSyncInFlight.has(athleteId)) return;
+  backgroundActivitiesSyncInFlight.add(athleteId);
+  void (async () => {
+    try {
+      await withCachePerf('activities.backgroundSync', () =>
+        syncActivitiesFromStravaForAthlete(athleteId, 'incremental'),
+      );
+      const cbs = backgroundActivitiesCallbacks.get(athleteId);
+      backgroundActivitiesCallbacks.delete(athleteId);
+      cbs?.forEach((cb) => {
+        try {
+          cb();
+        } catch {
+          /* noop */
+        }
+      });
+    } finally {
+      backgroundActivitiesSyncInFlight.delete(athleteId);
+    }
+  })();
+};
+
+async function touchLatestActivityFetchedAt(athleteId: number): Promise<void> {
+  const latest = await neonGetActivitiesPaginated(athleteId, 1, 0);
+  if (!latest?.[0]) return;
+  await neonSyncActivities([
+    {
+      ...latest[0],
+      fetchedAt: Date.now(),
+    },
+  ]);
+}
+
+async function syncActivitiesFromStravaForAthlete(
+  athleteId: number,
+  mode: 'incremental' | 'full',
+): Promise<void> {
+  const now = Date.now();
+  if (mode === 'full') {
+    const raw = await fetchAllActivities();
+    const records = raw.map((activity) => ({
+      id: activity.id,
+      athleteId,
+      data: activity,
+      date: activity.start_date_local.split('T')[0],
+      fetchedAt: now,
+    }));
+    await neonSyncActivities(records);
+    return;
+  }
+
+  const latest = await neonGetActivitiesPaginated(athleteId, 1, 0);
+  if (!latest || latest.length === 0) {
+    await syncActivitiesFromStravaForAthlete(athleteId, 'full');
+    return;
+  }
+
+  const startStr = latest[0].data.start_date as string;
+  const afterEpoch = Math.max(
+    0,
+    Math.floor(new Date(startStr).getTime() / 1000) - 1,
+  );
+
+  const raw = await fetchActivitiesSinceEpoch(afterEpoch);
+  if (raw.length === 0) {
+    await touchLatestActivityFetchedAt(athleteId);
+    return;
+  }
+
+  const records = raw.map((activity) => ({
+    id: activity.id,
+    athleteId,
+    data: activity,
+    date: activity.start_date_local.split('T')[0],
+    fetchedAt: now,
+  }));
+  await neonSyncActivities(records);
+}
+
 // ----- Activities (list) -----
 
 /**
@@ -90,17 +224,20 @@ const isFresh = (fetchedAt: number, maxAge: number): boolean => {
  * @param afterDate  Optional YYYY-MM-DD cutoff — when provided, the Neon
  *                   read only returns activities on or after this date,
  *                   reducing payload size for dashboard views.
- *                   The Strava sync always fetches everything so the full
- *                   history is available for other views.
+ *                   Incremental Strava sync loads new activities when Neon exists.
  */
 export const cachedGetAllActivities = async (
   athleteId: number,
   afterDate?: string,
+  options?: CachedActivitiesOptions,
 ): Promise<ActivitySummary[]> => {
-  // ── Tier 1: Neon (persistent, multi-device) ──
-  const neonData = afterDate
-    ? await neonGetRecentActivities(athleteId, afterDate)
-    : await neonGetActivities(athleteId);
+  const neonData = await withCachePerf('activities.neonRead', async () =>
+    afterDate
+      ? await neonGetRecentActivities(athleteId, afterDate)
+      : await neonGetActivities(athleteId),
+  );
+
+  const swr = Boolean(options?.staleWhileRevalidate && afterDate);
 
   if (neonData && neonData.length > 0) {
     const newestNeon = neonData.reduce((a, b) =>
@@ -108,37 +245,35 @@ export const cachedGetAllActivities = async (
     );
 
     if (isFresh(newestNeon.fetchedAt, STALE.activities)) {
-      const sorted = [...neonData].sort((a, b) =>
-        b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
+      return sortNeonToSummaries(neonData);
+    }
+
+    if (swr) {
+      scheduleBackgroundActivitiesSync(
+        athleteId,
+        options?.onBackgroundSyncComplete,
       );
-      return sorted.map((record) => transformActivity(record.data));
+      return sortNeonToSummaries(neonData);
     }
   }
 
-  // ── Tier 2: Strava API (source of truth) ──
-  const raw = await fetchAllActivities();
-  const now = Date.now();
+  const mode: 'incremental' | 'full' =
+    neonData && neonData.length > 0 ? 'incremental' : 'full';
 
-  const records = raw.map((activity) => ({
-    id: activity.id,
-    athleteId,
-    data: activity,
-    date: activity.start_date_local.split('T')[0],
-    fetchedAt: now,
-  }));
-
-  // Write all to Neon (full history for other views)
-  await neonSyncActivities(records);
-
-  // Apply client-side date filter if requested (Strava returns everything)
-  const filtered = afterDate
-    ? records.filter((r) => r.date >= afterDate)
-    : records;
-
-  const sorted = [...filtered].sort((a, b) =>
-    b.date > a.date ? 1 : a.date > b.date ? -1 : 0,
+  await withCachePerf(
+    mode === 'incremental' ? 'activities.syncIncremental' : 'activities.syncFull',
+    () => syncActivitiesFromStravaForAthlete(athleteId, mode),
   );
-  return sorted.map((record) => transformActivity(record.data));
+
+  const neonAfter = afterDate
+    ? await neonGetRecentActivities(athleteId, afterDate)
+    : await neonGetActivities(athleteId);
+
+  if (!neonAfter || neonAfter.length === 0) {
+    return [];
+  }
+
+  return sortNeonToSummaries(neonAfter);
 };
 
 /**
@@ -409,7 +544,8 @@ const batchGetZoneBreakdownsInternal = async (
   activityIds: number[],
   zones: UserSettings['zones'],
   onProgress?: (done: number, total: number) => void,
-): Promise<Map<number, ZoneBreakdown>> => {
+): Promise<Map<number, ZoneBreakdown>> =>
+  withCachePerf('zones.batchBreakdowns', async () => {
   const results = new Map<number, ZoneBreakdown>();
   const total = activityIds.length;
   const currentHash = hashZoneSettings(zones);
@@ -490,7 +626,7 @@ const batchGetZoneBreakdownsInternal = async (
   }
 
   return results;
-};
+  });
 
 // ----- Dashboard Fitness Cache (3-way: hit / append / recompute) -----
 
@@ -511,7 +647,8 @@ export const cachedCalcFitnessData = async (
   athleteId: number,
   activities: ActivitySummary[],
   settings: UserSettings,
-): Promise<FitnessDataPoint[]> => {
+): Promise<FitnessDataPoint[]> =>
+  withCachePerf('fitness.cachedCalcFitnessData', async () => {
   const currentHash = hashTrainingSettings(
     settings.zones,
     settings.maxHr,
@@ -629,7 +766,7 @@ export const cachedCalcFitnessData = async (
   });
 
   return result.data;
-};
+  });
 
 // ----- Force refresh helpers -----
 

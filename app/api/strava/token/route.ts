@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {sql} from "drizzle-orm";
 import {db} from "@/db";
+import {
+  applyStravaTokenPayloadToResponse,
+  postStravaOAuthToken,
+  refreshStravaTokensFromRequest,
+} from "@/lib/stravaTokenBroker";
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_STRAVA_CLIENT_ID ?? "";
 const CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET ?? "";
-const COOKIE_SECURE = process.env.NODE_ENV === 'production';
-const ACCESS_COOKIE = 'strava_access_token';
-const REFRESH_COOKIE = 'strava_refresh_token';
-const EXPIRES_COOKIE = 'strava_expires_at';
-const ATHLETE_COOKIE = 'strava_athlete';
-const CSRF_COOKIE = 'strava_csrf_token';
 
 const reconcileLegacyRowsForAthlete = async (athleteId: number) => {
   await db.execute(sql`
@@ -91,32 +90,32 @@ export async function POST(request: NextRequest) {
     grant_type: body.grant_type,
   });
 
-  if (body.grant_type === "authorization_code") {
-    formData.set("code", body.code);
-  } else if (body.grant_type === "refresh_token") {
-    const csrfCookie = request.cookies.get(CSRF_COOKIE)?.value;
-    const csrfHeader = request.headers.get('x-csrf-token');
-    if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
-      return NextResponse.json({ error: "CSRF validation failed" }, { status: 403 });
+  if (body.grant_type === "refresh_token") {
+    const result = await refreshStravaTokensFromRequest(request, body.refresh_token);
+    if (!result.ok) {
+      return new NextResponse(result.bodyText, {
+        status: result.status,
+        headers: {"Content-Type": "application/json"},
+      });
     }
-    const cookieRefresh = request.cookies.get(REFRESH_COOKIE)?.value;
-    const refresh = body.refresh_token || cookieRefresh;
-    if (!refresh) {
-      return NextResponse.json({ error: "refresh_token required" }, { status: 400 });
-    }
-    formData.set("refresh_token", refresh);
+    const response = new NextResponse(result.bodyText, {
+      status: result.status,
+      headers: {"Content-Type": "application/json"},
+    });
+    applyStravaTokenPayloadToResponse(response, result.parsed);
+    return response;
   }
 
+  if (body.grant_type !== "authorization_code") {
+    return NextResponse.json({error: "Unsupported grant_type"}, {status: 400});
+  }
+
+  formData.set("code", body.code);
+
   try {
-    const stravaRes = await fetch("https://www.strava.com/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString(),
-    });
+    const {status, bodyText: data} = await postStravaOAuthToken(formData);
 
-    const data = await stravaRes.text();
-
-    if (stravaRes.ok && body.grant_type === "authorization_code") {
+    if (status >= 200 && status < 300 && body.grant_type === "authorization_code") {
       try {
         const parsed = JSON.parse(data) as {athlete?: {id?: number}};
         const athleteId = parsed.athlete?.id;
@@ -129,10 +128,10 @@ export async function POST(request: NextRequest) {
     }
 
     const response = new NextResponse(data, {
-      status: stravaRes.status,
-      headers: { "Content-Type": "application/json" },
+      status,
+      headers: {"Content-Type": "application/json"},
     });
-    if (stravaRes.ok) {
+    if (status >= 200 && status < 300) {
       try {
         const parsed = JSON.parse(data) as {
           access_token?: string;
@@ -140,42 +139,7 @@ export async function POST(request: NextRequest) {
           expires_at?: number;
           athlete?: unknown;
         };
-        if (parsed.access_token) {
-          response.cookies.set(ACCESS_COOKIE, parsed.access_token, {
-            httpOnly: true,
-            sameSite: 'lax',
-            secure: COOKIE_SECURE,
-            path: '/',
-            maxAge: 60 * 60 * 6,
-          });
-        }
-        if (parsed.refresh_token) {
-          response.cookies.set(REFRESH_COOKIE, parsed.refresh_token, {
-            httpOnly: true,
-            sameSite: 'lax',
-            secure: COOKIE_SECURE,
-            path: '/',
-            maxAge: 60 * 60 * 24 * 30,
-          });
-        }
-        if (parsed.expires_at) {
-          response.cookies.set(EXPIRES_COOKIE, String(parsed.expires_at), {
-            httpOnly: true,
-            sameSite: 'lax',
-            secure: COOKIE_SECURE,
-            path: '/',
-            maxAge: 60 * 60 * 24 * 30,
-          });
-        }
-        if (parsed.athlete) {
-          response.cookies.set(ATHLETE_COOKIE, JSON.stringify(parsed.athlete), {
-            httpOnly: false,
-            sameSite: 'lax',
-            secure: COOKIE_SECURE,
-            path: '/',
-            maxAge: 60 * 60 * 24 * 30,
-          });
-        }
+        applyStravaTokenPayloadToResponse(response, parsed);
       } catch {
         // No-op if response body is not JSON.
       }

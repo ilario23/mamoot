@@ -61,11 +61,20 @@ export const useActivities = () => {
 /** Dashboard-optimized activity query (rolling window only). */
 export const useDashboardActivities = () => {
   const {isAuthenticated, athlete} = useStravaAuth();
+  const queryClient = useQueryClient();
   const afterDate = getDashboardAfterDate();
 
   return useQuery<ActivitySummary[]>({
     queryKey: ['strava', 'activities', 'dashboard', athlete?.id, afterDate],
-    queryFn: () => cachedGetAllActivities(athlete!.id, afterDate),
+    queryFn: () =>
+      cachedGetAllActivities(athlete!.id, afterDate, {
+        staleWhileRevalidate: true,
+        onBackgroundSyncComplete: () => {
+          queryClient.invalidateQueries({
+            queryKey: ['strava', 'activities'],
+          });
+        },
+      }),
     enabled: isAuthenticated && !!athlete?.id,
     staleTime: ONE_HOUR,
     gcTime: ONE_DAY,
