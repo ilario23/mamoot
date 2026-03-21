@@ -1,7 +1,12 @@
-import {describe, expect, it} from 'vitest';
+import {beforeEach, describe, expect, it} from 'vitest';
 import {NextRequest} from 'next/server';
 
 describe('db route auth defaults', () => {
+  beforeEach(() => {
+    // Route imports @/db, which initializes Neon at module load.
+    process.env.DATABASE_URL = 'postgres://ci:ci@localhost:5432/ci';
+  });
+
   it('blocks unauthorized requests in production by default', async () => {
     (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
     delete process.env.DB_ROUTE_ENFORCE_AUTH;

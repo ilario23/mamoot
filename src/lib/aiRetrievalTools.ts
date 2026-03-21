@@ -42,6 +42,8 @@ import {
   getCurrentMondayInTimeZone,
   getMondayIsoForDate,
 } from './weekTime';
+import type {UnifiedSession} from './cacheTypes';
+import {formatRunPhasesSummary} from './runPlanFormat';
 
 // ----- Helpers -----
 
@@ -886,7 +888,8 @@ export const createRetrievalTools = (
 
         if (s.run) {
           const pz = [s.run.targetPace, s.run.targetZone].filter(Boolean).join(' / ') || '';
-          lines.push(`**Run (${s.run.type}):** ${s.run.description}${pz ? ` — ${pz}` : ''}`);
+          const runText = formatRunPhasesSummary(s.run as NonNullable<UnifiedSession['run']>);
+          lines.push(`**Run (${s.run.type}):** ${runText}${pz ? ` — ${pz}` : ''}`);
           if (s.run.duration) lines.push(`Duration: ${s.run.duration}`);
           if (s.run.notes) lines.push(`Note: ${s.run.notes}`);
         }

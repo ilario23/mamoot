@@ -535,6 +535,9 @@ export const evaluateCoachWeeklyDistribution = (
       run: {
         type: session.type,
         description: session.description,
+        warmupSteps: session.warmupSteps.length ? session.warmupSteps : undefined,
+        mainSteps: session.mainSteps.length ? session.mainSteps : undefined,
+        cooldownSteps: session.cooldownSteps.length ? session.cooldownSteps : undefined,
         duration: session.duration ?? undefined,
         plannedDurationMin: session.plannedDurationMin ?? undefined,
         plannedDistanceKm: session.plannedDistanceKm ?? undefined,

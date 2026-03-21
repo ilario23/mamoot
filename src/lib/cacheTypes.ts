@@ -15,6 +15,7 @@ import type {
   StravaAthleteZones,
   StravaSummaryGear,
 } from './strava';
+import type {RunStep} from './weeklyPlanSchema';
 
 // ----- Cached record wrappers -----
 
@@ -196,6 +197,10 @@ export interface UnifiedSession {
   run?: {
     type: string;
     description: string;
+    /** Warmup / main / cooldown when present (legacy plans may omit). */
+    warmupSteps?: RunStep[];
+    mainSteps?: RunStep[];
+    cooldownSteps?: RunStep[];
     duration?: string;
     plannedDurationMin?: number;
     plannedDistanceKm?: number;

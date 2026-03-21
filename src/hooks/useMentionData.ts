@@ -25,6 +25,8 @@ import {
 } from '@/lib/neonSync';
 import {neonGetWeeklyPlans, neonGetActiveTrainingBlock} from '@/lib/chatSync';
 import {transformActivity} from '@/lib/strava';
+import type {UnifiedSession} from '@/lib/cacheTypes';
+import {formatRunPhasesSummary} from '@/lib/runPlanFormat';
 
 // ----- Helpers -----
 
@@ -273,7 +275,11 @@ const resolvePlan = async (athleteId: number): Promise<string> => {
   if (plan.sessions?.length > 0) {
     for (const s of plan.sessions) {
       const parts = [`### ${s.day} — ${s.date}`];
-      if (s.run) parts.push(`**Run (${s.run.type}):** ${s.run.description}`);
+      if (s.run) {
+        parts.push(
+          `**Run (${s.run.type}):** ${formatRunPhasesSummary(s.run as NonNullable<UnifiedSession['run']>)}`,
+        );
+      }
       if (s.physio) {
         parts.push(`**Physio (${s.physio.type}):** ${s.physio.exercises.map((e) => e.name).join(', ')}`);
       }

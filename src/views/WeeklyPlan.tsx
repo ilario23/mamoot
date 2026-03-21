@@ -43,6 +43,7 @@ import {
 import {Sheet, SheetContent, SheetTitle} from '@/components/ui/sheet';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
 import WeeklyPlanDistribution from '@/components/weekly-plan/WeeklyPlanDistribution';
+import RunPhaseTable from '@/components/weekly-plan/RunPhaseTable';
 import WeeklyDecisionHeader from '@/components/training-plan/WeeklyDecisionHeader';
 import TrainingPlanPanel from '@/components/training-plan/TrainingPlanPanel';
 import {useWeeklyPlan} from '@/hooks/useWeeklyPlan';
@@ -359,6 +360,7 @@ const DayCard = ({
               <p className='text-sm font-medium leading-relaxed'>
                 {session.run!.description}
               </p>
+              <RunPhaseTable run={session.run!} />
               {(session.run!.duration || session.run!.targetPace || session.run!.targetZone) && (
                 <div className='flex flex-wrap gap-1.5 mt-2'>
                   {session.run!.duration && (

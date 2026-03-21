@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {runStepSchema} from './weeklyPlanSchema';
 
 const personSchema = z.enum(['coach', 'nutritionist', 'physio']);
 
@@ -68,6 +69,9 @@ const weeklyPlanPhysioExerciseSchema = z.object({
 const weeklyPlanRunSchema = z.object({
   type: z.string(),
   description: z.string(),
+  warmupSteps: z.array(runStepSchema).optional(),
+  mainSteps: z.array(runStepSchema).optional(),
+  cooldownSteps: z.array(runStepSchema).optional(),
   duration: z.string().optional(),
   plannedDurationMin: z.number().positive().optional(),
   plannedDistanceKm: z.number().positive().optional(),

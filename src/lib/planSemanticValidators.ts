@@ -97,7 +97,112 @@ export const validateCoachWeekOutput = (
     }
   }
 
+  const RUN_TYPES_WITH_PHASES = new Set<
+    CoachWeekOutput['sessions'][number]['type']
+  >(['easy', 'intervals', 'tempo', 'long', 'recovery']);
+
+  for (const session of value.sessions) {
+    if (RUN_TYPES_WITH_PHASES.has(session.type)) {
+      if (
+        !session.warmupSteps.length ||
+        !session.mainSteps.length ||
+        !session.cooldownSteps.length
+      ) {
+        return {
+          ok: false,
+          reason: `Coach output must include warmup, main, and cooldown steps for ${session.date} (${session.type})`,
+        };
+      }
+    } else if (session.type === 'rest' || session.type === 'strength') {
+      if (
+        session.warmupSteps.length ||
+        session.mainSteps.length ||
+        session.cooldownSteps.length
+      ) {
+        return {
+          ok: false,
+          reason: `Coach output must leave warmup/main/cooldown step arrays empty for ${session.type} on ${session.date}`,
+        };
+      }
+    }
+  }
+
   return {ok: true};
+};
+
+/** Session types whose plannedDistanceKm counts toward weekly block volume. */
+const RUN_VOLUME_SESSION_TYPES = new Set<
+  CoachWeekOutput['sessions'][number]['type']
+>(['easy', 'intervals', 'tempo', 'long', 'recovery']);
+
+export const sumCoachWeekRunPlannedKm = (value: CoachWeekOutput): number => {
+  let sum = 0;
+  for (const session of value.sessions) {
+    if (!RUN_VOLUME_SESSION_TYPES.has(session.type)) continue;
+    const km = session.plannedDistanceKm;
+    if (km == null || !Number.isFinite(km)) continue;
+    sum += km;
+  }
+  return sum;
+};
+
+/** Enforces block volumeTargetKm when the athlete has a periodized outline for this week. */
+export const validateCoachWeekVolumeVsBlockTarget = (
+  value: CoachWeekOutput,
+  volumeTargetKm: number,
+  options?: {toleranceRatio?: number},
+): {ok: boolean; reason?: string} => {
+  if (!Number.isFinite(volumeTargetKm) || volumeTargetKm <= 0) {
+    return {ok: true};
+  }
+  const toleranceRatio = options?.toleranceRatio ?? 0.06;
+  const low = volumeTargetKm * (1 - toleranceRatio);
+  const high = volumeTargetKm * (1 + toleranceRatio);
+
+  for (const session of value.sessions) {
+    if (!RUN_VOLUME_SESSION_TYPES.has(session.type)) continue;
+    const km = session.plannedDistanceKm;
+    if (km == null || !Number.isFinite(km) || km <= 0) {
+      return {
+        ok: false,
+        reason: `Training block volume is ${volumeTargetKm} km: every ${session.type} session must set plannedDistanceKm (missing or invalid on ${session.date})`,
+      };
+    }
+  }
+
+  const sumKm = sumCoachWeekRunPlannedKm(value);
+  if (sumKm < low || sumKm > high) {
+    return {
+      ok: false,
+      reason: `Weekly planned run volume ${sumKm.toFixed(1)} km is outside the block target band ${low.toFixed(1)}–${high.toFixed(1)} km (target ${volumeTargetKm} km, ±${Math.round(toleranceRatio * 100)}%)`,
+    };
+  }
+
+  return {ok: true};
+};
+
+export const summarizeBlockVolumeForPrompt = (
+  value: CoachWeekOutput,
+  volumeTargetKm: number,
+  toleranceRatio = 0.06,
+): string => {
+  const low = volumeTargetKm * (1 - toleranceRatio);
+  const high = volumeTargetKm * (1 + toleranceRatio);
+  const sumKm = sumCoachWeekRunPlannedKm(value);
+  const lines = value.sessions.map((session) => {
+    if (!RUN_VOLUME_SESSION_TYPES.has(session.type)) {
+      return `- ${session.date} (${session.type}): not counted toward run volume`;
+    }
+    const km = session.plannedDistanceKm;
+    return `- ${session.date} (${session.type}): ${km == null ? 'missing km' : `${km} km`}`;
+  });
+  return [
+    `Block weekly run volume target: ${volumeTargetKm} km (acceptable total: ${low.toFixed(1)}–${high.toFixed(1)} km).`,
+    `Current sum of plannedDistanceKm on run days: ${sumKm.toFixed(2)} km.`,
+    'Per-day breakdown:',
+    ...lines,
+    'Repair: set plannedDistanceKm on every easy/intervals/tempo/long/recovery day so the total matches the target band. Keep workout intent and HR zones coherent.',
+  ].join('\n');
 };
 
 export const validateCombinedWeekSemantics = (

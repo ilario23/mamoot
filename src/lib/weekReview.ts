@@ -18,6 +18,8 @@ import {
 } from './workoutLabel';
 import type {StravaDetailedActivity} from './strava';
 import {addDaysIso} from './weekTime';
+import type {UnifiedSession} from './cacheTypes';
+import {formatRunPhasesSummary} from './runPlanFormat';
 
 type UnifiedSessionShape = {
   day: string;
@@ -123,7 +125,9 @@ export async function buildWeekReview(
       day: s.day,
       date: s.date,
       type: s.run?.type ?? 'rest',
-      description: s.run?.description ?? (s.notes || 'Rest'),
+      description: s.run
+        ? formatRunPhasesSummary(s.run as NonNullable<UnifiedSession['run']>)
+        : (s.notes || 'Rest'),
       targetPace: s.run?.targetPace,
       targetZone: s.run?.targetZone,
     }));

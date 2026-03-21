@@ -43,9 +43,12 @@ import {
 } from '@/lib/digitalTwin';
 import {calibratePriorityFromOutcomes} from '@/lib/calibration';
 import {weeklyPlanRequestSchema} from '@/lib/aiRequestSchemas';
+import {appendRunPhasesMarkdown, formatRunPhasesSummary} from '@/lib/runPlanFormat';
 import {generateObjectWithRetry} from '@/lib/aiGeneration';
 import {
+  summarizeBlockVolumeForPrompt,
   validateCoachWeekOutput,
+  validateCoachWeekVolumeVsBlockTarget,
 } from '@/lib/planSemanticValidators';
 import {
   evaluateCoachWeeklyDistribution,
@@ -230,6 +233,9 @@ const buildGeneratedSessions = (
       unified.run = {
         type: coach.type,
         description: coach.description,
+        warmupSteps: coach.warmupSteps.length ? coach.warmupSteps : undefined,
+        mainSteps: coach.mainSteps.length ? coach.mainSteps : undefined,
+        cooldownSteps: coach.cooldownSteps.length ? coach.cooldownSteps : undefined,
         duration: n2u(coach.duration),
         plannedDurationMin: n2u(coach.plannedDurationMin),
         plannedDistanceKm: n2u(coach.plannedDistanceKm),
@@ -850,6 +856,10 @@ export async function POST(req: Request) {
           ].filter(Boolean);
           trainingBlockContext = lines.join('\n');
           console.log(`[WeeklyPlan] Training block context injected (week ${weekNum} of ${block.totalWeeks}, ${thisWeek.weekType})`);
+        } else {
+          console.warn(
+            `[WeeklyPlan] Active training block ${block.id} has no outline for computed week ${weekNum} (weekStart ${weekStart}, block start ${block.startDate}). Block volume will not be enforced in this generation.`,
+          );
         }
       }
     } catch {
@@ -880,7 +890,7 @@ export async function POST(req: Request) {
           `Source plan: ${sourcePlanContext.title} (${sourcePlanContext.weekStart})`,
           ...(sourcePlanContext.sessions as UnifiedSession[]).map((session) => {
             const runPart = session.run
-              ? `run ${session.run.type}: ${session.run.description}`
+              ? `run ${session.run.type}: ${formatRunPhasesSummary(session.run)}`
               : 'no run';
             const strengthPart = session.strengthSlot
               ? `strength slot (${session.strengthSlot.load ?? 'moderate'})`
@@ -978,11 +988,42 @@ export async function POST(req: Request) {
       promptHash: promptHash(finalCoachPrompt),
       mode: effectiveMode,
     });
+
+    const blockVolumeTargetKm =
+      currentBlockWeek &&
+      typeof currentBlockWeek.volumeTargetKm === 'number' &&
+      currentBlockWeek.volumeTargetKm > 0
+        ? currentBlockWeek.volumeTargetKm
+        : null;
+
+    const coachSemanticCheck = (candidate: CoachWeekOutput) => {
+      const base = validateCoachWeekOutput(candidate);
+      if (!base.ok) return base;
+      if (blockVolumeTargetKm != null) {
+        return validateCoachWeekVolumeVsBlockTarget(
+          candidate,
+          blockVolumeTargetKm,
+        );
+      }
+      return {ok: true};
+    };
+
+    const coachMaxAttempts = blockVolumeTargetKm != null ? 4 : 2;
+
+    const blockVolumeHintFor = (obj: CoachWeekOutput) =>
+      blockVolumeTargetKm != null
+        ? `\n\n## Training block volume check\n${summarizeBlockVolumeForPrompt(
+            obj,
+            blockVolumeTargetKm,
+          )}`
+        : '';
+
     let coachObject = await generateObjectWithRetry<CoachWeekOutput>({
       model,
       schema: coachWeekOutputSchema,
       prompt: finalCoachPrompt,
-      semanticCheck: validateCoachWeekOutput,
+      maxAttempts: coachMaxAttempts,
+      semanticCheck: coachSemanticCheck,
     });
     specialistTurnsUsed += 1;
     roundCount += 1;
@@ -1003,14 +1044,17 @@ export async function POST(req: Request) {
       roundCount < MAX_REPAIR_ROUNDS
     ) {
       sendProgress('coach', 'Applying coach distribution repair pass.');
-      const repairPrompt = `${finalCoachPrompt}\n\n## Deterministic Weekly Distribution Feedback\n${summarizeDistributionForPrompt(
+      const repairPrompt = `${finalCoachPrompt}${blockVolumeHintFor(
+        coachObject,
+      )}\n\n## Deterministic Weekly Distribution Feedback\n${summarizeDistributionForPrompt(
         coachDistributionEvaluation,
-      )}\n\nRepair instructions:\n- Keep all dates.\n- Reduce hard clustering.\n- Keep easy volume dominant.\n- Preserve key block intent and safety constraints.\n- Minimize unnecessary restructuring.`;
+      )}\n\nRepair instructions:\n- Keep all dates.\n- Reduce hard clustering.\n- Keep easy volume dominant.\n- Preserve key block intent and safety constraints.\n- If a block volume target applies, keep the weekly sum of plannedDistanceKm within the stated band.\n- Preserve warmup/main/cooldown step structure for running days (each phase must stay ≥1 step); adjust only what distribution requires.\n- Minimize unnecessary restructuring.`;
       coachObject = await generateObjectWithRetry<CoachWeekOutput>({
         model,
         schema: coachWeekOutputSchema,
         prompt: repairPrompt,
-        semanticCheck: validateCoachWeekOutput,
+        maxAttempts: coachMaxAttempts,
+        semanticCheck: coachSemanticCheck,
       });
       coachSessions = coachObject.sessions;
       coachDistributionEvaluation = evaluateCoachWeeklyDistribution(coachObject);
@@ -1056,14 +1100,17 @@ export async function POST(req: Request) {
       roundCount < MAX_REPAIR_ROUNDS
     ) {
       sendProgress('merge', 'Applying targeted coach distribution repair pass.');
-      const distributionRepairPrompt = `${finalCoachPrompt}\n\n## Deterministic Weekly Distribution Repair Feedback\n${summarizeDistributionForPrompt(
+      const distributionRepairPrompt = `${finalCoachPrompt}${blockVolumeHintFor(
+        coachObject,
+      )}\n\n## Deterministic Weekly Distribution Repair Feedback\n${summarizeDistributionForPrompt(
         finalDistributionEvaluation,
-      )}\n\nRepair instructions:\n- Keep all dates fixed.\n- Reduce hard clustering and excessive weekend load.\n- Keep easy-minute dominance.\n- Preserve key workout intent from block context and athlete goals.\n- Keep changes minimal and safety-first.`;
+      )}\n\nRepair instructions:\n- Keep all dates fixed.\n- Reduce hard clustering and excessive weekend load.\n- Keep easy-minute dominance.\n- Preserve key workout intent from block context and athlete goals.\n- If a block volume target applies, keep the weekly sum of plannedDistanceKm within the stated band.\n- Preserve warmup/main/cooldown step structure for running days (each phase must stay ≥1 step); adjust only what distribution requires.\n- Keep changes minimal and safety-first.`;
       coachObject = await generateObjectWithRetry<CoachWeekOutput>({
         model,
         schema: coachWeekOutputSchema,
         prompt: distributionRepairPrompt,
-        semanticCheck: validateCoachWeekOutput,
+        maxAttempts: coachMaxAttempts,
+        semanticCheck: coachSemanticCheck,
       });
       coachSessions = coachObject.sessions;
       specialistTurnsUsed += 1;
@@ -1172,6 +1219,7 @@ export async function POST(req: Request) {
       if (s.run) {
         markdownLines.push(`### Running: ${s.run.type}`);
         markdownLines.push(s.run.description);
+        appendRunPhasesMarkdown(markdownLines, s.run);
         const details: string[] = [];
         if (s.run.duration) details.push(`Duration: ${s.run.duration}`);
         if (s.run.targetPace) details.push(`Pace: ${s.run.targetPace}`);
