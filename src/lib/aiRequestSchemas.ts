@@ -2,6 +2,7 @@ import {z} from 'zod';
 import {runStepSchema} from './weeklyPlanSchema';
 
 const personSchema = z.enum(['coach', 'nutritionist', 'physio']);
+const planEnvSchema = z.enum(['dev', 'prod']);
 
 const uiMessagePartSchema = z.object({
   type: z.string(),
@@ -49,6 +50,7 @@ export const weeklyPlanRequestSchema = z.object({
   editSourcePlanId: z.string().optional(),
   editInstructions: z.string().optional(),
   editTargetDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
+  planEnv: planEnvSchema.optional(),
 });
 
 export const weeklyPlanSessionStatusSchema = z.enum([
@@ -162,4 +164,5 @@ export const trainingBlockRequestSchema = z.object({
   optimizationPriority: z.string().optional(),
   riskOverride: z.boolean().optional(),
   timeZone: z.string().optional(),
+  planEnv: planEnvSchema.optional(),
 });

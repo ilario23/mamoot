@@ -1,5 +1,90 @@
 /** Focused pipeline prompts for generating unified weekly plans. */
 
+import type {CoachWeekOutput} from './weeklyPlanSchema';
+
+/** One-line-per-day snapshot of the current week for partial repair prompts. */
+export const formatFrozenCoachWeekForRepair = (coach: CoachWeekOutput): string =>
+  coach.sessions
+    .map(
+      (s) =>
+        `- ${s.day} ${s.date}: type=${s.type}, ${s.plannedDistanceKm ?? 'n/a'}km, ${s.plannedDurationMin ?? 'n/a'}min — ${s.description}`,
+    )
+    .join('\n');
+
+export const buildCoachDayRepairPrompt = (context: {
+  weekStart: string;
+  weekEnd: string;
+  repairDates: string[];
+  frozenWeekSummary: string;
+  distributionFeedback: string;
+  skeletonSummary: string;
+  blockVolumeHint: string | null;
+}) => `You are repairing a weekly running plan by regenerating ONLY specific days.
+
+## Allowed repair dates (ISO)
+You MUST output one full session per date below, and ONLY these dates:
+${context.repairDates.join(', ')}
+
+## Frozen week (all 7 days — copy unchanged days mentally; your JSON must only include the repair dates above)
+${context.frozenWeekSummary}
+
+## Week skeleton (preserve intent for repaired days)
+${context.skeletonSummary}
+
+## Distribution feedback to fix
+${context.distributionFeedback}
+${context.blockVolumeHint ? `\n${context.blockVolumeHint}\n` : ''}
+
+## Rules
+- Week window: ${context.weekStart} to ${context.weekEnd}.
+- Each output session must use the same \`day\` and \`date\` as in the frozen week for that ISO date.
+- For running days: include warmupSteps, mainSteps, cooldownSteps (each ≥1 step). For rest/strength: empty phase arrays.
+- Align plannedDistanceKm / plannedDurationMin with phase steps; use structured repeat_block/composite steps when applicable.
+- Fix the distribution issues without changing non-repair days (they are not in your output).
+- If a repaired day was rest/strength, you may change type only if required to fix load spread; otherwise keep skeleton sessionType.
+`;
+
+export const buildWeekSkeletonPrompt = (context: {
+  weekStart: string;
+  weekEnd: string;
+  recentTraining: string;
+  goal: string | null;
+  preferences: string | null;
+  trainingBlockContext: string | null;
+  optimizationPriorityLabel: string;
+  strategyLabel: string;
+  strategyDescription: string;
+  riskPolicyBanner: string | null;
+}) => `You are an expert running coach planning only weekly structure.
+
+Generate exactly 7 days (Monday through Sunday) for ${context.weekStart} to ${context.weekEnd}.
+
+## Strategy
+- Strategy: ${context.strategyLabel}
+- Strategy intent: ${context.strategyDescription}
+- Priority: ${context.optimizationPriorityLabel}
+${context.riskPolicyBanner ? `- Risk policy: ${context.riskPolicyBanner}` : ''}
+${context.goal ? `- Goal: ${context.goal}` : ''}
+${context.trainingBlockContext ? `\n## Training Block Context\n${context.trainingBlockContext}\n` : ''}
+
+## Recent Training
+${context.recentTraining}
+${context.preferences ? `\n## Athlete Preferences\n${context.preferences}\n` : ''}
+
+## Instructions
+- Output only day-level structure; do not generate detailed warmup/main/cooldown workouts.
+- For each day provide: sessionType, dayTargetKm, dayTargetMin, intensityTag, strengthSlotIntent, notes.
+- Keep exactly 7 unique dates.
+- Weekly distribution constraints:
+  - hard run days usually 1-3.
+  - avoid back-to-back hard run days.
+  - include long run freshness (no hard lower-body strength right before long run).
+  - easy/recovery load should dominate.
+- If training block target exists, distribute dayTargetKm so weekly total is near target (within about ±6%).
+- For rest/strength days, dayTargetKm can be null or 0.
+- For non-rest running days, set positive dayTargetKm when possible.
+`;
+
 export const buildCoachPipelinePrompt = (context: {
   athleteName: string | null;
   hrZones: string | null;
@@ -55,11 +140,15 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
   - If pace confidence is low or unavailable, omit targetPace and keep HR-only.
 - For rest/strength days, use type "rest" or "strength" and describe what the day is for; set warmupSteps, mainSteps, and cooldownSteps to empty arrays [].
 - For every **running** day (easy, intervals, tempo, long, recovery): fill warmupSteps, mainSteps, and cooldownSteps — each array must have at least one step. Quality sessions: progressive warmup (easy + drills/strides as needed), explicit main work (intervals, tempo, pyramid, fartlek as separate steps), then cooldown (easy jog + walk). Easy/recovery: keep all three phases but they can be short (e.g. 5–15 min build, steady aerobic block, 5 min walk). Phase steps must align with plannedDistanceKm, plannedDurationMin, and zone targets where applicable.
+- Use structured step encoding whenever possible:
+  - For repeated work like "6 x (30s sprint + 90s jog)", encode as one step with stepKind="repeat_block", repeatCount=6, and subSteps containing sprint + jog child steps (each child has subSteps=null; do not nest repeat blocks inside subSteps).
+  - For multi-part blocks without repeats, use stepKind="composite" with subSteps (same single-level rule).
+  - Keep label human-readable, but treat structured fields as canonical for machine-readability.
 - The description field is a short narrative summary (1–3 sentences) that matches the phase steps.
 - Honor the training balance: lower values (closer to 20) = more running days; higher values (closer to 80) = fewer runs, more rest/strength days.
 - Coach owns strength slot allocation: intentionally create 1-3 explicit "strength" days across the week (typically on rest or low-run-load days).
 - Use activity-type-aware sequencing: pair strength slots with easy/recovery/rest context; avoid placing them right before key run days whenever possible.
-- DOMS-aware planning: after a likely heavy lower-body strength slot, the next day must NOT be a long run, intervals, or tempo; use easy/recovery/rest as a buffer.
+- DOMS-aware planning: if a **strength** day is immediately **before** intervals, tempo, long, threshold, or race, either (1) put easy/recovery/rest between, or (2) make that strength session explicitly **low-DOMS** in description/notes (use words like light, mobility, activation, primer, prehab, bodyweight; avoid heavy lower-body eccentric work). Heavy strength must not sit the day before those hard/long runs.
 - Weekly distribution targets (deterministic scorer aligned):
   - Run days: usually 3-6/week.
   - Rest days: usually 1-3/week.

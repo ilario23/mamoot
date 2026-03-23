@@ -1,7 +1,7 @@
 import {NextResponse} from 'next/server';
 import {and, desc, eq, inArray, sql} from 'drizzle-orm';
 import {z} from 'zod';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {activities, activityDetails, userSettings} from '@/db/schema';
 import type {StravaDetailedActivity, StravaSummaryActivity} from '@/lib/strava';
 import {autoGeneratePaceZones} from '@/lib/paceZoneAutoGeneration';
@@ -42,6 +42,8 @@ export async function POST(req: Request) {
   if (callerAthleteId && callerAthleteId !== athleteId) {
     return NextResponse.json({error: 'Forbidden athlete scope'}, {status: 403});
   }
+
+  const db = getDb();
 
   let settings:
     | {

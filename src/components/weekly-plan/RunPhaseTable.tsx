@@ -1,5 +1,6 @@
 'use client';
 
+import type {JSX} from 'react';
 import type {UnifiedSession} from '@/lib/cacheTypes';
 import type {RunStep} from '@/lib/weeklyPlanSchema';
 
@@ -8,6 +9,41 @@ type Run = NonNullable<UnifiedSession['run']>;
 const targetCell = (step: RunStep): string => {
   const parts = [step.targetZone, step.targetPace].filter(Boolean);
   return parts.length ? parts.join(' · ') : '—';
+};
+
+const renderStepRows = (step: RunStep, title: string, keyPrefix: string, depth = 0): JSX.Element[] => {
+  const rows: JSX.Element[] = [];
+  const hasSubSteps = Boolean(step.subSteps && step.subSteps.length > 0);
+  const indentPx = depth * 12;
+  rows.push(
+    <tr key={`${keyPrefix}-row`} className='border-b border-border/60 last:border-b-0'>
+      <td className='px-2 py-1.5 font-medium align-top' style={{paddingLeft: `${8 + indentPx}px`}}>
+        {step.label}
+        {step.repeatCount != null ? (
+          <span className='ml-1 text-[10px] text-muted-foreground font-bold'>
+            ×{step.repeatCount}
+          </span>
+        ) : null}
+      </td>
+      <td className='px-2 py-1.5 text-muted-foreground align-top'>
+        {step.durationMin != null ? step.durationMin : '—'}
+      </td>
+      <td className='px-2 py-1.5 text-muted-foreground align-top'>
+        {step.distanceKm != null ? step.distanceKm : '—'}
+      </td>
+      <td className='px-2 py-1.5 align-top'>{targetCell(step)}</td>
+      <td className='px-2 py-1.5 text-muted-foreground align-top'>
+        {step.recovery ?? '—'}
+      </td>
+      <td className='px-2 py-1.5 text-muted-foreground align-top'>{step.notes ?? '—'}</td>
+    </tr>,
+  );
+  if (hasSubSteps) {
+    step.subSteps!.forEach((child, childIdx) => {
+      rows.push(...renderStepRows(child, title, `${keyPrefix}-child-${childIdx}`, depth + 1));
+    });
+  }
+  return rows;
 };
 
 const PhaseBlock = ({
@@ -34,29 +70,7 @@ const PhaseBlock = ({
           </tr>
         </thead>
         <tbody>
-          {steps.map((step, i) => (
-            <tr key={`${title}-${i}`} className='border-b border-border/60 last:border-b-0'>
-              <td className='px-2 py-1.5 font-medium align-top'>
-                {step.label}
-                {step.repeatCount != null ? (
-                  <span className='ml-1 text-[10px] text-muted-foreground font-bold'>
-                    ×{step.repeatCount}
-                  </span>
-                ) : null}
-              </td>
-              <td className='px-2 py-1.5 text-muted-foreground align-top'>
-                {step.durationMin != null ? step.durationMin : '—'}
-              </td>
-              <td className='px-2 py-1.5 text-muted-foreground align-top'>
-                {step.distanceKm != null ? step.distanceKm : '—'}
-              </td>
-              <td className='px-2 py-1.5 align-top'>{targetCell(step)}</td>
-              <td className='px-2 py-1.5 text-muted-foreground align-top'>
-                {step.recovery ?? '—'}
-              </td>
-              <td className='px-2 py-1.5 text-muted-foreground align-top'>{step.notes ?? '—'}</td>
-            </tr>
-          ))}
+          {steps.flatMap((step, i) => renderStepRows(step, title, `${title}-${i}`))}
         </tbody>
       </table>
     </div>

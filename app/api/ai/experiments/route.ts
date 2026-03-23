@@ -1,6 +1,6 @@
 import {NextResponse} from 'next/server';
 import {createHash, randomUUID} from 'node:crypto';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {aiTelemetryEvents} from '@/db/schema';
 
 const stableBucket = (seed: string): number => {
@@ -38,6 +38,7 @@ export async function POST(req: Request) {
   const now = Date.now();
 
   try {
+    const db = getDb();
     await db.insert(aiTelemetryEvents).values({
       id: randomUUID(),
       traceId: parsed.traceId ?? randomUUID(),

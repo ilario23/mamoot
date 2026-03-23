@@ -1,5 +1,5 @@
 import {NextResponse} from 'next/server';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {sql} from 'drizzle-orm';
 
 type TableCheck = {
@@ -29,6 +29,7 @@ const REQUIRED_COLUMNS: Array<{table: string; column: string}> = [
 ];
 
 const getExistingTables = async (): Promise<Set<string>> => {
+  const db = getDb();
   const rows = await db.execute<{tableName: string}>(sql`
     select table_name as "tableName"
     from information_schema.tables
@@ -38,6 +39,7 @@ const getExistingTables = async (): Promise<Set<string>> => {
 };
 
 const getExistingColumns = async (): Promise<Set<string>> => {
+  const db = getDb();
   const rows = await db.execute<{tableName: string; columnName: string}>(sql`
     select table_name as "tableName", column_name as "columnName"
     from information_schema.columns
@@ -52,6 +54,7 @@ export async function GET() {
   }
 
   try {
+    const db = getDb();
     const [tables, columns, dbInfoRows] = await Promise.all([
       getExistingTables(),
       getExistingColumns(),

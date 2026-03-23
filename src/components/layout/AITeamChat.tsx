@@ -52,6 +52,7 @@ import {parseAiErrorFromUnknown} from '@/lib/aiErrors';
 import AiErrorBanner from '@/components/ai/AiErrorBanner';
 import type {WeeklyPlanQuickAskDraft} from '@/lib/weeklyPlanQuickAsk';
 import CoachGuidedIntakePanel from '@/components/chat/CoachGuidedIntakePanel';
+import {getDefaultPlanEnv} from '@/lib/planEnv';
 
 // ----- Personas -----
 
@@ -702,6 +703,7 @@ const AITeamChat = ({
             athleteId,
             sessionId: session?.id ?? null,
             explicitContext,
+            planEnv: getDefaultPlanEnv(),
           },
         },
       );

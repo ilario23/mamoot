@@ -30,9 +30,24 @@ const markdownRow = (step: RunStep): string => {
   const dist = step.distanceKm != null ? String(step.distanceKm) : '—';
   const recovery = step.recovery ?? '—';
   const notes = step.notes ?? '—';
-  const repeat =
-    step.repeatCount != null ? `${cell(step.label)} (×${step.repeatCount})` : cell(step.label);
+  const repeat = step.repeatCount != null ? `${cell(step.label)} (×${step.repeatCount})` : cell(step.label);
   return `| ${repeat} | ${time} | ${dist} | ${cell(zonePace)} | ${cell(recovery)} | ${cell(notes)} |`;
+};
+
+const flattenStepsForMarkdown = (steps: RunStep[]): RunStep[] => {
+  const flattened: RunStep[] = [];
+  for (const step of steps) {
+    flattened.push(step);
+    if (step.subSteps?.length) {
+      for (const child of step.subSteps) {
+        flattened.push({
+          ...child,
+          label: `↳ ${child.label}`,
+        });
+      }
+    }
+  }
+  return flattened;
 };
 
 /** Append GFM tables for warmup / main / cooldown under ### Running. */
@@ -45,7 +60,7 @@ export const appendRunPhasesMarkdown = (
     lines.push(`#### ${title}`);
     lines.push('| Step | Min | km | Zone / pace | Recovery | Notes |');
     lines.push('| --- | --- | --- | --- | --- | --- |');
-    for (const step of steps) lines.push(markdownRow(step));
+    for (const step of flattenStepsForMarkdown(steps)) lines.push(markdownRow(step));
   };
   pushTable('Warmup', run.warmupSteps);
   pushTable('Main', run.mainSteps);

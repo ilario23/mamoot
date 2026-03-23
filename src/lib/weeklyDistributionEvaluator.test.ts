@@ -1,6 +1,11 @@
 import {describe, expect, it} from 'vitest';
-import {evaluateUnifiedWeeklyDistribution} from './weeklyDistributionEvaluator';
+import {
+  evaluateUnifiedWeeklyDistribution,
+  evaluateCoachWeeklyDistribution,
+  suggestCoachRepairDates,
+} from './weeklyDistributionEvaluator';
 import type {UnifiedSession} from './cacheTypes';
+import type {CoachWeekOutput, RunStep} from './weeklyPlanSchema';
 
 const BASE_WEEK = [
   '2026-03-02',
@@ -66,5 +71,54 @@ describe('weekly distribution evaluator', () => {
     const result = evaluateUnifiedWeeklyDistribution(sessions);
     expect(result.issues.some((issue) => issue.code === 'easy_minutes_not_dominant')).toBe(true);
     expect(result.score).toBeLessThan(70);
+  });
+});
+
+const emptyPhases = (): {warmupSteps: RunStep[]; mainSteps: RunStep[]; cooldownSteps: RunStep[]} => ({
+  warmupSteps: [],
+  mainSteps: [],
+  cooldownSteps: [],
+});
+
+const rs = (label: string): RunStep => ({
+  label,
+  durationMin: null,
+  distanceKm: null,
+  targetPace: null,
+  targetZone: null,
+  targetZoneId: null,
+  recovery: null,
+  repeatCount: null,
+  notes: null,
+  stepKind: null,
+  subSteps: null,
+});
+
+const runPhases = () => ({
+  warmupSteps: [rs('W')],
+  mainSteps: [rs('M')],
+  cooldownSteps: [rs('C')],
+});
+
+const makeCoachWeekAdjacentHard = (): CoachWeekOutput => ({
+  sessions: [
+    {day: 'Monday', date: BASE_WEEK[0], type: 'intervals', description: 'A', ...runPhases(), duration: '50 min', plannedDurationMin: 50, plannedDistanceKm: 8, targetPace: null, targetZone: 'Z4', targetZoneId: 4, notes: null},
+    {day: 'Tuesday', date: BASE_WEEK[1], type: 'tempo', description: 'B', ...runPhases(), duration: '45 min', plannedDurationMin: 45, plannedDistanceKm: 7, targetPace: null, targetZone: 'Z4', targetZoneId: 4, notes: null},
+    {day: 'Wednesday', date: BASE_WEEK[2], type: 'easy', description: 'C', ...runPhases(), duration: '40 min', plannedDurationMin: 40, plannedDistanceKm: 6, targetPace: null, targetZone: 'Z2', targetZoneId: 2, notes: null},
+    {day: 'Thursday', date: BASE_WEEK[3], type: 'rest', description: 'R', ...emptyPhases(), duration: null, plannedDurationMin: null, plannedDistanceKm: null, targetPace: null, targetZone: null, targetZoneId: null, notes: null},
+    {day: 'Friday', date: BASE_WEEK[4], type: 'easy', description: 'D', ...runPhases(), duration: '40 min', plannedDurationMin: 40, plannedDistanceKm: 6, targetPace: null, targetZone: 'Z2', targetZoneId: 2, notes: null},
+    {day: 'Saturday', date: BASE_WEEK[5], type: 'long', description: 'L', ...runPhases(), duration: '90 min', plannedDurationMin: 90, plannedDistanceKm: 16, targetPace: null, targetZone: 'Z2', targetZoneId: 2, notes: null},
+    {day: 'Sunday', date: BASE_WEEK[6], type: 'recovery', description: 'E', ...runPhases(), duration: '30 min', plannedDurationMin: 30, plannedDistanceKm: 5, targetPace: null, targetZone: 'Z1', targetZoneId: 1, notes: null},
+  ],
+});
+
+describe('suggestCoachRepairDates', () => {
+  it('suggests adjacent hard pair dates when evaluation flags adjacent_hard_days', () => {
+    const coach = makeCoachWeekAdjacentHard();
+    const evaluation = evaluateCoachWeeklyDistribution(coach);
+    expect(evaluation.issues.some((i) => i.code === 'adjacent_hard_days')).toBe(true);
+    const dates = suggestCoachRepairDates(coach, evaluation, 3);
+    expect(dates).toContain(BASE_WEEK[0]);
+    expect(dates).toContain(BASE_WEEK[1]);
   });
 });

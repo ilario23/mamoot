@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {sql} from "drizzle-orm";
-import {db} from "@/db";
+import {getDb} from "@/db";
 import {
   applyStravaTokenPayloadToResponse,
   postStravaOAuthToken,
@@ -11,6 +11,7 @@ const CLIENT_ID = process.env.NEXT_PUBLIC_STRAVA_CLIENT_ID ?? "";
 const CLIENT_SECRET = process.env.STRAVA_CLIENT_SECRET ?? "";
 
 const reconcileLegacyRowsForAthlete = async (athleteId: number) => {
+  const db = getDb();
   await db.execute(sql`
     UPDATE activities
     SET athlete_id = ${athleteId}

@@ -273,11 +273,18 @@ export const activityAiReviews = pgTable(
 export const trainingBlocks = pgTable('training_blocks', {
   id: text('id').primaryKey(),
   athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  /** Logical plan environment namespace: dev or prod */
+  planEnv: text('plan_env').notNull().default('prod'),
   /** Goal event name, e.g. "Berlin Marathon" */
   goalEvent: text('goal_event').notNull(),
   /** ISO date of the goal event, e.g. "2026-09-27" */
   goalDate: text('goal_date').notNull(),
   totalWeeks: integer('total_weeks').notNull(),
+  /**
+   * 1-indexed canonical week where the calendar block begins (default 1).
+   * When > 1, weeks 1..(n-1) are treated as already completed for this timeline.
+   */
+  firstActiveWeekNumber: integer('first_active_week_number').notNull().default(1),
   /** ISO Monday date for the first week, e.g. "2026-06-29" */
   startDate: text('start_date').notNull(),
   /** TrainingPhase[] — named phases with week ranges */
@@ -296,6 +303,8 @@ export const trainingBlocks = pgTable('training_blocks', {
 export const weeklyPlans = pgTable('weekly_plans', {
   id: text('id').primaryKey(),
   athleteId: bigint('athlete_id', {mode: 'number'}).notNull(),
+  /** Logical plan environment namespace: dev or prod */
+  planEnv: text('plan_env').notNull().default('prod'),
   /** ISO Monday date for this plan week, e.g. "2026-02-23" */
   weekStart: text('week_start').notNull(),
   title: text('title').notNull(),

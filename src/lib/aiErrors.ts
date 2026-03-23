@@ -9,6 +9,8 @@ export type AiErrorCode =
   | 'adaptation_type_required'
   | 'source_plan_not_found'
   | 'source_block_not_found'
+  | 'invalid_source_block'
+  | 'training_block_timeline_too_short'
   | 'allergy_confirmation_required'
   | 'chat_guardrail_blocked'
   | 'acwr_risk_override_required'
@@ -38,6 +40,11 @@ const AI_ERROR_RECOVERY_ACTIONS: Record<AiErrorCode, string[]> = {
   adaptation_type_required: ['Select adaptation mode', 'Retry adaptation'],
   source_plan_not_found: ['Generate full weekly plan first', 'Retry remaining-days mode'],
   source_block_not_found: ['Create a training block first', 'Retry adaptation'],
+  invalid_source_block: ['Create a new training block', 'Contact support if this persists'],
+  training_block_timeline_too_short: [
+    'Move the goal date later or start the block earlier',
+    'Pick a shorter template length',
+  ],
   allergy_confirmation_required: [
     'Update allergy profile',
     'Retry with explicit override',

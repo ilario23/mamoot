@@ -15,8 +15,13 @@ import type {
   TrainingPhase,
 } from './cacheTypes';
 import {dbFetch} from './dbClient';
+import {getDefaultPlanEnv, type PlanEnv} from './planEnv';
 
 const API = '/api/db';
+const withPlanEnv = (baseUrl: string, planEnv: PlanEnv): string => {
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}planEnv=${planEnv}`;
+};
 
 // ---- Internal helpers ----
 
@@ -107,33 +112,43 @@ export const neonDeleteChatSession = async (
 /** Get all weekly plans for an athlete (ordered by createdAt desc). */
 export const neonGetWeeklyPlans = async (
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
 ): Promise<CachedWeeklyPlan[] | null> =>
   getFromNeon<CachedWeeklyPlan[]>(
-    `${API}/weekly-plans?athleteId=${athleteId}`,
+    withPlanEnv(`${API}/weekly-plans?athleteId=${athleteId}`, planEnv),
   );
 
 /** Get only the active weekly plan for an athlete. */
 export const neonGetActiveWeeklyPlan = async (
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
 ): Promise<CachedWeeklyPlan | null> =>
   getFromNeon<CachedWeeklyPlan>(
-    `${API}/weekly-plans?athleteId=${athleteId}&active=true`,
+    withPlanEnv(`${API}/weekly-plans?athleteId=${athleteId}&active=true`, planEnv),
   );
 
 /** Awaitable upsert of a weekly plan. */
-export const neonSyncWeeklyPlan = async (record: CachedWeeklyPlan): Promise<void> => {
-  await postToNeon('weekly-plans', record);
+export const neonSyncWeeklyPlan = async (
+  record: CachedWeeklyPlan,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
+): Promise<void> => {
+  await postToNeon(`weekly-plans?planEnv=${planEnv}`, record);
 };
 
 /** Awaitable delete of a weekly plan by ID. */
 export const neonDeleteWeeklyPlan = async (
   planId: string,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
   athleteId?: number,
 ): Promise<void> => {
   try {
-    await dbFetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId ?? ''}`, {
+    await dbFetch(
+      withPlanEnv(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId ?? ''}`, planEnv),
+      {
       method: 'DELETE',
-    }, athleteId ?? null);
+      },
+      athleteId ?? null,
+    );
   } catch (err) {
     console.warn('[chatSync] DELETE weekly-plan error:', err);
   }
@@ -143,9 +158,10 @@ export const neonDeleteWeeklyPlan = async (
 export const neonActivateWeeklyPlan = async (
   planId: string,
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
 ): Promise<boolean> => {
   try {
-    const res = await dbFetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
+    const res = await dbFetch(withPlanEnv(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, planEnv), {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
@@ -160,11 +176,12 @@ export const neonActivateWeeklyPlan = async (
 export const neonUpdateWeeklyPlanSessions = async (
   planId: string,
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
   sessions: CachedWeeklyPlan['sessions'],
   content?: string,
 ): Promise<boolean> => {
   try {
-    const res = await dbFetch(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, {
+    const res = await dbFetch(withPlanEnv(`${API}/weekly-plans?id=${planId}&athleteId=${athleteId}`, planEnv), {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -183,28 +200,34 @@ export const neonUpdateWeeklyPlanSessions = async (
 
 export const neonGetTrainingBlocks = async (
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
 ): Promise<CachedTrainingBlock[] | null> =>
   getFromNeon<CachedTrainingBlock[]>(
-    `${API}/training-blocks?athleteId=${athleteId}`,
+    withPlanEnv(`${API}/training-blocks?athleteId=${athleteId}`, planEnv),
   );
 
 export const neonGetActiveTrainingBlock = async (
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
 ): Promise<CachedTrainingBlock | null> =>
   getFromNeon<CachedTrainingBlock>(
-    `${API}/training-blocks?athleteId=${athleteId}&active=true`,
+    withPlanEnv(`${API}/training-blocks?athleteId=${athleteId}&active=true`, planEnv),
   );
 
-export const neonSyncTrainingBlock = async (record: CachedTrainingBlock): Promise<void> => {
-  await postToNeon('training-blocks', record);
+export const neonSyncTrainingBlock = async (
+  record: CachedTrainingBlock,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
+): Promise<void> => {
+  await postToNeon(`training-blocks?planEnv=${planEnv}`, record);
 };
 
 export const neonDeleteTrainingBlock = async (
   blockId: string,
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
 ): Promise<void> => {
   try {
-    await dbFetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
+    await dbFetch(withPlanEnv(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, planEnv), {
       method: 'DELETE',
     }, athleteId);
   } catch (err) {
@@ -215,9 +238,10 @@ export const neonDeleteTrainingBlock = async (
 export const neonActivateTrainingBlock = async (
   blockId: string,
   athleteId: number,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
 ): Promise<boolean> => {
   try {
-    const res = await dbFetch(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, {
+    const res = await dbFetch(withPlanEnv(`${API}/training-blocks?id=${blockId}&athleteId=${athleteId}`, planEnv), {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
@@ -231,11 +255,12 @@ export const neonActivateTrainingBlock = async (
 
 export const neonUpdateTrainingBlockOutlines = async (
   blockId: string,
+  planEnv: PlanEnv = getDefaultPlanEnv(),
   weekOutlines: WeekOutline[],
   phases?: TrainingPhase[],
 ): Promise<void> => {
   try {
-    await dbFetch(`${API}/training-blocks?id=${blockId}`, {
+    await dbFetch(withPlanEnv(`${API}/training-blocks?id=${blockId}`, planEnv), {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({

@@ -7,7 +7,7 @@
 // route. Keeps DB credentials server-side while the client uses
 // fetch() to sync.
 
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   activities,
   activityDetails,
@@ -29,6 +29,7 @@ import {
 import {eq, and, sql, desc, inArray, gte, isNull} from 'drizzle-orm';
 import {type NextRequest, NextResponse} from 'next/server';
 import {weeklyPlanSessionSchema} from '@/lib/aiRequestSchemas';
+import {resolvePlanEnv} from '@/lib/planEnv';
 
 type RouteContext = {params: Promise<{table: string}>};
 
@@ -96,6 +97,7 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
   const accessCheck = enforceDbRouteAccess(req, athleteId);
   if (accessCheck) return accessCheck;
 
+  const db = getDb();
   try {
     switch (table) {
       case 'activities': {
@@ -485,11 +487,18 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'training-blocks': {
+        const planEnv = resolvePlanEnv(req.nextUrl.searchParams.get('planEnv'));
         if (pk) {
           const rows = await db
             .select()
             .from(trainingBlocks)
-            .where(and(eq(trainingBlocks.id, pk), isNull(trainingBlocks.deletedAt)));
+            .where(
+              and(
+                eq(trainingBlocks.id, pk),
+                eq(trainingBlocks.planEnv, planEnv),
+                isNull(trainingBlocks.deletedAt),
+              ),
+            );
           return NextResponse.json(rows[0] ?? null);
         }
         const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
@@ -501,6 +510,7 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
         const tbActiveOnly = req.nextUrl.searchParams.get('active') === 'true';
         const tbConditions = [
           eq(trainingBlocks.athleteId, Number(tbAthleteId)),
+          eq(trainingBlocks.planEnv, planEnv),
           isNull(trainingBlocks.deletedAt),
         ];
         if (tbActiveOnly) {
@@ -518,11 +528,12 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
       }
 
       case 'weekly-plans': {
+        const planEnv = resolvePlanEnv(req.nextUrl.searchParams.get('planEnv'));
         if (pk) {
           const rows = await db
             .select()
             .from(weeklyPlans)
-            .where(eq(weeklyPlans.id, pk));
+            .where(and(eq(weeklyPlans.id, pk), eq(weeklyPlans.planEnv, planEnv)));
           return NextResponse.json(rows[0] ?? null);
         }
         const wpAthleteId = req.nextUrl.searchParams.get('athleteId');
@@ -532,7 +543,10 @@ export const GET = async (req: NextRequest, {params}: RouteContext) => {
             {status: 400},
           );
         const wpActiveOnly = req.nextUrl.searchParams.get('active') === 'true';
-        const wpConditions = [eq(weeklyPlans.athleteId, Number(wpAthleteId))];
+        const wpConditions = [
+          eq(weeklyPlans.athleteId, Number(wpAthleteId)),
+          eq(weeklyPlans.planEnv, planEnv),
+        ];
         if (wpActiveOnly) {
           wpConditions.push(eq(weeklyPlans.isActive, true));
         }
@@ -589,6 +603,9 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
   if (accessCheck) return accessCheck;
 
   try {
+    const db = getDb();
+    const planEnvParam = (req.nextUrl.searchParams.get('planEnv') ?? undefined);
+    const planEnv = resolvePlanEnv(planEnvParam);
     switch (table) {
       case 'activities':
         await db
@@ -857,15 +874,22 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
         break;
 
       case 'training-blocks':
+        {
+          const normalizedRecords = records.map((record) => ({
+            ...(record as typeof trainingBlocks.$inferInsert),
+            planEnv,
+          })) as Array<typeof trainingBlocks.$inferInsert>;
         await db
           .insert(trainingBlocks)
-          .values(records)
+          .values(normalizedRecords)
           .onConflictDoUpdate({
             target: trainingBlocks.id,
             set: {
+              planEnv: sql`excluded.plan_env`,
               goalEvent: sql`excluded.goal_event`,
               goalDate: sql`excluded.goal_date`,
               totalWeeks: sql`excluded.total_weeks`,
+              firstActiveWeekNumber: sql`excluded.first_active_week_number`,
               startDate: sql`excluded.start_date`,
               phases: sql`excluded.phases`,
               weekOutlines: sql`excluded.week_outlines`,
@@ -874,14 +898,21 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
             },
           });
         break;
+        }
 
       case 'weekly-plans':
+        {
+          const normalizedRecords = records.map((record) => ({
+            ...(record as typeof weeklyPlans.$inferInsert),
+            planEnv,
+          })) as Array<typeof weeklyPlans.$inferInsert>;
         await db
           .insert(weeklyPlans)
-          .values(records)
+          .values(normalizedRecords)
           .onConflictDoUpdate({
             target: weeklyPlans.id,
             set: {
+              planEnv: sql`excluded.plan_env`,
               weekStart: sql`excluded.week_start`,
               title: sql`excluded.title`,
               summary: sql`excluded.summary`,
@@ -895,6 +926,7 @@ export const POST = async (req: NextRequest, {params}: RouteContext) => {
             },
           });
         break;
+        }
 
       default:
         return NextResponse.json({error: 'Unknown table'}, {status: 404});
@@ -916,6 +948,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
   const accessCheck = enforceDbRouteAccess(req, requestedAthleteId);
   if (accessCheck) return accessCheck;
 
+  const db = getDb();
   try {
     switch (table) {
       case 'user-settings': {
@@ -976,6 +1009,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         }
         const tbId = req.nextUrl.searchParams.get('id');
         const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
+        const planEnv = resolvePlanEnv(req.nextUrl.searchParams.get('planEnv'));
 
         if (tbId && tbAthleteId && !body.weekOutlines) {
           await db
@@ -984,6 +1018,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
             .where(
               and(
                 eq(trainingBlocks.athleteId, Number(tbAthleteId)),
+                eq(trainingBlocks.planEnv, planEnv),
                 isNull(trainingBlocks.deletedAt),
               ),
             );
@@ -994,6 +1029,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
               and(
                 eq(trainingBlocks.id, tbId),
                 eq(trainingBlocks.athleteId, Number(tbAthleteId)),
+                eq(trainingBlocks.planEnv, planEnv),
                 isNull(trainingBlocks.deletedAt),
               ),
             );
@@ -1009,7 +1045,13 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
           await db
             .update(trainingBlocks)
             .set(updates)
-            .where(and(eq(trainingBlocks.id, tbId), isNull(trainingBlocks.deletedAt)));
+            .where(
+              and(
+                eq(trainingBlocks.id, tbId),
+                eq(trainingBlocks.planEnv, planEnv),
+                isNull(trainingBlocks.deletedAt),
+              ),
+            );
           return NextResponse.json({success: true});
         }
 
@@ -1019,6 +1061,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
       case 'weekly-plans': {
         const wpPlanId = req.nextUrl.searchParams.get('id');
         const wpAthleteId = req.nextUrl.searchParams.get('athleteId');
+        const planEnv = resolvePlanEnv(req.nextUrl.searchParams.get('planEnv'));
         if (!wpPlanId || !wpAthleteId)
           return NextResponse.json(
             {error: 'id and athleteId required'},
@@ -1069,6 +1112,7 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
               and(
                 eq(weeklyPlans.id, wpPlanId),
                 eq(weeklyPlans.athleteId, Number(wpAthleteId)),
+                eq(weeklyPlans.planEnv, planEnv),
               ),
             );
           return NextResponse.json({success: true});
@@ -1077,12 +1121,23 @@ export const PATCH = async (req: NextRequest, {params}: RouteContext) => {
         await db
           .update(weeklyPlans)
           .set({isActive: false})
-          .where(eq(weeklyPlans.athleteId, Number(wpAthleteId)));
+          .where(
+            and(
+              eq(weeklyPlans.athleteId, Number(wpAthleteId)),
+              eq(weeklyPlans.planEnv, planEnv),
+            ),
+          );
 
         await db
           .update(weeklyPlans)
           .set({isActive: true})
-          .where(eq(weeklyPlans.id, wpPlanId));
+          .where(
+            and(
+              eq(weeklyPlans.id, wpPlanId),
+              eq(weeklyPlans.athleteId, Number(wpAthleteId)),
+              eq(weeklyPlans.planEnv, planEnv),
+            ),
+          );
 
         return NextResponse.json({success: true});
       }
@@ -1105,6 +1160,7 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
   const accessCheck = enforceDbRouteAccess(req, requestedAthleteId);
   if (accessCheck) return accessCheck;
 
+  const db = getDb();
   try {
     switch (table) {
       case 'chat-sessions': {
@@ -1138,6 +1194,7 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
       case 'training-blocks': {
         const tbBlockId = req.nextUrl.searchParams.get('id');
         const tbAthleteId = req.nextUrl.searchParams.get('athleteId');
+        const planEnv = resolvePlanEnv(req.nextUrl.searchParams.get('planEnv'));
         if (!tbBlockId || !tbAthleteId)
           return NextResponse.json(
             {error: 'id and athleteId required'},
@@ -1153,6 +1210,7 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
             and(
               eq(trainingBlocks.id, tbBlockId),
               eq(trainingBlocks.athleteId, athleteIdNum),
+              eq(trainingBlocks.planEnv, planEnv),
               isNull(trainingBlocks.deletedAt),
             ),
           )
@@ -1168,6 +1226,7 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
           .where(
             and(
               eq(weeklyPlans.athleteId, athleteIdNum),
+              eq(weeklyPlans.planEnv, planEnv),
               eq(weeklyPlans.blockId, tbBlockId),
             ),
           );
@@ -1177,9 +1236,12 @@ export const DELETE = async (req: NextRequest, {params}: RouteContext) => {
 
       case 'weekly-plans': {
         const wpPlanId = req.nextUrl.searchParams.get('id');
+        const planEnv = resolvePlanEnv(req.nextUrl.searchParams.get('planEnv'));
         if (!wpPlanId)
           return NextResponse.json({error: 'id required'}, {status: 400});
-        await db.delete(weeklyPlans).where(eq(weeklyPlans.id, wpPlanId));
+        await db
+          .delete(weeklyPlans)
+          .where(and(eq(weeklyPlans.id, wpPlanId), eq(weeklyPlans.planEnv, planEnv)));
         return NextResponse.json({success: true});
       }
 

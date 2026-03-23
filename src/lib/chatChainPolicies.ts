@@ -83,6 +83,18 @@ export const shouldRequireRetrieval = (params: {
   );
 };
 
+/** Appended to the system prompt when `shouldRequireRetrieval` is true (chat route). */
+export const RETRIEVAL_FIRST_SYSTEM_APPEND = `
+
+## Retrieval-first (server-enforced)
+This turn is advisory with a linked athlete. On your **first** step, call one or more **retrieval** tools and emit **no user-visible prose** until tool results return (no greeting, preamble, or advice). After tool outputs, answer normally and end with **suggestFollowUps** as usual.`;
+
+/** Appended on a single automatic retry after a retrieval-first guardrail violation. */
+export const RETRIEVAL_REPAIR_SYSTEM_APPEND = `
+
+## Repair (retry)
+Your previous attempt included assistant text before any retrieval tool ran. Retry this turn: **first step = retrieval tool call(s) only**, then give your full answer.`;
+
 export const buildFallbackFollowUps = (persona: string): string[] => {
   if (persona === 'nutritionist') {
     return [

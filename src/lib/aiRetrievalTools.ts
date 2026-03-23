@@ -8,7 +8,7 @@
 
 import {z} from 'zod';
 import {tool} from 'ai';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   activities as activitiesTable,
   activityDetails as activityDetailsTable,
@@ -44,6 +44,11 @@ import {
 } from './weekTime';
 import type {UnifiedSession} from './cacheTypes';
 import {formatRunPhasesSummary} from './runPlanFormat';
+import {
+  blockCurrentCanonicalWeek,
+  readFirstActiveWeekNumber,
+} from '@/lib/trainingBlockWeekMath';
+import {resolvePlanEnv, type PlanEnv} from '@/lib/planEnv';
 
 // ----- Helpers -----
 
@@ -65,6 +70,7 @@ const parseActivityRow = (row: {
 const fetchSettings = async (
   athleteId: number,
 ): Promise<typeof userSettings.$inferSelect | null> => {
+  const db = getDb();
   try {
     const rows = await db
       .select()
@@ -78,6 +84,7 @@ const fetchSettings = async (
 
 /** Get all activities from Neon, sorted by date descending. */
 const fetchActivities = async (athleteId: number): Promise<ActivitySummary[]> => {
+  const db = getDb();
   try {
     const rows = await db
       .select()
@@ -99,6 +106,7 @@ type ActivityWithRaw = ActivitySummary & {elapsedTime: number};
 const fetchActivitiesWithRaw = async (
   athleteId: number,
 ): Promise<ActivityWithRaw[]> => {
+  const db = getDb();
   try {
     const rows = await db
       .select()
@@ -157,6 +165,7 @@ const fetchOrComputeLabels = async (
   const result = new Map<number, WorkoutLabel>();
   if (activityIds.length === 0) return result;
 
+  const db = getDb();
   // 1. Fetch existing labels from Neon
   try {
     const existing = await db
@@ -234,6 +243,7 @@ const fetchOrComputeLabels = async (
  * Returns a tool map compatible with the Vercel AI SDK `tools` parameter.
  */
 type RetrievalToolsOptions = {
+  planEnv?: PlanEnv;
   requestCache?: Map<string, Promise<unknown>>;
   onCacheEvent?: (event: 'hit' | 'miss', key: string) => void;
 };
@@ -242,6 +252,8 @@ export const createRetrievalTools = (
   athleteId: number,
   options: RetrievalToolsOptions = {},
 ) => {
+  const planEnv = resolvePlanEnv(options.planEnv);
+  const db = getDb();
   const requestCache = options.requestCache ?? new Map<string, Promise<unknown>>();
   const onCacheEvent = options.onCacheEvent;
 
@@ -1634,6 +1646,7 @@ export const createRetrievalTools = (
         .where(
           and(
             eq(trainingBlocks.athleteId, athleteId),
+            eq(trainingBlocks.planEnv, planEnv),
             eq(trainingBlocks.isActive, true),
             isNull(trainingBlocks.deletedAt),
           ),
@@ -1652,16 +1665,21 @@ export const createRetrievalTools = (
       const phases = block.phases as Phase[];
       const outlines = block.weekOutlines as Outline[];
 
-      const now = new Date();
-      const start = new Date(block.startDate);
-      const diffMs = now.getTime() - start.getTime();
-      const currentWeek = Math.max(1, Math.min(block.totalWeeks, Math.ceil(diffMs / (7 * 86400000))));
+      const firstActive = readFirstActiveWeekNumber(block.firstActiveWeekNumber);
+      const currentWeek = blockCurrentCanonicalWeek({
+        blockStartMondayIso: block.startDate,
+        firstActiveWeekNumber: firstActive,
+        canonicalTotalWeeks: block.totalWeeks,
+      });
       const currentPhase = phases.find((p) => p.weekNumbers.includes(currentWeek));
 
       const lines = [
         `Training Block: ${block.goalEvent}`,
         `Goal Date: ${block.goalDate}`,
-        `Total Weeks: ${block.totalWeeks} (started ${block.startDate})`,
+        `Total Weeks (canonical): ${block.totalWeeks} (calendar start Monday: ${block.startDate}, first active week: ${firstActive})`,
+        firstActive > 1
+          ? `Partial block: weeks 1–${firstActive - 1} are treated as already completed before this calendar start.`
+          : '',
         `Current Week: ${currentWeek} of ${block.totalWeeks}`,
         currentPhase ? `Current Phase: ${currentPhase.name} — ${currentPhase.focus}` : '',
         `Block ID: ${block.id}`,

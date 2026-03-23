@@ -308,6 +308,8 @@ export interface CachedTrainingBlock {
   goalEvent: string;
   goalDate: string;
   totalWeeks: number;
+  /** Canonical week index where this calendar block starts (default 1). */
+  firstActiveWeekNumber?: number;
   startDate: string;
   phases: TrainingPhase[];
   weekOutlines: WeekOutline[];

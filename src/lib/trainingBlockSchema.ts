@@ -45,3 +45,20 @@ export const trainingBlockOutputSchema = z.object({
 });
 
 export type TrainingBlockOutput = z.infer<typeof trainingBlockOutputSchema>;
+
+/** Zod schema for a block with exactly `forwardWeekCount` week outlines (partial blocks). */
+export const buildTrainingBlockOutputSchema = (forwardWeekCount: number) =>
+  z.object({
+    phases: z
+      .array(trainingPhaseSchema)
+      .min(2)
+      .describe('Phases covering the active canonical week range'),
+    weekOutlines: z
+      .array(weekOutlineSchema)
+      .length(forwardWeekCount)
+      .describe('One outline per active week, ordered by ascending weekNumber'),
+  });
+
+export type TrainingBlockOutputPartial = z.infer<
+  ReturnType<typeof buildTrainingBlockOutputSchema>
+>;

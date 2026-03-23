@@ -11,6 +11,7 @@ import {
   neonActivateWeeklyPlan,
   neonUpdateWeeklyPlanSessions,
 } from '@/lib/chatSync';
+import {getDefaultPlanEnv} from '@/lib/planEnv';
 import {fetchUserSettingsRow} from '@/lib/userSettingsSync';
 import {dbFetch} from '@/lib/dbClient';
 import {type AiClientError, parseAiErrorFromUnknown} from '@/lib/aiErrors';
@@ -21,8 +22,8 @@ import {
 } from '@/lib/aiProgress';
 
 const STORAGE_KEY = 'mamoot-weekly-plan-active';
-const getActiveStorageKey = (athleteId: number): string =>
-  `${STORAGE_KEY}:${athleteId}`;
+const getActiveStorageKey = (athleteId: number, planEnv: string): string =>
+  `${STORAGE_KEY}:${athleteId}:${planEnv}`;
 const CLIENT_TIMEZONE =
   Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
@@ -132,21 +133,22 @@ const getCurrentMonday = (): string => {
   return addDaysToIsoDate(todayIso, -daysSinceMonday);
 };
 
-const writeActiveRef = (athleteId: number, plan: WeeklyPlan): void => {
+const writeActiveRef = (athleteId: number, planEnv: string, plan: WeeklyPlan): void => {
   const ref: ActivePlanRef = {
     id: plan.id,
     title: plan.title,
     weekStart: plan.weekStart,
     createdAt: plan.createdAt,
   };
-  localStorage.setItem(getActiveStorageKey(athleteId), JSON.stringify(ref));
+  localStorage.setItem(getActiveStorageKey(athleteId, planEnv), JSON.stringify(ref));
 };
 
-const removeActiveRef = (athleteId: number): void => {
-  localStorage.removeItem(getActiveStorageKey(athleteId));
+const removeActiveRef = (athleteId: number, planEnv: string): void => {
+  localStorage.removeItem(getActiveStorageKey(athleteId, planEnv));
 };
 
 export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => {
+  const planEnv = getDefaultPlanEnv();
   const [plans, setPlans] = useState<WeeklyPlan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -168,21 +170,21 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
 
   const loadPlans = useCallback(async () => {
     if (!athleteId) return;
-    const remote = await neonGetWeeklyPlans(athleteId);
+    const remote = await neonGetWeeklyPlans(athleteId, planEnv);
     if (!remote || remote.length === 0) {
       setPlans([]);
-      removeActiveRef(athleteId);
+      removeActiveRef(athleteId, planEnv);
       return;
     }
     const sorted = [...remote].sort((a, b) => b.createdAt - a.createdAt);
     setPlans(sorted);
     const active = sorted.find((p) => p.isActive);
     if (active) {
-      writeActiveRef(athleteId, active);
+      writeActiveRef(athleteId, planEnv, active);
     } else {
-      removeActiveRef(athleteId);
+      removeActiveRef(athleteId, planEnv);
     }
-  }, [athleteId]);
+  }, [athleteId, planEnv]);
 
   const loadPreferences = useCallback(async () => {
     if (!athleteId) return;
@@ -232,13 +234,13 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
   useEffect(() => {
     if (!athleteId) return;
     const handleStorage = (e: StorageEvent) => {
-      if (e.key !== getActiveStorageKey(athleteId)) return;
+      if (e.key !== getActiveStorageKey(athleteId, planEnv)) return;
       loadPlans().catch(() => {});
     };
 
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, [athleteId, loadPlans]);
+  }, [athleteId, loadPlans, planEnv]);
 
   const generatePlan = useCallback(
     async (options?: GeneratePlanOptions): Promise<WeeklyPlan | null> => {
@@ -267,7 +269,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
         const res = await fetch('/api/ai/weekly-plan', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(payload),
+          body: JSON.stringify({...payload, planEnv}),
         });
 
         if (!res.ok) {
@@ -436,7 +438,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
           return [newPlan, ...deactivated];
         });
 
-        writeActiveRef(athleteId, newPlan);
+        writeActiveRef(athleteId, planEnv, newPlan);
         setLastError(null);
         return newPlan;
       } catch (err) {
@@ -451,7 +453,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
         setIsGenerating(false);
       }
     },
-    [athleteId, preferences],
+    [athleteId, preferences, planEnv],
   );
 
   const activatePlan = useCallback(
@@ -461,15 +463,15 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
       );
 
       const target = plans.find((p) => p.id === planId);
-      if (target && athleteId) writeActiveRef(athleteId, {...target, isActive: true});
+      if (target && athleteId) writeActiveRef(athleteId, planEnv, {...target, isActive: true});
 
       if (!athleteId) return;
-      const activated = await neonActivateWeeklyPlan(planId, athleteId);
+      const activated = await neonActivateWeeklyPlan(planId, athleteId, planEnv);
       if (!activated) {
         await loadPlans();
       }
     },
-    [athleteId, loadPlans, plans],
+    [athleteId, loadPlans, plans, planEnv],
   );
 
   const deletePlan = useCallback(
@@ -487,22 +489,22 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
       if (wasActive) {
         const remaining = plans.filter((p) => p.id !== planId);
         if (remaining.length > 0) {
-          if (athleteId) writeActiveRef(athleteId, {...remaining[0], isActive: true});
+          if (athleteId) writeActiveRef(athleteId, planEnv, {...remaining[0], isActive: true});
         } else {
-          if (athleteId) removeActiveRef(athleteId);
+          if (athleteId) removeActiveRef(athleteId, planEnv);
         }
       }
 
-      await neonDeleteWeeklyPlan(planId);
+      await neonDeleteWeeklyPlan(planId, planEnv);
 
       if (wasActive && athleteId) {
         const nextActive = plans.filter((p) => p.id !== planId)[0];
         if (nextActive) {
-          await neonActivateWeeklyPlan(nextActive.id, athleteId);
+          await neonActivateWeeklyPlan(nextActive.id, athleteId, planEnv);
         }
       }
     },
-    [athleteId, plans],
+    [athleteId, plans, planEnv],
   );
 
   const refresh = useCallback(async () => {
@@ -541,6 +543,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
       const updated = await neonUpdateWeeklyPlanSessions(
         activePlan.id,
         athleteId,
+        planEnv,
         sessions,
       );
       if (!updated) {
@@ -548,7 +551,7 @@ export const useWeeklyPlan = (athleteId: number | null): UseWeeklyPlanResult => 
       }
       return updated;
     },
-    [activePlan, athleteId, loadPlans],
+    [activePlan, athleteId, loadPlans, planEnv],
   );
 
   return {

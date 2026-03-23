@@ -2,7 +2,7 @@ import {streamText} from 'ai';
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
 import {and, eq, sql} from 'drizzle-orm';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   activityDetails as activityDetailsTable,
   activityAiReviews,
@@ -160,6 +160,7 @@ const parsePositiveInt = (value: string | null): number | null => {
 const getOrComputeSixMonthBests = async (
   athleteId: number,
 ): Promise<SixMonthBests> => {
+  const db = getDb();
   const [{count: currentCount}] = await db
     .select({count: sql<number>`count(*)::int`})
     .from(activityDetailsTable)
@@ -458,6 +459,7 @@ export const GET = async (req: Request) => {
     );
   }
 
+  const db = getDb();
   const rows = await db
     .select()
     .from(activityAiReviews)
@@ -525,6 +527,7 @@ export const POST = async (req: Request) => {
     });
   }
 
+  const db = getDb();
   const detailRows = await db
     .select()
     .from(activityDetailsTable)

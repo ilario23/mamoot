@@ -565,3 +565,136 @@ export const summarizeDistributionForPrompt = (
     .map((issue) => `- ${issue.code}: ${issue.message}`);
   return [...summaryLines, ...issueLines].join('\n');
 };
+
+const isCoachRunDay = (session: CoachWeekOutput['sessions'][number]): boolean =>
+  session.type !== 'rest' && session.type !== 'strength';
+
+/** Intensity for coach week rows (rest/strength treated as off-run). */
+const coachSessionRunIntensity = (
+  session: CoachWeekOutput['sessions'][number],
+): 'hard' | 'moderate' | 'easy' | 'off' => {
+  if (!isCoachRunDay(session)) return 'off';
+  return classifyRunIntensity({
+    type: session.type,
+    targetZone: session.targetZone ?? undefined,
+    targetZoneId: session.targetZoneId ?? undefined,
+  });
+};
+
+/**
+ * Pick up to `maxDates` ISO dates to regenerate when fixing weekly distribution.
+ * Heuristic: map issue codes to likely culprit days; fallback to mid-week + weekend runs.
+ */
+export const suggestCoachRepairDates = (
+  coach: CoachWeekOutput,
+  evaluation: DistributionEvaluation,
+  maxDates = 3,
+): string[] => {
+  const sessions = coach.sessions;
+  const ordered: string[] = [];
+  const push = (date: string) => {
+    if (!ordered.includes(date)) ordered.push(date);
+  };
+
+  const codes = new Set(evaluation.issues.map((issue) => issue.code));
+
+  if (codes.has('adjacent_hard_days')) {
+    for (let i = 0; i < sessions.length - 1; i += 1) {
+      const a = coachSessionRunIntensity(sessions[i]);
+      const b = coachSessionRunIntensity(sessions[i + 1]);
+      if (a === 'hard' && b === 'hard') {
+        push(sessions[i].date);
+        push(sessions[i + 1].date);
+      }
+    }
+  }
+
+  if (codes.has('hard_session_spacing_tight')) {
+    const hardIdx = sessions
+      .map((s, i) => (coachSessionRunIntensity(s) === 'hard' ? i : -1))
+      .filter((i) => i >= 0);
+    for (let k = 1; k < hardIdx.length; k += 1) {
+      if (hardIdx[k] - hardIdx[k - 1] <= 2) {
+        push(sessions[hardIdx[k - 1]].date);
+        push(sessions[hardIdx[k]].date);
+      }
+    }
+  }
+
+  if (codes.has('weekend_load_too_high')) {
+    for (let i = 5; i <= 6 && i < sessions.length; i += 1) {
+      if (isCoachRunDay(sessions[i])) push(sessions[i].date);
+    }
+  }
+
+  if (codes.has('easy_minutes_not_dominant') || codes.has('hard_intensity_share_out_of_range')) {
+    let bestIdx = -1;
+    let bestMin = -1;
+    sessions.forEach((s, i) => {
+      if (coachSessionRunIntensity(s) !== 'hard') return;
+      const min = s.plannedDurationMin ?? 45;
+      if (min > bestMin) {
+        bestMin = min;
+        bestIdx = i;
+      }
+    });
+    if (bestIdx >= 0) push(sessions[bestIdx].date);
+  }
+
+  if (codes.has('moderate_intensity_share_out_of_range')) {
+    sessions.forEach((s) => {
+      if (ordered.length >= maxDates) return;
+      if (isCoachRunDay(s) && coachSessionRunIntensity(s) === 'moderate') push(s.date);
+    });
+  }
+
+  if (codes.has('hard_run_day_overload')) {
+    const hardDates = sessions.filter((s) => coachSessionRunIntensity(s) === 'hard').map((s) => s.date);
+    hardDates.slice(-2).forEach((d) => push(d));
+  }
+
+  if (codes.has('consecutive_run_streak_too_long')) {
+    let streakStart = 0;
+    let bestLen = 0;
+    let bestStart = 0;
+    for (let i = 0; i <= sessions.length; i += 1) {
+      const isRun = i < sessions.length && isCoachRunDay(sessions[i]);
+      if (isRun) continue;
+      const len = i - streakStart;
+      if (len > bestLen) {
+        bestLen = len;
+        bestStart = streakStart;
+      }
+      streakStart = i + 1;
+    }
+    if (bestLen > 0 && bestStart < sessions.length) {
+      const mid = bestStart + Math.floor(bestLen / 2);
+      push(sessions[mid].date);
+    }
+  }
+
+  if (codes.has('run_day_balance_out_of_range') || codes.has('rest_day_balance_out_of_range')) {
+    if (evaluation.metrics.runDays > DEFAULT_DISTRIBUTION_POLICY.targets.runDays.max) {
+      const easyRuns = sessions
+        .map((s, i) => ({s, i}))
+        .filter(
+          ({s}) => isCoachRunDay(s) && coachSessionRunIntensity(s) === 'easy',
+        );
+      easyRuns.sort(
+        (a, b) => (a.s.plannedDistanceKm ?? 0) - (b.s.plannedDistanceKm ?? 0),
+      );
+      if (easyRuns[0]) push(easyRuns[0].s.date);
+    } else if (evaluation.metrics.runDays < DEFAULT_DISTRIBUTION_POLICY.targets.runDays.min) {
+      const rest = sessions.find((s) => s.type === 'rest');
+      if (rest) push(rest.date);
+    }
+  }
+
+  if (ordered.length === 0 && evaluation.issues.length > 0) {
+    [2, 5].forEach((i) => {
+      if (sessions[i] && isCoachRunDay(sessions[i])) push(sessions[i].date);
+    });
+  }
+
+  return ordered.slice(0, maxDates);
+};

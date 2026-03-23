@@ -13,8 +13,12 @@ const pipelineExerciseSchema = z.object({
 
 const MAX_RUN_STEPS_PER_PHASE = 12;
 
-/** One row in warmup, main work, or cooldown — table-friendly. */
-export const runStepSchema = z.object({
+/**
+ * Shared fields for coach run phase rows. Nesting is exactly one level: parent steps may list
+ * `subSteps` as leaf rows only. OpenAI structured outputs cannot handle unbounded recursion
+ * (the SDK replaces cycles with `any`, which the API rejects).
+ */
+const runStepCoreFields = {
   label: z.string().describe('Human-readable step, e.g. "10 min easy jog + drills", "6 × 800 m @ Z4"'),
   durationMin: z.number().positive().nullable().describe('Duration in minutes when applicable'),
   distanceKm: z.number().positive().nullable().describe('Distance in km when applicable'),
@@ -24,9 +28,33 @@ export const runStepSchema = z.object({
   recovery: z.string().nullable().describe('Recovery after work or repeat, e.g. "90 s easy jog"'),
   repeatCount: z.number().int().positive().nullable().describe('Repeats when the step is a repeat block'),
   notes: z.string().nullable().describe('Extra cues for this step'),
+  stepKind: z
+    .enum(['steady', 'repeat_block', 'composite'])
+    .nullable()
+    .describe('Structured step kind; use repeat_block/composite when nested steps are present'),
+} satisfies Record<string, z.ZodTypeAny>;
+
+/** Child step inside repeat_block / composite; `subSteps` must stay null (no deeper nesting). */
+const runStepLeafSchema = z.object({
+  ...runStepCoreFields,
+  subSteps: z
+    .null()
+    .describe(
+      'Always null on child steps. Use sibling entries under the parent repeat_block/composite instead of nesting.',
+    ),
+});
+
+/** One row in warmup, main work, or cooldown — table-friendly. */
+export const runStepSchema = z.object({
+  ...runStepCoreFields,
+  subSteps: z
+    .array(runStepLeafSchema)
+    .nullable()
+    .describe('Nested child steps for repeat/composite structures (e.g., 6 x [sprint + jog])'),
 });
 
 export type RunStep = z.infer<typeof runStepSchema>;
+export type RunStepLeaf = z.infer<typeof runStepLeafSchema>;
 
 const runPhaseStepsField = z
   .array(runStepSchema)
@@ -62,6 +90,40 @@ export const coachWeekOutputSchema = z.object({
 });
 
 export type CoachWeekOutput = z.infer<typeof coachWeekOutputSchema>;
+
+/** Partial coach output for distribution repair: only 1–3 days regenerated at a time. */
+export const coachDayRepairOutputSchema = z.object({
+  sessions: z
+    .array(coachWeekSessionSchema)
+    .min(1)
+    .max(3)
+    .describe(
+      'Only the full coach sessions for dates being repaired; each must match an allowed ISO date from the prompt',
+    ),
+});
+
+export type CoachDayRepairOutput = z.infer<typeof coachDayRepairOutputSchema>;
+
+export const weekSkeletonDaySchema = z.object({
+  day: z.string().describe('Day name Monday..Sunday'),
+  date: z.string().describe('ISO date'),
+  sessionType: z
+    .enum(['easy', 'intervals', 'tempo', 'long', 'rest', 'strength', 'recovery'])
+    .describe('Primary day intent decided before detailed workouts'),
+  dayTargetKm: z.number().nonnegative().nullable().describe('Day-level run distance target in km'),
+  dayTargetMin: z.number().nonnegative().nullable().describe('Day-level time target in minutes'),
+  intensityTag: z
+    .enum(['low', 'moderate', 'high', 'rest'])
+    .describe('High-level intensity bucket for distribution validation'),
+  strengthSlotIntent: z.string().nullable().describe('Optional intent to be filled by physio/strength planner'),
+  notes: z.string().nullable().describe('Any short planning constraint for the day'),
+});
+
+export const weekSkeletonSchema = z.object({
+  days: z.array(weekSkeletonDaySchema).length(7),
+});
+
+export type WeekSkeleton = z.infer<typeof weekSkeletonSchema>;
 
 export const physioWeekSessionSchema = z.object({
   day: z.string().describe('Day name, e.g. "Monday"'),

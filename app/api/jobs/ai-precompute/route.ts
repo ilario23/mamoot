@@ -1,6 +1,6 @@
 import {NextRequest, NextResponse} from 'next/server';
 import {and, desc, eq, inArray, sql} from 'drizzle-orm';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   activities,
   activityDetails,
@@ -31,6 +31,8 @@ export async function POST(req: NextRequest) {
   if (!athleteId) {
     return NextResponse.json({error: 'athleteId required'}, {status: 400});
   }
+
+  const db = getDb();
 
   const latestActivities = Math.max(10, Math.min(body.latestActivities ?? 80, 300));
   const weeksBack = Math.max(2, Math.min(body.weeksBack ?? 10, 24));

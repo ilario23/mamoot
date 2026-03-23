@@ -47,6 +47,11 @@ import {
   type StrategySelectionMode,
   type TrainingStrategyPreset,
 } from '@/lib/trainingStrategy';
+import {
+  blockCurrentCanonicalWeek,
+  blockWeekStartMondayIso,
+  readFirstActiveWeekNumber,
+} from '@/lib/trainingBlockWeekMath';
 
 const WEEK_TYPE_COLORS: Record<string, string> = {
   base: 'bg-zone-1/20 text-zone-1',
@@ -74,22 +79,12 @@ const INTENSITY_ICON: Record<string, typeof Zap> = {
   high: Zap,
 };
 
-const getCurrentWeek = (startDate: string, totalWeeks: number): number => {
-  const now = new Date();
-  const start = new Date(startDate);
-  const diffMs = Math.max(0, now.getTime() - start.getTime());
-  const weeksElapsed = Math.floor(diffMs / (7 * 86400000));
-  return Math.max(1, Math.min(totalWeeks, weeksElapsed + 1));
-};
-
 const formatDate = (iso: string): string =>
-  new Date(iso).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
-
-const getWeekStartDate = (blockStart: string, weekNumber: number): string => {
-  const d = new Date(blockStart);
-  d.setDate(d.getDate() + (weekNumber - 1) * 7);
-  return d.toISOString().slice(0, 10);
-};
+  new Date(`${iso}T12:00:00.000Z`).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
 const extractAppliedStrategyMeta = (
   weekOutlines: WeekOutline[],
@@ -113,6 +108,7 @@ const WeekRow = ({
   isCurrent,
   isPast,
   blockStart,
+  firstActiveWeekNumber,
   linkedWeeklyPlan,
   onOpenLinkedWeekPlan,
 }: {
@@ -120,11 +116,16 @@ const WeekRow = ({
   isCurrent: boolean;
   isPast: boolean;
   blockStart: string;
+  firstActiveWeekNumber: number;
   linkedWeeklyPlan?: {id: string; title: string; weekStart: string};
   onOpenLinkedWeekPlan?: (planId: string) => void;
 }) => {
   const IntensityIcon = INTENSITY_ICON[outline.intensityLevel] ?? Minus;
-  const weekDate = getWeekStartDate(blockStart, outline.weekNumber);
+  const weekDate = blockWeekStartMondayIso({
+    blockStartMondayIso: blockStart,
+    weekNumber: outline.weekNumber,
+    firstActiveWeekNumber,
+  });
 
   return (
     <div
@@ -349,12 +350,24 @@ const TrainingBlockView = ({embedded = false}: TrainingBlockViewProps) => {
     Record<number, {id: string; title: string; weekStart: string}>
   >({});
 
+  const blockFirstActive = useMemo(
+    () =>
+      activeBlock
+        ? readFirstActiveWeekNumber(activeBlock.firstActiveWeekNumber)
+        : 1,
+    [activeBlock],
+  );
+
   const currentWeek = useMemo(
     () =>
       activeBlock
-        ? getCurrentWeek(activeBlock.startDate, activeBlock.totalWeeks)
+        ? blockCurrentCanonicalWeek({
+            blockStartMondayIso: activeBlock.startDate,
+            firstActiveWeekNumber: blockFirstActive,
+            canonicalTotalWeeks: activeBlock.totalWeeks,
+          })
         : 0,
-    [activeBlock],
+    [activeBlock, blockFirstActive],
   );
 
   const currentPhase = useMemo(() => {
@@ -421,12 +434,19 @@ const TrainingBlockView = ({embedded = false}: TrainingBlockViewProps) => {
           };
           return;
         }
+        const firstActive = readFirstActiveWeekNumber(
+          activeBlock.firstActiveWeekNumber,
+        );
         const weekDiff = Math.round(
-          (new Date(plan.weekStart).getTime() - new Date(activeBlock.startDate).getTime())
+          (new Date(`${plan.weekStart}T12:00:00.000Z`).getTime()
+            - new Date(`${activeBlock.startDate}T12:00:00.000Z`).getTime())
             / (7 * 86400000),
         );
-        const derivedWeek = weekDiff + 1;
-        if (derivedWeek > 0 && derivedWeek <= activeBlock.totalWeeks) {
+        const derivedWeek = firstActive + weekDiff;
+        if (
+          derivedWeek >= firstActive
+          && derivedWeek <= activeBlock.totalWeeks
+        ) {
           byWeek[derivedWeek] = {
             id: plan.id,
             title: plan.title,
@@ -835,6 +855,24 @@ const TrainingBlockView = ({embedded = false}: TrainingBlockViewProps) => {
               )}
             </div>
 
+            {blockFirstActive > 1 && (
+              <div
+                className="flex gap-2 items-start border-2 border-border bg-muted/40 px-3 py-2 text-xs font-medium text-foreground"
+                role="status"
+              >
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" aria-hidden />
+                <p>
+                  <span className="font-black uppercase tracking-wide text-[10px]">
+                    Partial block
+                  </span>
+                  {' — '}
+                  Weeks 1–{blockFirstActive - 1} are treated as already completed. This calendar
+                  starts at <span className="font-bold">week {blockFirstActive}</span> of{' '}
+                  {activeBlock.totalWeeks}.
+                </p>
+              </div>
+            )}
+
             {/* Progress bar */}
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -856,12 +894,15 @@ const TrainingBlockView = ({embedded = false}: TrainingBlockViewProps) => {
 
           {/* Week timeline */}
           <div className="space-y-2">
-            {activeBlock.phases.map((phase) => (
-              <div key={phase.name}>
+            {activeBlock.phases.map((phase, phaseIdx) => (
+              <div
+                key={`${phaseIdx}-${phase.name}-${phase.weekNumbers.join(',')}`}
+              >
                 <PhaseHeader phase={phase} />
                 <div className="space-y-2 mt-2">
                   {activeBlock.weekOutlines
                     .filter((o) => o.phase === phase.name)
+                    .sort((a, b) => a.weekNumber - b.weekNumber)
                     .map((outline) => (
                       <WeekRow
                         key={outline.weekNumber}
@@ -869,6 +910,7 @@ const TrainingBlockView = ({embedded = false}: TrainingBlockViewProps) => {
                         isCurrent={outline.weekNumber === currentWeek}
                         isPast={outline.weekNumber < currentWeek}
                         blockStart={activeBlock.startDate}
+                        firstActiveWeekNumber={blockFirstActive}
                         linkedWeeklyPlan={weeklyPlansByWeek[outline.weekNumber]}
                         onOpenLinkedWeekPlan={handleOpenLinkedWeekPlan}
                       />
@@ -879,7 +921,9 @@ const TrainingBlockView = ({embedded = false}: TrainingBlockViewProps) => {
           </div>
 
           <BlockPeriodizationOverview
-            weekOutlines={activeBlock.weekOutlines}
+            weekOutlines={[...activeBlock.weekOutlines].sort(
+              (a, b) => a.weekNumber - b.weekNumber,
+            )}
             linkedWeekPlanByWeek={weeklyPlansByWeek}
             onOpenLinkedWeekPlan={handleOpenLinkedWeekPlan}
           />

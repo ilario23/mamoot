@@ -51,6 +51,7 @@ import {useTrainingBlock} from '@/hooks/useTrainingBlock';
 import {useStravaAuth} from '@/contexts/StravaAuthContext';
 import {SESSION_TYPE_COLORS, SESSION_TYPE_BORDER_COLORS} from '@/lib/planConstants';
 import type {UnifiedSession} from '@/lib/cacheTypes';
+import type {RunStep} from '@/lib/weeklyPlanSchema';
 import {
   type OptimizationPriority,
   type StrategySelectionMode,
@@ -111,14 +112,6 @@ const addDaysToIsoDate = (isoDate: string, days: number): string => {
   return toIsoDate(d);
 };
 
-const getCurrentWeekNumberForBlock = (startDate: string, totalWeeks: number): number => {
-  const now = new Date();
-  const start = new Date(startDate);
-  const diffMs = Math.max(0, now.getTime() - start.getTime());
-  const weeksElapsed = Math.floor(diffMs / (7 * 86400000));
-  return Math.max(1, Math.min(totalWeeks, weeksElapsed + 1));
-};
-
 const isHardSessionType = (type?: string): boolean => {
   if (!type) return false;
   const normalized = type.toLowerCase();
@@ -133,6 +126,17 @@ const parseDistanceKm = (description?: string): number | null => {
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isFinite(value) && value > 0 ? value : null;
+};
+
+const sumRunStepDistance = (steps?: RunStep[]): number => {
+  if (!steps?.length) return 0;
+  return steps.reduce((acc, step) => {
+    const own = step.distanceKm ?? 0;
+    const nested = sumRunStepDistance(step.subSteps);
+    const base = nested > 0 ? nested : own;
+    const multiplier = step.stepKind === 'repeat_block' && step.repeatCount ? step.repeatCount : 1;
+    return acc + (base * multiplier);
+  }, 0);
 };
 
 const formatSessionDate = (dateIso: string): string =>
@@ -230,9 +234,20 @@ const DayCard = ({
   const hasStrengthSlot = !!session.strengthSlot;
   const isRest = !hasRun && !hasPhysio && !hasStrengthSlot;
   const plannedDistanceKm = session.run?.plannedDistanceKm ?? parseDistanceKm(session.run?.description);
+  const phaseDistanceKm = session.run
+    ? sumRunStepDistance([
+        ...(session.run.warmupSteps ?? []),
+        ...(session.run.mainSteps ?? []),
+        ...(session.run.cooldownSteps ?? []),
+      ])
+    : 0;
+  const canonicalDistanceKm =
+    plannedDistanceKm != null && phaseDistanceKm > 0 && Math.abs(phaseDistanceKm - plannedDistanceKm) > 0.25
+      ? phaseDistanceKm
+      : plannedDistanceKm;
   const compactMetric = hasRun
-    ? plannedDistanceKm
-      ? `${plannedDistanceKm.toFixed(plannedDistanceKm >= 10 ? 0 : 1)} km`
+    ? canonicalDistanceKm
+      ? `${canonicalDistanceKm.toFixed(canonicalDistanceKm >= 10 ? 0 : 1)} km`
       : (session.run?.duration ?? 'Run')
     : hasStrengthSlot
       ? 'Strength slot'

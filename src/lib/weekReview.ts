@@ -3,7 +3,7 @@
  * against actual activities to produce a text summary for prompt injection.
  */
 
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   activityDetails as activityDetailsTable,
   activityLabels as activityLabelsTable,
@@ -37,6 +37,7 @@ async function fetchOrComputeLabels(
   const result = new Map<number, WorkoutLabel>();
   if (activityIds.length === 0) return result;
 
+  const db = getDb();
   try {
     const existing = await db
       .select()

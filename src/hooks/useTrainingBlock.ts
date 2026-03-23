@@ -10,6 +10,7 @@ import {
   neonDeleteTrainingBlock,
   neonActivateTrainingBlock,
 } from '@/lib/chatSync';
+import {getDefaultPlanEnv} from '@/lib/planEnv';
 import {type AiClientError, parseAiErrorFromUnknown} from '@/lib/aiErrors';
 
 export type TrainingBlock = CachedTrainingBlock;
@@ -58,6 +59,7 @@ export interface UseTrainingBlockResult {
 }
 
 export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResult => {
+  const planEnv = getDefaultPlanEnv();
   const [blocks, setBlocks] = useState<TrainingBlock[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -68,14 +70,14 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
 
   const loadBlocks = useCallback(async () => {
     if (!athleteId) return;
-    const remote = await neonGetTrainingBlocks(athleteId);
+    const remote = await neonGetTrainingBlocks(athleteId, planEnv);
     if (!remote || remote.length === 0) {
       setBlocks([]);
       return;
     }
     const sorted = [...remote].sort((a, b) => b.createdAt - a.createdAt);
     setBlocks(sorted);
-  }, [athleteId]);
+  }, [athleteId, planEnv]);
 
   useEffect(() => {
     if (!athleteId || hydratedRef.current) return;
@@ -102,6 +104,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             athleteId,
+            planEnv,
             goalEvent: options.goalEvent,
             goalDate: options.goalDate,
             totalWeeks: options.totalWeeks || undefined,
@@ -144,6 +147,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
           goalEvent: data.goalEvent,
           goalDate: data.goalDate,
           totalWeeks: data.totalWeeks,
+          firstActiveWeekNumber: data.firstActiveWeekNumber,
           startDate: data.startDate,
           phases: data.phases,
           weekOutlines: data.weekOutlines,
@@ -171,7 +175,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
         setIsGenerating(false);
       }
     },
-    [athleteId],
+    [athleteId, planEnv],
   );
 
   const adaptBlock = useCallback(
@@ -186,6 +190,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             athleteId,
+            planEnv,
             mode: 'adapt',
             ...options,
           }),
@@ -224,6 +229,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
           goalEvent: data.goalEvent,
           goalDate: data.goalDate,
           totalWeeks: data.totalWeeks,
+          firstActiveWeekNumber: data.firstActiveWeekNumber,
           startDate: data.startDate,
           phases: data.phases,
           weekOutlines: data.weekOutlines,
@@ -251,7 +257,7 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
         setIsGenerating(false);
       }
     },
-    [athleteId],
+    [athleteId, planEnv],
   );
 
   const activateBlock = useCallback(
@@ -260,12 +266,12 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
         prev.map((b) => ({...b, isActive: b.id === blockId})),
       );
       if (!athleteId) return;
-      const activated = await neonActivateTrainingBlock(blockId, athleteId);
+      const activated = await neonActivateTrainingBlock(blockId, athleteId, planEnv);
       if (!activated) {
         await loadBlocks();
       }
     },
-    [athleteId, loadBlocks],
+    [athleteId, loadBlocks, planEnv],
   );
 
   const deleteBlock = useCallback(
@@ -284,15 +290,15 @@ export const useTrainingBlock = (athleteId: number | null): UseTrainingBlockResu
       });
 
       try {
-        await neonDeleteTrainingBlock(blockId, athleteId);
+        await neonDeleteTrainingBlock(blockId, athleteId, planEnv);
         if (nextActive) {
-          await neonActivateTrainingBlock(nextActive.id, athleteId);
+          await neonActivateTrainingBlock(nextActive.id, athleteId, planEnv);
         }
       } finally {
         await loadBlocks();
       }
     },
-    [athleteId, blocks, loadBlocks],
+    [athleteId, blocks, loadBlocks, planEnv],
   );
 
   const refresh = useCallback(async () => {

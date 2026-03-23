@@ -1,6 +1,6 @@
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   activities as activitiesTable,
   userSettings,
@@ -19,9 +19,24 @@ import {
   calcRiskIntelligence,
 } from '@/utils/trainingLoad';
 import {formatPace, formatDuration, type UserSettings, type ActivitySummary} from '@/lib/activityModel';
-import {buildCoachPipelinePrompt} from '@/lib/weeklyPlanPrompts';
 import {
-  coachWeekOutputSchema, planMetaSchema, type CoachWeekOutput, type PlanMeta,
+  buildCoachDayRepairPrompt,
+  buildCoachPipelinePrompt,
+  buildPhysioPipelinePrompt,
+  buildWeekSkeletonPrompt,
+  formatFrozenCoachWeekForRepair,
+} from '@/lib/weeklyPlanPrompts';
+import {
+  coachDayRepairOutputSchema,
+  coachWeekOutputSchema,
+  physioWeekOutputSchema,
+  planMetaSchema,
+  weekSkeletonSchema,
+  type CoachDayRepairOutput,
+  type CoachWeekOutput,
+  type PlanMeta,
+  type PhysioWeekOutput,
+  type WeekSkeleton,
 } from '@/lib/weeklyPlanSchema';
 import type {UnifiedSession} from '@/lib/cacheTypes';
 import {buildWeekReview} from '@/lib/weekReview';
@@ -46,6 +61,9 @@ import {weeklyPlanRequestSchema} from '@/lib/aiRequestSchemas';
 import {appendRunPhasesMarkdown, formatRunPhasesSummary} from '@/lib/runPlanFormat';
 import {generateObjectWithRetry} from '@/lib/aiGeneration';
 import {
+  normalizeCoachSessionStepTotals,
+  validateCoachSessionStepTotals,
+  validateCombinedWeekSemantics,
   summarizeBlockVolumeForPrompt,
   validateCoachWeekOutput,
   validateCoachWeekVolumeVsBlockTarget,
@@ -53,6 +71,7 @@ import {
 import {
   evaluateCoachWeeklyDistribution,
   evaluateUnifiedWeeklyDistribution,
+  suggestCoachRepairDates,
   summarizeDistributionForPrompt,
   type DistributionEvaluation,
 } from '@/lib/weeklyDistributionEvaluator';
@@ -72,6 +91,11 @@ import {
 } from '@/lib/weekTime';
 import {formatPaceRange, mergeWithDefaultPaceZones, PACE_ZONE_KEYS} from '@/lib/paceZones';
 import type {PaceZoneRange} from '@/lib/activityModel';
+import {resolvePlanEnv} from '@/lib/planEnv';
+import {
+  canonicalWeekFromPlanWeekStart,
+  readFirstActiveWeekNumber,
+} from '@/lib/trainingBlockWeekMath';
 
 export const maxDuration = 120;
 const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
@@ -81,6 +105,7 @@ const PLAN_PREFERENCES_PREFIX = '<!-- weekly-plan-preferences:';
 const PLAN_PREFERENCES_SUFFIX = '-->';
 const PLAN_STRATEGY_PREFIX = '<!-- weekly-plan-strategy:';
 const PLAN_STRATEGY_SUFFIX = '-->';
+const ENABLE_STAGED_WEEKLY_PIPELINE = process.env.WEEKLY_PLAN_PIPELINE_V2 !== '0';
 
 const isMissingPlanningStateTableError = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false;
@@ -137,7 +162,7 @@ const loadUserSettingsCompat = async (
   athleteId: number,
 ): Promise<WeeklyPlanUserSettings[]> => {
   try {
-    const settingsRows = await db.execute<{payload: Record<string, unknown>}>(
+    const settingsRows = await getDb().execute<{payload: Record<string, unknown>}>(
       sql`select to_jsonb(us) as payload from user_settings us where us.athlete_id = ${athleteId} limit 1`,
     );
     const payload = settingsRows.rows[0]?.payload;
@@ -261,6 +286,144 @@ const buildGeneratedSessions = (
   });
 };
 
+const formatCoachSessionsForPhysioPrompt = (coach: CoachWeekOutput): string =>
+  coach.sessions
+    .map((session) => {
+      const distance = session.plannedDistanceKm != null ? `${session.plannedDistanceKm}km` : 'n/a';
+      const duration = session.plannedDurationMin != null ? `${session.plannedDurationMin}min` : 'n/a';
+      return `- ${session.day} (${session.date}): ${session.type}, ${distance}, ${duration}, ${session.description}`;
+    })
+    .join('\n');
+
+const summarizeSkeletonForCoachPrompt = (skeleton: WeekSkeleton): string =>
+  skeleton.days
+    .map((day) => {
+      const km = day.dayTargetKm == null ? 'n/a' : `${day.dayTargetKm}km`;
+      const min = day.dayTargetMin == null ? 'n/a' : `${day.dayTargetMin}min`;
+      const slot = day.strengthSlotIntent ? `, strengthSlotIntent: ${day.strengthSlotIntent}` : '';
+      return `- ${day.day} (${day.date}): ${day.sessionType}, target ${km}/${min}, intensity ${day.intensityTag}${slot}`;
+    })
+    .join('\n');
+
+const mergeCoachDayRepairs = (
+  base: CoachWeekOutput,
+  partial: CoachDayRepairOutput,
+  repairDates: string[],
+): CoachWeekOutput => {
+  const allowed = new Set(repairDates);
+  const byDate = new Map(partial.sessions.map((session) => [session.date, session]));
+  return {
+    sessions: base.sessions.map((session) => {
+      const next = byDate.get(session.date);
+      return next && allowed.has(session.date) ? next : session;
+    }),
+  };
+};
+
+const mergePhysioIntoUnifiedSessions = (
+  sessions: UnifiedSession[],
+  physio: PhysioWeekOutput,
+): UnifiedSession[] => {
+  const byDate = new Map(physio.sessions.map((session) => [session.date, session]));
+  return sessions.map((session) => {
+    const row = byDate.get(session.date);
+    if (!row) return session;
+    return {
+      ...session,
+      physio: {
+        type: row.type,
+        exercises: row.exercises.map((exercise) => ({
+          name: exercise.name,
+          sets: exercise.sets ?? undefined,
+          reps: exercise.reps ?? undefined,
+          tempo: exercise.tempo ?? undefined,
+          notes: exercise.notes ?? undefined,
+        })),
+        duration: row.duration ?? undefined,
+        notes: row.notes ?? undefined,
+      },
+    };
+  });
+};
+
+const runCoachDistributionRepair = async (params: {
+  model: ReturnType<typeof getModel>;
+  coachObject: CoachWeekOutput;
+  evaluation: DistributionEvaluation;
+  skeletonObject: WeekSkeleton;
+  weekStart: string;
+  weekEnd: string;
+  coachMaxAttempts: number;
+  coachSemanticCheck: (candidate: CoachWeekOutput) => {ok: boolean; reason?: string};
+  blockVolumeTargetKm: number | null;
+  blockVolumeHintFor: (obj: CoachWeekOutput) => string;
+  targetedRepairDirective: (evaluation: DistributionEvaluation) => string;
+  finalCoachPrompt: string;
+  fallbackRepairBody: string;
+}): Promise<CoachWeekOutput> => {
+  const repairDates = suggestCoachRepairDates(params.coachObject, params.evaluation, 3);
+  const blockHint =
+    params.blockVolumeTargetKm != null ? params.blockVolumeHintFor(params.coachObject) : null;
+
+  if (repairDates.length > 0) {
+    const repairDateSet = new Set(repairDates);
+    try {
+      const partial = await generateObjectWithRetry<CoachDayRepairOutput>({
+        model: params.model,
+        schema: coachDayRepairOutputSchema,
+        prompt: buildCoachDayRepairPrompt({
+          weekStart: params.weekStart,
+          weekEnd: params.weekEnd,
+          repairDates,
+          frozenWeekSummary: formatFrozenCoachWeekForRepair(params.coachObject),
+          distributionFeedback: summarizeDistributionForPrompt(params.evaluation),
+          skeletonSummary: summarizeSkeletonForCoachPrompt(params.skeletonObject),
+          blockVolumeHint: blockHint,
+        }),
+        maxAttempts: params.coachMaxAttempts,
+        semanticCheck: (value) => {
+          if (value.sessions.length < 1 || value.sessions.length > 3) {
+            return {ok: false, reason: 'Partial repair must return 1-3 sessions'};
+          }
+          for (const date of repairDates) {
+            if (!value.sessions.some((session) => session.date === date)) {
+              return {ok: false, reason: `Missing repair session for ${date}`};
+            }
+          }
+          for (const session of value.sessions) {
+            if (!repairDateSet.has(session.date)) {
+              return {ok: false, reason: `Unexpected date ${session.date} in partial repair`};
+            }
+            const original = params.coachObject.sessions.find((row) => row.date === session.date);
+            if (!original || original.day !== session.day) {
+              return {ok: false, reason: `Day label must match frozen week for ${session.date}`};
+            }
+          }
+          const merged = mergeCoachDayRepairs(params.coachObject, value, repairDates);
+          return params.coachSemanticCheck(merged);
+        },
+      });
+      return mergeCoachDayRepairs(params.coachObject, partial, repairDates);
+    } catch {
+      // Fall through to full-week regeneration.
+    }
+  }
+
+  const repairPrompt = `${params.finalCoachPrompt}${params.blockVolumeHintFor(
+    params.coachObject,
+  )}\n\n## Deterministic Weekly Distribution Feedback\n${summarizeDistributionForPrompt(
+    params.evaluation,
+  )}${params.targetedRepairDirective(params.evaluation)}\n\n${params.fallbackRepairBody}`;
+
+  return generateObjectWithRetry<CoachWeekOutput>({
+    model: params.model,
+    schema: coachWeekOutputSchema,
+    prompt: repairPrompt,
+    maxAttempts: params.coachMaxAttempts,
+    semanticCheck: params.coachSemanticCheck,
+  });
+};
+
 const buildWeeklyGenerationLockKey = (input: {
   athleteId: number;
   idempotencyKey?: string;
@@ -268,6 +431,7 @@ const buildWeeklyGenerationLockKey = (input: {
   mode?: 'full' | 'remaining_days';
   sourcePlanId?: string;
   editSourcePlanId?: string;
+  planEnv?: 'dev' | 'prod';
 }): string => {
   const explicit = input.idempotencyKey?.trim();
   if (explicit) return `generation-lock:weekly:${input.athleteId}:${explicit}`;
@@ -275,6 +439,7 @@ const buildWeeklyGenerationLockKey = (input: {
     'generation-lock:weekly',
     input.athleteId,
     input.weekStartDate ?? 'auto',
+    input.planEnv ?? 'prod',
     input.mode ?? 'full',
     input.editSourcePlanId ?? input.sourcePlanId ?? 'none',
   ].join(':');
@@ -284,6 +449,7 @@ const acquireGenerationLock = async (
   athleteId: number,
   key: string,
 ): Promise<boolean> => {
+  const db = getDb();
   const now = Date.now();
   await db
     .delete(aiPlanningState)
@@ -318,6 +484,7 @@ const acquireGenerationLock = async (
 };
 
 const releaseGenerationLock = async (key: string): Promise<void> => {
+  const db = getDb();
   await db
     .delete(aiPlanningState)
     .where(eq(aiPlanningState.key, key))
@@ -418,6 +585,7 @@ export async function POST(req: Request) {
     editSourcePlanId?: string;
     editInstructions?: string;
     editTargetDates?: string[];
+    planEnv?: 'dev' | 'prod';
   };
   const {
     athleteId,
@@ -436,7 +604,9 @@ export async function POST(req: Request) {
     editSourcePlanId,
     editInstructions,
     editTargetDates,
+    planEnv: inputPlanEnv,
   } = parsedData;
+  const planEnv = resolvePlanEnv(inputPlanEnv);
 
   if (!athleteId) {
     return NextResponse.json(
@@ -449,6 +619,7 @@ export async function POST(req: Request) {
     athleteId,
     idempotencyKey: idempotencyKey ?? req.headers.get('x-idempotency-key') ?? undefined,
     weekStartDate,
+    planEnv,
     mode: generationMode,
     sourcePlanId,
     editSourcePlanId,
@@ -527,6 +698,7 @@ export async function POST(req: Request) {
 
       (async () => {
         try {
+    const db = getDb();
     // Step 1: Load context
     const activityContextStartDate = getActivityContextStartDate();
     const [settingsRows, activityRows, planRows] = await Promise.all([
@@ -544,7 +716,12 @@ export async function POST(req: Request) {
       db
         .select()
         .from(weeklyPlans)
-        .where(eq(weeklyPlans.athleteId, athleteId))
+        .where(
+          and(
+            eq(weeklyPlans.athleteId, athleteId),
+            eq(weeklyPlans.planEnv, planEnv),
+          ),
+        )
         .orderBy(desc(weeklyPlans.createdAt)),
     ]);
     sendProgress('context', 'Loaded athlete context and historical plans.');
@@ -871,6 +1048,7 @@ export async function POST(req: Request) {
         .where(
           and(
             eq(trainingBlocks.athleteId, athleteId),
+            eq(trainingBlocks.planEnv, planEnv),
             eq(trainingBlocks.isActive, true),
                 isNull(trainingBlocks.deletedAt),
           ),
@@ -883,9 +1061,15 @@ export async function POST(req: Request) {
         activeBlockId = block.id;
         const outlines = block.weekOutlines as BlockOutline[];
         const phases = block.phases as BlockPhase[];
-        const startMs = new Date(block.startDate).getTime();
-        const weekMs = new Date(weekStart).getTime();
-        const weekNum = Math.max(1, Math.min(block.totalWeeks, Math.round((weekMs - startMs) / (7 * 86400000)) + 1));
+        const blockFirstActive = readFirstActiveWeekNumber(
+          block.firstActiveWeekNumber,
+        );
+        const weekNum = canonicalWeekFromPlanWeekStart({
+          blockStartMondayIso: block.startDate,
+          planWeekStartMondayIso: weekStart,
+          firstActiveWeekNumber: blockFirstActive,
+          canonicalTotalWeeks: block.totalWeeks,
+        });
         blockWeekNumber = weekNum;
 
         const thisWeek = outlines.find((o) => o.weekNumber === weekNum);
@@ -981,9 +1165,55 @@ export async function POST(req: Request) {
       }
     }
 
-    // Step 2: Coach generates running sessions
-    console.log(`[WeeklyPlan] Step 2: Coach generateObject...`);
-    sendProgress('coach', 'Coach is drafting running sessions.');
+    // Step 2: Week skeleton allocation
+    const skeletonObject = ENABLE_STAGED_WEEKLY_PIPELINE
+      ? await (async () => {
+          sendProgress('coach', 'Stage 1/3: allocating weekly skeleton.');
+          const skeletonPrompt = buildWeekSkeletonPrompt({
+            weekStart,
+            weekEnd,
+            recentTraining,
+            goal: settings?.goal ?? null,
+            preferences: preferences ?? null,
+            trainingBlockContext,
+            optimizationPriorityLabel,
+            strategyLabel,
+            strategyDescription,
+            riskPolicyBanner,
+          });
+          const obj = await generateObjectWithRetry<WeekSkeleton>({
+            model,
+            schema: weekSkeletonSchema,
+            prompt: skeletonPrompt,
+            maxAttempts: 2,
+            semanticCheck: (value) => {
+              const uniqueDates = new Set(value.days.map((day) => day.date));
+              if (value.days.length !== 7 || uniqueDates.size !== 7) {
+                return {ok: false, reason: 'Week skeleton must include exactly 7 unique dates'};
+              }
+              return {ok: true};
+            },
+          });
+          specialistTurnsUsed += 1;
+          roundCount += 1;
+          return obj;
+        })()
+      : {
+          days: weekDates.map(({day, date}) => ({
+            day,
+            date,
+            sessionType: 'easy' as const,
+            dayTargetKm: null,
+            dayTargetMin: null,
+            intensityTag: 'low' as const,
+            strengthSlotIntent: null,
+            notes: null,
+          })),
+        };
+
+    // Step 3: Coach generates detailed running sessions constrained by skeleton
+    console.log(`[WeeklyPlan] Step 3: Coach generateObject...`);
+    sendProgress('coach', 'Stage 2/3: coach is drafting detailed running sessions.');
     const generationPreferences = [
       preferences,
       riskPolicyBanner ? `Risk policy: ${riskPolicyBanner}` : null,
@@ -1030,12 +1260,15 @@ export async function POST(req: Request) {
       optimizationPriorityLabel,
       metricsSummary,
     });
+    const skeletonDirective = `\n\n## Week Skeleton Contract (must follow)\n${summarizeSkeletonForCoachPrompt(
+      skeletonObject,
+    )}\nRules:\n- Keep each day mapped to the same date and primary intent from the skeleton.\n- plannedDistanceKm and plannedDurationMin should align with day targets when provided.\n- If a day has strengthSlotIntent, preserve a strength-capable day (type \"strength\" or run+strength slot intent in notes).\n- If strength falls the calendar day immediately before intervals/tempo/long/threshold/race, make that strength session explicitly low-DOMS in description/notes (see DOMS-aware planning: light / mobility / activation / primer / prehab / bodyweight).`;
     const coachEditDirective = isEditRequest
       ? `\n\n## Weekly Plan Edit Instructions\nYou are editing an existing weekly plan, not creating from scratch.\n${normalizedEditInstructions ? `Apply these requested edits exactly when safe:\n${normalizedEditInstructions}\n` : ''}${sourcePlanSummary ? `Reference source plan:\n${sourcePlanSummary}\n` : ''}${normalizedEditTargetDates.length > 0 ? `Prioritize changes to these dates: ${normalizedEditTargetDates.join(', ')}.\n` : ''}${effectiveMode === 'full' ? 'For all other days, preserve previous plan intent and minimize unnecessary changes.\n' : 'Only regenerate remaining/future days; keep past days anchored to historical truth.\n'}`
       : '';
     const finalCoachPrompt = isEditRequest
-      ? `${coachPrompt}${coachEditDirective}`
-      : coachPrompt;
+      ? `${coachPrompt}${skeletonDirective}${coachEditDirective}`
+      : `${coachPrompt}${skeletonDirective}`;
 
     logAiTrace(trace, 'coach_prompt_built', {
       promptHash: promptHash(finalCoachPrompt),
@@ -1052,6 +1285,13 @@ export async function POST(req: Request) {
     const coachSemanticCheck = (candidate: CoachWeekOutput) => {
       const base = validateCoachWeekOutput(candidate);
       if (!base.ok) return base;
+      const stepTotals = validateCoachSessionStepTotals(candidate);
+      if (!stepTotals.ok) {
+        const normalized = normalizeCoachSessionStepTotals(candidate);
+        if (!normalized) return stepTotals;
+        const recheck = validateCoachSessionStepTotals(candidate);
+        if (!recheck.ok) return recheck;
+      }
       if (blockVolumeTargetKm != null) {
         const volumeCheck = validateCoachWeekVolumeVsBlockTarget(
           candidate,
@@ -1082,6 +1322,10 @@ export async function POST(req: Request) {
             blockVolumeTargetKm,
           )}`
         : '';
+    const targetedRepairDirective = (evaluation: DistributionEvaluation): string => {
+      const topIssueCodes = evaluation.issues.slice(0, 3).map((issue) => issue.code).join(', ');
+      return `\nRepair scope:\n- Prioritize fixing issue codes: ${topIssueCodes || 'general distribution balance'}.\n- Keep all unaffected days as-is.\n- Prefer edits on 1-2 days only unless impossible.\n- Preserve weekly skeleton day intents and targets.`;
+    };
 
     let coachObject = await generateObjectWithRetry<CoachWeekOutput>({
       model,
@@ -1108,18 +1352,22 @@ export async function POST(req: Request) {
       !coachDistributionEvaluation.accepted &&
       roundCount < MAX_REPAIR_ROUNDS
     ) {
-      sendProgress('coach', 'Applying coach distribution repair pass.');
-      const repairPrompt = `${finalCoachPrompt}${blockVolumeHintFor(
-        coachObject,
-      )}\n\n## Deterministic Weekly Distribution Feedback\n${summarizeDistributionForPrompt(
-        coachDistributionEvaluation,
-      )}\n\nRepair instructions:\n- Keep all dates.\n- Reduce hard clustering.\n- Keep easy volume dominant.\n- Preserve key block intent and safety constraints.\n- If a block volume target applies, keep the weekly sum of plannedDistanceKm within the stated band.\n- Preserve warmup/main/cooldown step structure for running days (each phase must stay ≥1 step); adjust only what distribution requires.\n- Minimize unnecessary restructuring.`;
-      coachObject = await generateObjectWithRetry<CoachWeekOutput>({
+      sendProgress('coach', 'Applying coach distribution repair pass (per-day first).');
+      coachObject = await runCoachDistributionRepair({
         model,
-        schema: coachWeekOutputSchema,
-        prompt: repairPrompt,
-        maxAttempts: coachMaxAttempts,
-        semanticCheck: coachSemanticCheck,
+        coachObject,
+        evaluation: coachDistributionEvaluation,
+        skeletonObject,
+        weekStart,
+        weekEnd,
+        coachMaxAttempts,
+        coachSemanticCheck,
+        blockVolumeTargetKm,
+        blockVolumeHintFor,
+        targetedRepairDirective,
+        finalCoachPrompt,
+        fallbackRepairBody:
+          'Repair instructions:\n- Keep all dates.\n- Reduce hard clustering.\n- Keep easy volume dominant.\n- Preserve key block intent and safety constraints.\n- If a block volume target applies, keep the weekly sum of plannedDistanceKm within the stated band.\n- Preserve warmup/main/cooldown step structure for running days (each phase must stay ≥1 step); adjust only what distribution requires.\n- Minimize unnecessary restructuring.',
       });
       coachSessions = coachObject.sessions;
       coachDistributionEvaluation = evaluateCoachWeeklyDistribution(coachObject);
@@ -1143,12 +1391,46 @@ export async function POST(req: Request) {
       distributionAccepted: coachDistributionEvaluation.accepted,
     });
 
-    // Step 3: Merge by date
-    sendProgress('merge', 'Building unified coach week with strength slots.');
-    let generatedSessions: UnifiedSession[] = buildGeneratedSessions(
-      weekDates,
-      coachSessions,
+    // Step 4: Physio fills reserved strength/mobility slots
+    sendProgress('merge', 'Stage 3/3: physio is filling strength and mobility slots.');
+    const physioObject: PhysioWeekOutput = ENABLE_STAGED_WEEKLY_PIPELINE
+      ? await (async () => {
+          const physioPrompt = buildPhysioPipelinePrompt({
+            athleteName: null,
+            weight: settings?.weight ?? null,
+            trainingBalance: settings?.trainingBalance ?? null,
+            weekStart,
+            weekEnd,
+            injuries: injuriesText,
+            coachSessions: formatCoachSessionsForPhysioPrompt(coachObject),
+            preferences: generationPreferences || null,
+            optimizationPriorityLabel,
+          });
+          const obj = await generateObjectWithRetry<PhysioWeekOutput>({
+            model,
+            schema: physioWeekOutputSchema,
+            prompt: physioPrompt,
+            maxAttempts: 2,
+            semanticCheck: () => ({ok: true}),
+          });
+          specialistTurnsUsed += 1;
+          roundCount += 1;
+          return obj;
+        })()
+      : {sessions: []};
+
+    // Step 5: Merge by date
+    sendProgress('merge', 'Building unified coach + physio week.');
+    let generatedSessions: UnifiedSession[] = mergePhysioIntoUnifiedSessions(
+      buildGeneratedSessions(weekDates, coachSessions),
+      physioObject,
     );
+    const combinedSemantic = validateCombinedWeekSemantics(coachObject, physioObject, {
+      allowMissingStrengthBeforeDate: ENABLE_STAGED_WEEKLY_PIPELINE ? undefined : todayIso,
+    });
+    if (!combinedSemantic.ok && ENABLE_STAGED_WEEKLY_PIPELINE) {
+      throw new Error(`COMBINED_WEEK_SEMANTIC_FAILED: ${combinedSemantic.reason ?? 'unknown reason'}`);
+    }
     finalDistributionEvaluation = evaluateUnifiedWeeklyDistribution(generatedSessions);
     logAiTrace(trace, 'weekly_distribution_final_evaluated', {
       athleteId,
@@ -1164,25 +1446,32 @@ export async function POST(req: Request) {
       !distributionRepairApplied &&
       roundCount < MAX_REPAIR_ROUNDS
     ) {
-      sendProgress('merge', 'Applying targeted coach distribution repair pass.');
-      const distributionRepairPrompt = `${finalCoachPrompt}${blockVolumeHintFor(
-        coachObject,
-      )}\n\n## Deterministic Weekly Distribution Repair Feedback\n${summarizeDistributionForPrompt(
-        finalDistributionEvaluation,
-      )}\n\nRepair instructions:\n- Keep all dates fixed.\n- Reduce hard clustering and excessive weekend load.\n- Keep easy-minute dominance.\n- Preserve key workout intent from block context and athlete goals.\n- If a block volume target applies, keep the weekly sum of plannedDistanceKm within the stated band.\n- Preserve warmup/main/cooldown step structure for running days (each phase must stay ≥1 step); adjust only what distribution requires.\n- Keep changes minimal and safety-first.`;
-      coachObject = await generateObjectWithRetry<CoachWeekOutput>({
+      sendProgress('merge', 'Applying unified distribution repair (per-day coach first).');
+      coachObject = await runCoachDistributionRepair({
         model,
-        schema: coachWeekOutputSchema,
-        prompt: distributionRepairPrompt,
-        maxAttempts: coachMaxAttempts,
-        semanticCheck: coachSemanticCheck,
+        coachObject,
+        evaluation: finalDistributionEvaluation,
+        skeletonObject,
+        weekStart,
+        weekEnd,
+        coachMaxAttempts,
+        coachSemanticCheck,
+        blockVolumeTargetKm,
+        blockVolumeHintFor,
+        targetedRepairDirective,
+        finalCoachPrompt,
+        fallbackRepairBody:
+          'Repair instructions:\n- Keep all dates fixed.\n- Reduce hard clustering and excessive weekend load.\n- Keep easy-minute dominance.\n- Preserve key workout intent from block context and athlete goals.\n- If a block volume target applies, keep the weekly sum of plannedDistanceKm within the stated band.\n- Preserve warmup/main/cooldown step structure for running days (each phase must stay ≥1 step); adjust only what distribution requires.\n- Keep changes minimal and safety-first.',
       });
       coachSessions = coachObject.sessions;
       specialistTurnsUsed += 1;
       roundCount += 1;
       distributionRepairApplied = true;
       distributionRepairAttempts += 1;
-      generatedSessions = buildGeneratedSessions(weekDates, coachSessions);
+      generatedSessions = mergePhysioIntoUnifiedSessions(
+        buildGeneratedSessions(weekDates, coachSessions),
+        physioObject,
+      );
       finalDistributionEvaluation = evaluateUnifiedWeeklyDistribution(generatedSessions);
       logAiTrace(trace, 'weekly_distribution_final_repaired', {
         athleteId,
@@ -1378,6 +1667,7 @@ export async function POST(req: Request) {
     await db.insert(weeklyPlans).values({
       id: planId,
       athleteId,
+      planEnv,
       weekStart,
       title: metaObject.title,
       summary: metaObject.summary,
@@ -1397,6 +1687,7 @@ export async function POST(req: Request) {
       .where(
         and(
           eq(weeklyPlans.athleteId, athleteId),
+          eq(weeklyPlans.planEnv, planEnv),
           ne(weeklyPlans.id, planId),
         ),
       );
@@ -1420,6 +1711,7 @@ export async function POST(req: Request) {
       distributionAccepted: finalDistributionEvaluation?.accepted ?? null,
       distributionRepairApplied,
       distributionRepairAttempts,
+      pipelineVersion: ENABLE_STAGED_WEEKLY_PIPELINE ? 'v2-staged' : 'v1-legacy',
       elapsedMs: elapsedMs(),
       inputTokens: null,
       outputTokens: null,
@@ -1441,6 +1733,7 @@ export async function POST(req: Request) {
       digitalTwin: twinProfile,
       counterfactualRanking,
       distribution: finalDistributionEvaluation,
+      pipelineVersion: ENABLE_STAGED_WEEKLY_PIPELINE ? 'v2-staged' : 'v1-legacy',
       riskPolicy: {
         acwr: acwrValue,
         override: riskOverride,

@@ -27,6 +27,10 @@ import {neonGetWeeklyPlans, neonGetActiveTrainingBlock} from '@/lib/chatSync';
 import {transformActivity} from '@/lib/strava';
 import type {UnifiedSession} from '@/lib/cacheTypes';
 import {formatRunPhasesSummary} from '@/lib/runPlanFormat';
+import {
+  blockCurrentCanonicalWeek,
+  readFirstActiveWeekNumber,
+} from '@/lib/trainingBlockWeekMath';
 
 // ----- Helpers -----
 
@@ -297,10 +301,12 @@ const resolveBlock = async (athleteId: number): Promise<string> => {
   const block = await neonGetActiveTrainingBlock(athleteId);
   if (!block) return 'No active training block.';
 
-  const now = new Date();
-  const start = new Date(block.startDate);
-  const diffMs = now.getTime() - start.getTime();
-  const currentWeek = Math.max(1, Math.min(block.totalWeeks, Math.ceil(diffMs / (7 * 86400000))));
+  const firstActive = readFirstActiveWeekNumber(block.firstActiveWeekNumber);
+  const currentWeek = blockCurrentCanonicalWeek({
+    blockStartMondayIso: block.startDate,
+    firstActiveWeekNumber: firstActive,
+    canonicalTotalWeeks: block.totalWeeks,
+  });
 
   type Phase = {name: string; weekNumbers: number[]; focus: string; volumeDirection: string};
   type Outline = {weekNumber: number; phase: string; weekType: string; volumeTargetKm: number; intensityLevel: string; keyWorkouts: string[]; notes: string};
@@ -312,7 +318,10 @@ const resolveBlock = async (athleteId: number): Promise<string> => {
   const lines = [
     `Training Block: ${block.goalEvent}`,
     `Goal Date: ${block.goalDate}`,
-    `Weeks: ${block.totalWeeks} (started ${block.startDate})`,
+    `Canonical weeks: ${block.totalWeeks} (calendar starts ${block.startDate}, first active week ${firstActive})`,
+    firstActive > 1
+      ? `Note: Weeks 1–${firstActive - 1} treated as already completed (partial block).`
+      : '',
     `Current Week: ${currentWeek} of ${block.totalWeeks}`,
     currentPhase ? `Phase: ${currentPhase.name} — ${currentPhase.focus}` : '',
     '',

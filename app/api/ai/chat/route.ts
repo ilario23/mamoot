@@ -1,6 +1,8 @@
 import {
   streamText,
   convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
   stepCountIs,
   type UIMessage,
 } from 'ai';
@@ -20,7 +22,7 @@ import {
   type SetPlanningFieldInput,
 } from '@/lib/aiTools';
 import {createRetrievalTools} from '@/lib/aiRetrievalTools';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   userSettings,
   trainingBlocks,
@@ -30,6 +32,7 @@ import {eq, and, isNull, lt, sql} from 'drizzle-orm';
 import type {WeekOutline} from '@/lib/cacheTypes';
 import type {ResolvedMention} from '@/lib/mentionTypes';
 import {chatRequestSchema} from '@/lib/aiRequestSchemas';
+import {resolvePlanEnv} from '@/lib/planEnv';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
 import {
@@ -56,9 +59,14 @@ import {
   sanitizeExplicitContext,
   isAdvisoryIntent,
   shouldRequireRetrieval,
+  RETRIEVAL_FIRST_SYSTEM_APPEND,
+  RETRIEVAL_REPAIR_SYSTEM_APPEND,
   buildFallbackFollowUps,
   getMessageText,
 } from '@/lib/chatChainPolicies';
+
+const GUARDRAIL_RETRIEVAL_REQUIRED_BEFORE_ANSWER =
+  'GUARDRAIL_RETRIEVAL_REQUIRED_BEFORE_ANSWER';
 
 // Allow streaming responses up to 60 seconds
 export const maxDuration = 60;
@@ -290,6 +298,7 @@ const readWeeklyPlanStreamPayload = async (response: Response) => {
 };
 
 const cleanupExpiredPlanningState = async () => {
+  const db = getDb();
   const now = Date.now();
   await db
     .delete(aiPlanningState)
@@ -342,6 +351,7 @@ export async function POST(req: Request) {
     riskOverride = false,
     timeZone,
     explicitContext,
+    planEnv: planEnvInput,
   }: {
     messages: UIMessage[];
     persona: string;
@@ -353,6 +363,7 @@ export async function POST(req: Request) {
     riskOverride?: boolean;
     timeZone?: string;
     explicitContext?: ResolvedMention[] | null;
+    planEnv?: 'dev' | 'prod';
   } = parsedBody.data as {
     messages: UIMessage[];
     persona: string;
@@ -364,7 +375,10 @@ export async function POST(req: Request) {
     riskOverride?: boolean;
     timeZone?: string;
     explicitContext?: ResolvedMention[] | null;
+    planEnv?: 'dev' | 'prod';
   };
+
+  const chatPlanEnv = resolvePlanEnv(planEnvInput);
 
   const clientMessages = messages.filter(
     (message) => message.role === 'user' || message.role === 'assistant',
@@ -472,6 +486,8 @@ export async function POST(req: Request) {
     );
   }
 
+  const db = getDb();
+
   // Fetch minimal always-on context (athlete name + HR zones + weight) from Neon
   let athleteName: string | null = null;
   let hrZonesText: string | null = null;
@@ -528,11 +544,7 @@ export async function POST(req: Request) {
     memory ?? null,
   );
   const reliabilityPolicy = `\n\n## Reliability Policy\n- For training-science or factual claims, cite concrete evidence from tool outputs or attached context.\n- If data is missing or uncertain, ask a clarifying question before giving specific prescriptions.\n- If the user asks for medical diagnosis, medication, or reports severe red-flag symptoms, refuse safely and recommend immediate professional care.\n- Keep critic loop bounded: produce one coherent answer; do not recurse endlessly.`;
-  const system = `${baseSystem}${reliabilityPolicy}`;
-  logAiTrace(trace, 'system_prompt_built', {
-    promptHash: promptHash(system),
-    memoryChars: memory?.length ?? 0,
-  });
+  let system = `${baseSystem}${reliabilityPolicy}`;
 
   // Strip client-side mention metadata (<!-- mentions:... -->) from all user messages
   // so the LLM never sees the raw HTML comment markers
@@ -608,6 +620,14 @@ export async function POST(req: Request) {
     advisoryIntent,
     requiresRetrieval,
   });
+  if (requiresRetrieval) {
+    system += RETRIEVAL_FIRST_SYSTEM_APPEND;
+  }
+  logAiTrace(trace, 'system_prompt_built', {
+    promptHash: promptHash(system),
+    memoryChars: memory?.length ?? 0,
+    requiresRetrieval,
+  });
   if (detectRedFlagInput(latestUserText) || reliability.refusalRequired) {
     logAiTrace(trace, 'safety_refusal', {
       persona,
@@ -632,6 +652,7 @@ export async function POST(req: Request) {
   const retrievalRequestCache = new Map<string, Promise<unknown>>();
   const allRetrievalTools = athleteId
     ? createRetrievalTools(athleteId, {
+        planEnv: chatPlanEnv,
         requestCache: retrievalRequestCache,
         onCacheEvent: (event, key) => {
           logAiTrace(
@@ -1228,20 +1249,36 @@ export async function POST(req: Request) {
   });
 
   const retrievalToolNames = new Set(Object.keys(retrievalTools));
-  let sawRetrievalCall = false;
-  let sawFollowUpsCall = false;
-  let retrievalGuardrailViolated = false;
-  let fallbackFollowUps: string[] | null = null;
-
-  let result;
   const maxToolSteps = canUsePlanningTools ? 8 : 5;
-  try {
-    result = streamText({
+  const modelMessages = await convertToModelMessages(processedMessages);
+
+  const retrievalToolKeyList = Object.keys(retrievalTools) as Array<
+    keyof typeof tools
+  >;
+  const prepareRetrievalFirstStep =
+    requiresRetrieval && retrievalToolKeyList.length > 0
+      ? ({stepNumber}: {stepNumber: number}) => {
+          if (stepNumber !== 1) return undefined;
+          return {
+            toolChoice: 'required' as const,
+            activeTools: retrievalToolKeyList,
+          };
+        }
+      : undefined;
+
+  const startChatStream = (systemForTurn: string) => {
+    let sawRetrievalCall = false;
+    let sawFollowUpsCall = false;
+    let retrievalGuardrailViolated = false;
+    let fallbackFollowUps: string[] | null = null;
+
+    return streamText({
       model: getModel(clientModel),
-      system,
-      messages: await convertToModelMessages(processedMessages),
+      system: systemForTurn,
+      messages: modelMessages,
       tools: Object.keys(tools).length > 0 ? tools : undefined,
       stopWhen: stepCountIs(maxToolSteps),
+      prepareStep: prepareRetrievalFirstStep,
       onStepFinish(event) {
         logAiTrace(trace, 'step_finished', {
           persona,
@@ -1292,7 +1329,7 @@ export async function POST(req: Request) {
               sessionId: sessionId ?? null,
             });
             retrievalGuardrailViolated = true;
-            throw new Error('GUARDRAIL_RETRIEVAL_REQUIRED_BEFORE_ANSWER');
+            throw new Error(GUARDRAIL_RETRIEVAL_REQUIRED_BEFORE_ANSWER);
           }
         }
         const u = event.usage;
@@ -1362,6 +1399,56 @@ export async function POST(req: Request) {
         console.log(`[AI] ========================================\n`);
       },
     });
+  };
+
+  try {
+    if (requiresRetrieval) {
+      const uiMessageStream = createUIMessageStream({
+        originalMessages: clientMessages,
+        execute: async ({writer}) => {
+          let systemForAttempt = system;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const streamResult = startChatStream(systemForAttempt);
+            const chunkStream = streamResult.toUIMessageStream();
+            try {
+              for await (const part of chunkStream) {
+                writer.write(part);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : '';
+              if (
+                attempt === 0 &&
+                msg === GUARDRAIL_RETRIEVAL_REQUIRED_BEFORE_ANSWER
+              ) {
+                logAiTrace(trace, 'retrieval_first_retry', {
+                  persona,
+                  model: resolvedModel,
+                  athleteId: athleteId ?? null,
+                  sessionId: sessionId ?? null,
+                });
+                systemForAttempt = `${system}${RETRIEVAL_REPAIR_SYSTEM_APPEND}`;
+                continue;
+              }
+              throw err;
+            }
+            break;
+          }
+        },
+      });
+      return createUIMessageStreamResponse({
+        stream: uiMessageStream,
+        headers: {
+          'x-trace-id': trace.traceId,
+        },
+      });
+    }
+
+    const result = startChatStream(system);
+    return result.toUIMessageStreamResponse({
+      headers: {
+        'x-trace-id': trace.traceId,
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'unknown error';
     if (message.startsWith('GUARDRAIL_')) {
@@ -1399,10 +1486,4 @@ export async function POST(req: Request) {
       },
     );
   }
-
-  return result.toUIMessageStreamResponse({
-    headers: {
-      'x-trace-id': trace.traceId,
-    },
-  });
 }

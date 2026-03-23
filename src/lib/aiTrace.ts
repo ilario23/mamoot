@@ -1,5 +1,5 @@
 import {createHash, randomUUID} from 'node:crypto';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {aiTelemetryEvents} from '@/db/schema';
 
 export interface TraceContext {
@@ -74,7 +74,10 @@ export const logAiTrace = (
     createdAt: now,
   };
 
-  void db.insert(aiTelemetryEvents).values(record).catch(() => {
-    // Never block route responses on telemetry failures.
-  });
+  void getDb()
+    .insert(aiTelemetryEvents)
+    .values(record)
+    .catch(() => {
+      // Never block route responses on telemetry failures.
+    });
 };

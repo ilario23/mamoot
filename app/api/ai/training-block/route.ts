@@ -1,6 +1,6 @@
 import {openai} from '@ai-sdk/openai';
 import {anthropic} from '@ai-sdk/anthropic';
-import {db} from '@/db';
+import {getDb} from '@/db';
 import {
   activities as activitiesTable,
   userSettings,
@@ -21,8 +21,8 @@ import {
 import {formatPace, formatDuration, type UserSettings} from '@/lib/activityModel';
 import type {WeekOutline} from '@/lib/cacheTypes';
 import {
-  trainingBlockOutputSchema,
-  type TrainingBlockOutput,
+  buildTrainingBlockOutputSchema,
+  type TrainingBlockOutputPartial,
 } from '@/lib/trainingBlockSchema';
 import {NextResponse} from 'next/server';
 import {
@@ -45,6 +45,13 @@ import {validateTrainingBlockWeekOutlines} from '@/lib/planSemanticValidators';
 import {createTraceContext, logAiTrace, promptHash} from '@/lib/aiTrace';
 import {createAiErrorPayload} from '@/lib/aiErrors';
 import {getNextMondayInTimeZone} from '@/lib/weekTime';
+import {resolvePlanEnv} from '@/lib/planEnv';
+import {
+  DEFAULT_TRAINING_BLOCK_MIN_FORWARD_WEEKS,
+  blockCurrentCanonicalWeek,
+  readFirstActiveWeekNumber,
+  resolveTrainingBlockWeekParams,
+} from '@/lib/trainingBlockWeekMath';
 
 export const maxDuration = 120;
 const ACTIVITY_CONTEXT_WINDOW_DAYS = 120;
@@ -126,6 +133,7 @@ const buildTrainingBlockGenerationLockKey = (input: {
   goalDate: string;
   mode?: 'create' | 'adapt';
   sourceBlockId?: string;
+  planEnv?: 'dev' | 'prod';
 }): string => {
   const explicit = input.idempotencyKey?.trim();
   if (explicit) {
@@ -135,6 +143,7 @@ const buildTrainingBlockGenerationLockKey = (input: {
     'generation-lock:training-block',
     input.athleteId,
     input.mode ?? 'create',
+    input.planEnv ?? 'prod',
     input.goalEvent.trim().toLowerCase(),
     input.goalDate,
     input.sourceBlockId ?? 'none',
@@ -145,6 +154,7 @@ const acquireGenerationLock = async (
   athleteId: number,
   key: string,
 ): Promise<boolean> => {
+  const db = getDb();
   const now = Date.now();
   await db
     .delete(aiPlanningState)
@@ -169,6 +179,7 @@ const acquireGenerationLock = async (
 };
 
 const releaseGenerationLock = async (key: string): Promise<void> => {
+  const db = getDb();
   await db
     .delete(aiPlanningState)
     .where(eq(aiPlanningState.key, key))
@@ -221,6 +232,7 @@ export async function POST(req: Request) {
     optimizationPriority?: OptimizationPriority;
     riskOverride?: boolean;
     timeZone?: string;
+    planEnv?: 'dev' | 'prod';
   };
   const {
     athleteId,
@@ -240,7 +252,9 @@ export async function POST(req: Request) {
     optimizationPriority,
     riskOverride = false,
     timeZone,
+    planEnv: inputPlanEnv,
   } = parsedData;
+  const planEnv = resolvePlanEnv(inputPlanEnv);
   const resolvedTimeZone = timeZone?.trim() || 'UTC';
 
   if (!athleteId) {
@@ -257,6 +271,7 @@ export async function POST(req: Request) {
     goalDate,
     mode,
     sourceBlockId,
+    planEnv,
   });
   const lockAcquired = await acquireGenerationLock(athleteId, lockKey);
   if (!lockAcquired) {
@@ -313,6 +328,7 @@ export async function POST(req: Request) {
   console.log(`[TrainingBlock] Mode: ${resolvedMode}`);
 
   try {
+    const db = getDb();
     const elapsedMs = () => Date.now() - requestStartedAt;
     let roundCount = 0;
     let specialistTurnsUsed = 0;
@@ -329,6 +345,7 @@ export async function POST(req: Request) {
               and(
                 eq(trainingBlocks.id, sourceBlockId),
                 eq(trainingBlocks.athleteId, athleteId),
+                eq(trainingBlocks.planEnv, planEnv),
                 isNull(trainingBlocks.deletedAt),
               ),
             )
@@ -339,6 +356,7 @@ export async function POST(req: Request) {
             .where(
               and(
                 eq(trainingBlocks.athleteId, athleteId),
+                eq(trainingBlocks.planEnv, planEnv),
                 eq(trainingBlocks.isActive, true),
                 isNull(trainingBlocks.deletedAt),
               ),
@@ -395,13 +413,25 @@ export async function POST(req: Request) {
         'polarized_80_20';
 
       const startDate = sourceBlock.startDate;
-      const now = new Date();
-      const start = new Date(startDate);
-      const elapsedWeeks = Math.floor((now.getTime() - start.getTime()) / (7 * 86400000));
-      const currentWeek = Math.max(
-        1,
-        Math.min(sourceBlock.totalWeeks, elapsedWeeks + 1),
+      const srcFirstActive = readFirstActiveWeekNumber(
+        sourceBlock.firstActiveWeekNumber,
       );
+      if (sourceBlock.totalWeeks < srcFirstActive) {
+        return NextResponse.json(
+          createAiErrorPayload(
+            'invalid_source_block',
+            'Source training block has inconsistent week range (totalWeeks < firstActiveWeekNumber).',
+          ),
+          {status: 400, headers: {'x-trace-id': trace.traceId}},
+        );
+      }
+      const adaptForwardWeeks =
+        sourceBlock.totalWeeks - srcFirstActive + 1;
+      const currentWeek = blockCurrentCanonicalWeek({
+        blockStartMondayIso: startDate,
+        firstActiveWeekNumber: srcFirstActive,
+        canonicalTotalWeeks: sourceBlock.totalWeeks,
+      });
       const effectiveWeek = Math.max(1, effectiveFromWeek ?? currentWeek);
       const eventPriority = event?.priority ?? 'B';
 
@@ -498,8 +528,9 @@ ${adaptationType === 'shift_target_date' ? `- New goal date requested: ${goalDat
 ## Existing Block (source of truth for past weeks)
 - Goal Event: ${sourceBlock.goalEvent}
 - Goal Date: ${sourceBlock.goalDate}
-- Total Weeks: ${sourceBlock.totalWeeks}
-- Start Date: ${sourceBlock.startDate}
+- Total Weeks (canonical): ${sourceBlock.totalWeeks}
+- First active canonical week: ${srcFirstActive}
+- Start Date (Monday of week ${srcFirstActive}): ${sourceBlock.startDate}
 - Current Week: ${currentWeek}
 - Avg weekly volume (last 4 months): ${avgWeeklyVolume.toFixed(1)} km
 - Current CTL/ATL/TSB: ${latestSnapshot.ctl ?? 'n/a'} / ${latestSnapshot.atl ?? 'n/a'} / ${latestSnapshot.tsb ?? 'n/a'}
@@ -519,21 +550,23 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
 - Preserve all weeks before effective week as historical (do not rewrite intent drastically).
 - Recalculate weeks from effective week onward according to adaptation request.
 - Maintain progressive overload with periodic deload/recovery and safe taper logic.
-- Return full block output for all weeks (week numbers remain 1..${sourceBlock.totalWeeks}).
-- Keep exactly ${sourceBlock.totalWeeks} week outlines.`;
+- Return week outlines ONLY for canonical weeks ${srcFirstActive}..${sourceBlock.totalWeeks} (${adaptForwardWeeks} weeks), with weekNumber matching those indices.
+- Keep exactly ${adaptForwardWeeks} week outlines. Phases must only reference week numbers in that range.`;
 
       logAiTrace(trace, 'adapt_prompt_built', {
         promptHash: promptHash(adaptationPrompt),
         totalWeeks: sourceBlock.totalWeeks,
       });
-      const adaptedObject = await generateObjectWithRetry<TrainingBlockOutput>({
+      const adaptSchema = buildTrainingBlockOutputSchema(adaptForwardWeeks);
+      const adaptedObject = await generateObjectWithRetry<TrainingBlockOutputPartial>({
         model,
-        schema: trainingBlockOutputSchema,
+        schema: adaptSchema,
         prompt: adaptationPrompt,
         semanticCheck: (candidate) =>
           validateTrainingBlockWeekOutlines(
             candidate.weekOutlines as WeekOutline[],
             sourceBlock.totalWeeks,
+            srcFirstActive,
           ),
       });
       specialistTurnsUsed += 1;
@@ -554,9 +587,11 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
       await db.insert(trainingBlocks).values({
         id: blockId,
         athleteId,
+        planEnv,
         goalEvent: resolvedGoalEvent,
         goalDate: resolvedGoalDate,
         totalWeeks: sourceBlock.totalWeeks,
+        firstActiveWeekNumber: srcFirstActive,
         startDate,
         phases: adaptedObject.phases,
         weekOutlines: stampedWeekOutlines,
@@ -571,6 +606,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         .where(
           and(
             eq(trainingBlocks.athleteId, athleteId),
+            eq(trainingBlocks.planEnv, planEnv),
             ne(trainingBlocks.id, blockId),
             isNull(trainingBlocks.deletedAt),
           ),
@@ -598,6 +634,7 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         goalEvent: resolvedGoalEvent,
         goalDate: resolvedGoalDate,
         totalWeeks: sourceBlock.totalWeeks,
+        firstActiveWeekNumber: srcFirstActive,
         startDate,
         phases: adaptedObject.phases,
         weekOutlines: stampedWeekOutlines,
@@ -611,9 +648,32 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
     }
 
     const startDate = getNextMondayInTimeZone(resolvedTimeZone);
-    const totalWeeks = clientWeeks ?? weeksUntil(startDate, goalDate);
+    const resolvedWeekParams = resolveTrainingBlockWeekParams({
+      clientTemplateWeeks: clientWeeks,
+      startMondayIso: startDate,
+      goalDateIso: goalDate,
+      autoTemplateWeeks: weeksUntil,
+    });
+    const {
+      templateWeeks: totalWeeks,
+      firstActiveWeekNumber,
+      forwardWeekCount,
+    } = resolvedWeekParams;
+
+    if (forwardWeekCount < DEFAULT_TRAINING_BLOCK_MIN_FORWARD_WEEKS) {
+      return NextResponse.json(
+        createAiErrorPayload(
+          'training_block_timeline_too_short',
+          `Only ${forwardWeekCount} week(s) remain until the goal from this start date. Pick a later start, adjust the goal date, or use a shorter template (minimum ${DEFAULT_TRAINING_BLOCK_MIN_FORWARD_WEEKS} forward weeks).`,
+        ),
+        {status: 400, headers: {'x-trace-id': trace.traceId}},
+      );
+    }
+
     console.log(`[TrainingBlock] Goal: ${goalEvent} on ${goalDate}`);
-    console.log(`[TrainingBlock] Weeks: ${totalWeeks}, starts ${startDate}`);
+    console.log(
+      `[TrainingBlock] Canonical weeks: ${totalWeeks}, first active: ${firstActiveWeekNumber}, forward: ${forwardWeekCount}, starts ${startDate}`,
+    );
 
     const dbContextRows = await db.execute<{
       currentDb: string;
@@ -784,15 +844,27 @@ ${JSON.stringify(sourceBlock.weekOutlines)}
         .join('\n');
     }
 
-    const prompt = `You are an expert running coach specializing in periodized training. Generate a ${totalWeeks}-week training block for the following athlete and goal.
+    const partialTimelineSection =
+      firstActiveWeekNumber > 1
+        ? `## Partial timeline (late start)
+- The athlete requested a **${totalWeeks}-week canonical marathon (or similar) template**, but only **${forwardWeekCount}** calendar week(s) remain from this block start until the goal.
+- Treat canonical weeks **1..${firstActiveWeekNumber - 1}** as **already completed**: assume reasonable easy aerobic base, consistency, and strides; **do not** output outlines for those weeks.
+- Output week outlines **only** for canonical weeks **${firstActiveWeekNumber}** through **${totalWeeks}** (inclusive). Each outline's \`weekNumber\` must be that canonical index.
+- \`phases\` must only list \`weekNumbers\` in **${firstActiveWeekNumber}..${totalWeeks}**.
+
+`
+        : '';
+
+    const prompt = `You are an expert running coach specializing in periodized training. Generate a periodized training block for the following athlete and goal.
 
 ## Goal
 - Event: ${goalEvent}
 - Event Date: ${goalDate}
-- Block Start: ${startDate} (next Monday)
-- Total Weeks: ${totalWeeks}
+- Block Start: ${startDate} (Monday beginning canonical week ${firstActiveWeekNumber})
+- Canonical template length: ${totalWeeks} weeks
+- Week outlines to output: ${forwardWeekCount} (weeks ${firstActiveWeekNumber}–${totalWeeks})
 
-## Athlete
+${partialTimelineSection}## Athlete
 ${settings?.weight ? `- Weight: ${settings.weight} kg` : ''}
 ${settings?.trainingBalance != null ? `- Training Balance: ${settings.trainingBalance}/80 (20=run-focused, 80=gym-focused)` : ''}
 - Strategy to follow: ${strategyLabel}
@@ -816,10 +888,10 @@ ${injuriesText}
 ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'}
 
 ## Instructions
-- Divide the ${totalWeeks} weeks into logical training phases (e.g. Base, Build 1, Build 2, Taper, Race Week).
+- Divide the **active** weeks (${firstActiveWeekNumber}–${totalWeeks}) into logical training phases (e.g. Base, Build 1, Build 2, Taper, Race Week).
 - Each phase must have a name, the week numbers it covers, a focus description, and a volume direction (build/hold/reduce).
-- For each week, provide:
-  - weekNumber (1-indexed)
+- For each active week, provide:
+  - weekNumber (canonical 1..${totalWeeks}, must be in ${firstActiveWeekNumber}–${totalWeeks})
   - phase name it belongs to
   - weekType: one of "base", "build", "recovery", "peak", "taper", "race", "off-load"
   - volumeTargetKm: realistic weekly running volume target in km
@@ -827,26 +899,30 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
   - keyWorkouts: 1-3 key workouts for the week (e.g. "Tempo 6km", "Long run 18km", "6x1000m intervals")
   - notes: brief coaching note
 - Follow the 3:1 or 2:1 build-to-recovery pattern (every 3-4 build weeks should be followed by a recovery/off-load week).
-- Volume should start at or near the athlete's current level (${avgWeeklyKm.toFixed(1)} km) and progress gradually (cap increases to roughly 8-10% per week).
+- Volume should start at or near the athlete's current level (${avgWeeklyKm.toFixed(1)} km) for week ${firstActiveWeekNumber} and progress gradually (cap increases to roughly 8-10% per week).
 - Taper should reduce volume by 40-60% over 2-3 weeks leading to race day.
-- The last week should be type "race" with reduced volume and a shakeout run.
+- The last week (week ${totalWeeks}) should be type "race" with reduced volume and a shakeout run.
 - If injuries are reported, keep initial volume conservative and note injury precautions.
 - Perform a realism check against current baseline and available timeline. If the stated target appears unrealistic, explain why in notes and propose a realistic alternative target with adjusted progression.`;
 
-    console.log(`[TrainingBlock] Generating with ${totalWeeks} weeks...`);
+    console.log(
+      `[TrainingBlock] Generating ${forwardWeekCount} forward week outline(s) (canonical ${totalWeeks}-week template)...`,
+    );
 
     logAiTrace(trace, 'create_prompt_built', {
       promptHash: promptHash(prompt),
       totalWeeks,
     });
-    const resultObject = await generateObjectWithRetry<TrainingBlockOutput>({
+    const createSchema = buildTrainingBlockOutputSchema(forwardWeekCount);
+    const resultObject = await generateObjectWithRetry<TrainingBlockOutputPartial>({
       model,
-      schema: trainingBlockOutputSchema,
+      schema: createSchema,
       prompt,
       semanticCheck: (candidate) =>
         validateTrainingBlockWeekOutlines(
           candidate.weekOutlines as WeekOutline[],
           totalWeeks,
+          firstActiveWeekNumber,
         ),
     });
     specialistTurnsUsed += 1;
@@ -865,9 +941,11 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
     await db.insert(trainingBlocks).values({
       id: blockId,
       athleteId,
+      planEnv,
       goalEvent,
       goalDate,
       totalWeeks,
+      firstActiveWeekNumber,
       startDate,
       phases: resultObject.phases,
       weekOutlines: stampedWeekOutlines,
@@ -882,6 +960,7 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       .where(
         and(
           eq(trainingBlocks.athleteId, athleteId),
+          eq(trainingBlocks.planEnv, planEnv),
           ne(trainingBlocks.id, blockId),
           isNull(trainingBlocks.deletedAt),
         ),
@@ -912,6 +991,7 @@ ${requirements?.trim() ? requirements.trim() : 'No extra requirements provided.'
       goalEvent,
       goalDate,
       totalWeeks,
+      firstActiveWeekNumber,
       startDate,
       phases: resultObject.phases,
       weekOutlines: stampedWeekOutlines,
