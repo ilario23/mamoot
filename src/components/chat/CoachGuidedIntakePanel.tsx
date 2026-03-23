@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
-import {CheckCircle2, ChevronDown, Loader2, Sparkles, Target} from 'lucide-react';
+import {CheckCircle2, ChevronDown, Loader2, Sparkles} from 'lucide-react';
+import {useRouter} from 'next/navigation';
 import ProgressiveIntakeCard from '@/components/chat/ProgressiveIntakeCard';
 import IntakeStepControls from '@/components/chat/IntakeStepControls';
 import IntakeReviewCard from '@/components/chat/IntakeReviewCard';
@@ -30,7 +31,7 @@ import {
   type WeeklyPlanRequirements,
 } from '@/lib/coachIntake';
 import type {CachedWeeklyPlan} from '@/lib/cacheTypes';
-import {neonGetActiveWeeklyPlan} from '@/lib/chatSync';
+import {neonGetActiveWeeklyPlan, neonGetWeeklyPlans} from '@/lib/chatSync';
 
 const WEEKLY_PHASE_ORDER: AiProgressPhase[] = [
   'context',
@@ -64,13 +65,21 @@ const createPhaseMap = (): Record<
   error: 'pending',
 });
 
+const toLocalIsoDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const getCurrentMondayIso = (): string => {
   const now = new Date();
   const day = now.getDay();
   const daysSinceMonday = day === 0 ? 6 : day - 1;
   const monday = new Date(now);
   monday.setDate(now.getDate() - daysSinceMonday);
-  return monday.toISOString().slice(0, 10);
+  monday.setHours(0, 0, 0, 0);
+  return toLocalIsoDate(monday);
 };
 
 const getNextMondayIso = (): string => {
@@ -79,7 +88,37 @@ const getNextMondayIso = (): string => {
   const daysUntilMonday = day === 0 ? 1 : day === 1 ? 7 : 8 - day;
   const monday = new Date(now);
   monday.setDate(now.getDate() + daysUntilMonday);
-  return monday.toISOString().slice(0, 10);
+  monday.setHours(0, 0, 0, 0);
+  return toLocalIsoDate(monday);
+};
+
+type WeekOption = {
+  id: string;
+  label: string;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const formatWeekLabel = (weekStartIso: string): string => {
+  const date = new Date(`${weekStartIso}T00:00:00Z`);
+  const endDate = new Date(date.getTime() + DAY_MS * 6);
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  return `Week of ${weekStartIso} (${formatter.format(date)} - ${formatter.format(endDate)})`;
+};
+
+const buildWeekOptions = (anchorMondayIso: string, totalWeeks = 8): WeekOption[] => {
+  const anchorDate = new Date(`${anchorMondayIso}T00:00:00`);
+  anchorDate.setHours(0, 0, 0, 0);
+  return Array.from({length: totalWeeks}, (_, index) => {
+    const weekOffset = index - 1;
+    const date = new Date(anchorDate.getTime() + weekOffset * 7 * DAY_MS);
+    const weekStartIso = toLocalIsoDate(date);
+    return {id: weekStartIso, label: formatWeekLabel(weekStartIso)};
+  });
 };
 
 const WEEKLY_STEP_IDS = [
@@ -102,6 +141,7 @@ const BLOCK_STEP_IDS = [
 ] as const;
 
 const WEEKLY_EDIT_STEP_IDS = [
+  'target_week',
   'mode',
   'focus',
   'goal',
@@ -142,6 +182,7 @@ const CoachGuidedIntakePanel = ({
   onWeeklyPlanCreated,
   onTrainingBlockCreated,
 }: CoachGuidedIntakePanelProps) => {
+  const router = useRouter();
   const [intent, setIntent] = useState<CoachIntakeIntent | null>(null);
   const [mode, setMode] = useState<IntakeMode>('idle');
   const [stepIndex, setStepIndex] = useState(0);
@@ -156,6 +197,7 @@ const CoachGuidedIntakePanel = ({
   );
   const [stepNotes, setStepNotes] = useState<Record<string, string>>({});
   const [activePlanForEdit, setActivePlanForEdit] = useState<CachedWeeklyPlan | null>(null);
+  const [plansForEdit, setPlansForEdit] = useState<CachedWeeklyPlan[]>([]);
   const [isLoadingActivePlanForEdit, setIsLoadingActivePlanForEdit] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -190,6 +232,13 @@ const CoachGuidedIntakePanel = ({
   const activeStepNote = activeStepId ? (stepNotes[activeStepId] ?? '') : '';
   const isSubmitting = isGeneratingWeeklyPlan || isGeneratingBlock;
   const hasActiveIntake = mode === 'collecting' || mode === 'review';
+  const weekOptions = useMemo(() => buildWeekOptions(getCurrentMondayIso()), []);
+  const selectedPlanForEdit = useMemo(
+    () =>
+      plansForEdit.find((plan) => plan.weekStart === editReq.targetWeekStart) ??
+      activePlanForEdit,
+    [plansForEdit, editReq.targetWeekStart, activePlanForEdit],
+  );
   const isIntakeCollapsedWhileGenerating =
     isSubmitting && hasActiveIntake && !showIntakeDuringGeneration;
 
@@ -208,6 +257,7 @@ const CoachGuidedIntakePanel = ({
     setBlockReq(defaultTrainingBlockRequirements());
     setEditReq(defaultWeeklyPlanEditRequirements());
     setActivePlanForEdit(null);
+    setPlansForEdit([]);
   }, []);
 
   useEffect(() => {
@@ -220,14 +270,19 @@ const CoachGuidedIntakePanel = ({
     if (!athleteId || intent !== 'weekly_plan_edit') {
       setIsLoadingActivePlanForEdit(false);
       setActivePlanForEdit(null);
+      setPlansForEdit([]);
       return;
     }
     let cancelled = false;
     setIsLoadingActivePlanForEdit(true);
     void (async () => {
-      const plan = await neonGetActiveWeeklyPlan(athleteId);
+      const [plan, weeklyPlans] = await Promise.all([
+        neonGetActiveWeeklyPlan(athleteId),
+        neonGetWeeklyPlans(athleteId),
+      ]);
       if (cancelled) return;
       setActivePlanForEdit(plan ?? null);
+      setPlansForEdit(weeklyPlans ?? []);
       setIsLoadingActivePlanForEdit(false);
     })();
     return () => {
@@ -236,23 +291,40 @@ const CoachGuidedIntakePanel = ({
   }, [athleteId, intent]);
 
   useEffect(() => {
-    if (intent !== 'weekly_plan_edit' || !activePlanForEdit) return;
+    if (intent !== 'weekly_plan_edit') return;
     setEditReq((prev) => ({
       ...prev,
-      editGoal: `Refine ${activePlanForEdit.title} while preserving core intent.`,
-      constraints: `Keep the weekly structure for week starting ${activePlanForEdit.weekStart} unless explicitly changed.`,
+      targetWeekStart: prev.targetWeekStart || activePlanForEdit?.weekStart || getCurrentMondayIso(),
+      editGoal: activePlanForEdit
+        ? `Refine ${activePlanForEdit.title} while preserving core intent.`
+        : prev.editGoal,
+      constraints: activePlanForEdit
+        ? `Keep the weekly structure for week starting ${activePlanForEdit.weekStart} unless explicitly changed.`
+        : prev.constraints,
     }));
   }, [intent, activePlanForEdit]);
+
+  useEffect(() => {
+    if (intent !== 'weekly_plan') return;
+    setWeeklyReq((prev) => ({
+      ...prev,
+      targetWeekStart:
+        prev.targetWeekStart ||
+        (prev.targetWeek === 'current' ? getCurrentMondayIso() : getNextMondayIso()),
+    }));
+  }, [intent]);
 
   const canGoNext = useMemo(() => {
     if (!intent) return false;
     if (intent === 'weekly_plan') {
       const step = WEEKLY_STEP_IDS[stepIndex];
+      if (step === 'target_week') return weeklyReq.targetWeekStart.trim().length > 0;
       if (step === 'focus') return weeklyReq.focus.trim().length > 0;
       return true;
     }
     if (intent === 'weekly_plan_edit') {
       const step = WEEKLY_EDIT_STEP_IDS[stepIndex];
+      if (step === 'target_week') return editReq.targetWeekStart.trim().length > 0;
       if (step === 'goal') return editReq.editGoal.trim().length > 0;
       if (step === 'constraints') return editReq.constraints.trim().length > 0;
       return true;
@@ -264,7 +336,9 @@ const CoachGuidedIntakePanel = ({
   }, [
     intent,
     stepIndex,
+    weeklyReq.targetWeekStart,
     weeklyReq.focus,
+    editReq.targetWeekStart,
     editReq.editGoal,
     editReq.constraints,
     blockReq.goalDate,
@@ -338,18 +412,16 @@ const CoachGuidedIntakePanel = ({
         <ProgressiveIntakeCard
           title='Coach guided setup'
           subtitle='Weekly plan intake'
-          question='Which week should this plan target?'
+          question='Which specific week should this plan target?'
           stepIndex={stepIndex}
           totalSteps={WEEKLY_STEP_IDS.length}
-          options={[
-            {id: 'current', label: 'Current week'},
-            {id: 'next', label: 'Next week'},
-          ]}
-          selectedOptionIds={[weeklyReq.targetWeek]}
+          options={weekOptions}
+          selectedOptionIds={[weeklyReq.targetWeekStart]}
           onSelectOption={(id) =>
             setWeeklyReq((prev) => ({
               ...prev,
-              targetWeek: id === 'current' ? 'current' : 'next',
+              targetWeekStart: id,
+              targetWeek: id === getCurrentMondayIso() ? 'current' : 'next',
             }))
           }
           freeText={activeStepNote}
@@ -965,6 +1037,40 @@ const CoachGuidedIntakePanel = ({
   const renderEditStep = () => {
     const step = WEEKLY_EDIT_STEP_IDS[stepIndex];
 
+    if (step === 'target_week') {
+      return (
+        <ProgressiveIntakeCard
+          title='Coach guided setup'
+          subtitle='Weekly plan edit'
+          question='Which specific week should we edit?'
+          stepIndex={stepIndex}
+          totalSteps={WEEKLY_EDIT_STEP_IDS.length}
+          options={weekOptions}
+          selectedOptionIds={[editReq.targetWeekStart]}
+          onSelectOption={(id) =>
+            setEditReq((prev) => ({
+              ...prev,
+              targetWeekStart: id,
+            }))
+          }
+          freeText={activeStepNote}
+          onChangeFreeText={updateStepNote}
+          footer={
+            <IntakeStepControls
+              canGoBack={stepIndex > 0}
+              canGoNext={canGoNext}
+              isLastStep={stepIndex === WEEKLY_EDIT_STEP_IDS.length - 1}
+              isSubmitting={isSubmitting}
+              onBack={handleBack}
+              onNext={handleNext}
+              onSaveDraft={handleSaveDraft}
+              onCancel={handleCancel}
+            />
+          }
+        />
+      );
+    }
+
     if (step === 'mode') {
       return (
         <ProgressiveIntakeCard
@@ -1007,7 +1113,7 @@ const CoachGuidedIntakePanel = ({
         <ProgressiveIntakeCard
           title='Coach guided setup'
           subtitle='Weekly plan edit'
-          question='How much should we change from the current plan?'
+          question='How much should we change from the selected week plan?'
           stepIndex={stepIndex}
           totalSteps={WEEKLY_EDIT_STEP_IDS.length}
           options={[
@@ -1157,7 +1263,10 @@ const CoachGuidedIntakePanel = ({
         .filter(Boolean)
         .join(' | ');
       return [
-        {label: 'Week target', value: weeklyReq.targetWeek},
+        {
+          label: 'Week target',
+          value: weeklyReq.targetWeekStart || weeklyReq.targetWeek,
+        },
         {label: 'Run days', value: `${weeklyReq.runDaysPerWeek}/week`},
         {
           label: 'Unavailable',
@@ -1193,10 +1302,11 @@ const CoachGuidedIntakePanel = ({
       return [
         {
           label: 'Editing plan',
-          value: activePlanForEdit
-            ? `${activePlanForEdit.title} (${activePlanForEdit.weekStart})`
-            : 'No active plan found',
+          value: selectedPlanForEdit
+            ? `${selectedPlanForEdit.title} (${selectedPlanForEdit.weekStart})`
+            : `No existing plan found for ${editReq.targetWeekStart}`,
         },
+        {label: 'Target week', value: editReq.targetWeekStart || 'Not selected'},
         {label: 'Generation mode', value: editReq.generationMode},
         {label: 'Edit focus', value: editReq.editFocus},
         {label: 'Goal', value: editReq.editGoal},
@@ -1243,13 +1353,13 @@ const CoachGuidedIntakePanel = ({
           .join(' | ') || 'None',
       },
     ];
-  }, [intent, weeklyReq, editReq, blockReq, stepNotes, activePlanForEdit]);
+  }, [intent, weeklyReq, editReq, blockReq, stepNotes, selectedPlanForEdit]);
 
   const handleGenerateWeeklyPlan = useCallback(async () => {
     if (!athleteId || isGeneratingWeeklyPlan) return;
     logIntakeEvent('weekly_plan_generation_started', {
       intent: 'weekly_plan',
-      targetWeek: weeklyReq.targetWeek,
+      targetWeek: weeklyReq.targetWeekStart,
       generationMode: weeklyReq.generationMode,
     });
     setIsGeneratingWeeklyPlan(true);
@@ -1269,10 +1379,7 @@ const CoachGuidedIntakePanel = ({
       athleteId,
       idempotencyKey: buildIdempotencyKey('weekly_plan', athleteId),
       model: selectedModel,
-      weekStartDate:
-        weeklyReq.targetWeek === 'current'
-          ? getCurrentMondayIso()
-          : getNextMondayIso(),
+      weekStartDate: weeklyReq.targetWeekStart || getCurrentMondayIso(),
       mode: weeklyReq.generationMode,
       preferences,
       strategySelectionMode: weeklyReq.strategySelectionMode,
@@ -1413,6 +1520,7 @@ const CoachGuidedIntakePanel = ({
         setMode('idle');
         setIntent(null);
         await onWeeklyPlanCreated?.();
+        router.push('/training-plan');
       }
     } catch (error) {
       logIntakeEvent('weekly_plan_generation_failed', {
@@ -1432,14 +1540,28 @@ const CoachGuidedIntakePanel = ({
     selectedModel,
     stepNotes,
     weeklyReq,
+    router,
   ]);
 
   const handleEditWeeklyPlan = useCallback(async () => {
-    if (!athleteId || isGeneratingWeeklyPlan || !activePlanForEdit) return;
+    if (!athleteId || isGeneratingWeeklyPlan) return;
+    if (!selectedPlanForEdit) {
+      setWeeklyPlanError(
+        parseAiErrorFromUnknown(
+          {
+            code: 'source_plan_not_found_for_edit',
+            error: 'No source plan found for selected week.',
+          },
+          'No source weekly plan found for selected week.',
+        ),
+      );
+      return;
+    }
     logIntakeEvent('weekly_plan_edit_started', {
       intent: 'weekly_plan_edit',
-      planId: activePlanForEdit.id,
+      planId: selectedPlanForEdit.id,
       generationMode: editReq.generationMode,
+      targetWeek: editReq.targetWeekStart,
     });
     setIsGeneratingWeeklyPlan(true);
     setWeeklyPlanProgress([]);
@@ -1458,10 +1580,10 @@ const CoachGuidedIntakePanel = ({
       athleteId,
       idempotencyKey: buildIdempotencyKey('weekly_plan_edit', athleteId),
       model: selectedModel,
-      weekStartDate: activePlanForEdit.weekStart,
+      weekStartDate: editReq.targetWeekStart || selectedPlanForEdit.weekStart,
       mode: editReq.generationMode,
-      sourcePlanId: activePlanForEdit.id,
-      editSourcePlanId: activePlanForEdit.id,
+      sourcePlanId: selectedPlanForEdit.id,
+      editSourcePlanId: selectedPlanForEdit.id,
       editInstructions,
       strategySelectionMode: editReq.strategySelectionMode,
       strategyPreset: editReq.strategyPreset,
@@ -1611,6 +1733,7 @@ const CoachGuidedIntakePanel = ({
         setMode('idle');
         setIntent(null);
         await onWeeklyPlanCreated?.();
+        router.push('/training-plan');
       }
     } catch (error) {
       logIntakeEvent('weekly_plan_edit_failed', {
@@ -1626,11 +1749,12 @@ const CoachGuidedIntakePanel = ({
   }, [
     athleteId,
     isGeneratingWeeklyPlan,
-    activePlanForEdit,
+    selectedPlanForEdit,
     editReq,
     selectedModel,
     stepNotes,
     onWeeklyPlanCreated,
+    router,
   ]);
 
   const handleGenerateTrainingBlock = useCallback(async () => {
@@ -1691,6 +1815,7 @@ const CoachGuidedIntakePanel = ({
         intent: 'training_block',
       });
       await onTrainingBlockCreated?.();
+      router.push('/training-plan?tab=block');
     } catch (error) {
       logIntakeEvent('training_block_generation_failed', {
         intent: 'training_block',
@@ -1707,6 +1832,7 @@ const CoachGuidedIntakePanel = ({
     onTrainingBlockCreated,
     selectedModel,
     stepNotes,
+    router,
   ]);
 
   const handleGenerate = useCallback(async () => {
@@ -1889,10 +2015,10 @@ const CoachGuidedIntakePanel = ({
               )}
               {intent === 'weekly_plan_edit' &&
                 !isLoadingActivePlanForEdit &&
-                !activePlanForEdit && (
+                !selectedPlanForEdit && (
                   <div className='border-2 border-border bg-destructive/10 p-1.5 space-y-1.5'>
                     <p className='text-[11px] font-bold text-destructive'>
-                      No active weekly plan found to edit.
+                      No weekly plan found for the selected week.
                     </p>
                     <button
                       onClick={() => beginIntake('weekly_plan')}
@@ -1906,16 +2032,15 @@ const CoachGuidedIntakePanel = ({
                 )}
               {intent === 'weekly_plan_edit' &&
                 !isLoadingActivePlanForEdit &&
-                activePlanForEdit && (
+                selectedPlanForEdit && (
                   <div className='border-2 border-border bg-primary/5 p-1.5 text-[11px] font-medium'>
-                    Editing <span className='font-black'>{activePlanForEdit.title}</span> (
-                    {activePlanForEdit.weekStart})
+                    Editing <span className='font-black'>{selectedPlanForEdit.title}</span> (
+                    {selectedPlanForEdit.weekStart})
                   </div>
                 )}
               {mode === 'collecting' && intent === 'weekly_plan' && renderWeeklyStep()}
               {mode === 'collecting' &&
                 intent === 'weekly_plan_edit' &&
-                activePlanForEdit &&
                 renderEditStep()}
               {mode === 'collecting' && intent === 'training_block' && renderBlockStep()}
               {mode === 'review' && intent && (

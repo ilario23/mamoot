@@ -18,6 +18,7 @@ import {
   fetchAthleteStats,
   fetchAthleteZones,
   fetchAthleteWithGear,
+  isStravaAuthError,
   transformActivity,
   transformStreams,
 } from './strava';
@@ -152,6 +153,12 @@ export const scheduleBackgroundActivitiesSync = (
           /* noop */
         }
       });
+    } catch (error) {
+      // Background sync must never crash the app; auth-expired can happen
+      // if the local athlete cache outlives cookie-based broker session.
+      if (!isStravaAuthError(error)) {
+        console.error('Background Strava sync failed', error);
+      }
     } finally {
       backgroundActivitiesSyncInFlight.delete(athleteId);
     }

@@ -179,6 +179,13 @@ const getValidAccessToken = async (): Promise<string> => {
     headers: {"x-csrf-token": csrfToken},
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      clearTokens();
+      if (typeof window !== "undefined") {
+        window.location.assign(getAuthUrl());
+      }
+      throw new Error("Strava authentication required");
+    }
     throw new Error("Not authenticated with Strava");
   }
   const data = (await response.json()) as {accessToken?: string};
@@ -186,6 +193,14 @@ const getValidAccessToken = async (): Promise<string> => {
     throw new Error("Missing access token from broker");
   }
   return data.accessToken;
+};
+
+export const isStravaAuthError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.includes("Not authenticated with Strava") ||
+    error.message.includes("Strava authentication required")
+  );
 };
 
 const stravaFetch = async <T>(

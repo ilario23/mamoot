@@ -328,6 +328,59 @@ const releaseGenerationLock = async (key: string): Promise<void> => {
     });
 };
 
+const BLOCK_VOLUME_RUN_TYPES = new Set<
+  CoachWeekOutput['sessions'][number]['type']
+>(['easy', 'intervals', 'tempo', 'long', 'recovery']);
+
+const normalizeCoachWeekVolumeToBlockTarget = (
+  candidate: CoachWeekOutput,
+  volumeTargetKm: number,
+  toleranceRatio = 0.06,
+): boolean => {
+  if (!Number.isFinite(volumeTargetKm) || volumeTargetKm <= 0) return false;
+
+  const runSessions = candidate.sessions.filter(
+    (session) =>
+      BLOCK_VOLUME_RUN_TYPES.has(session.type) &&
+      session.plannedDistanceKm != null &&
+      Number.isFinite(session.plannedDistanceKm) &&
+      session.plannedDistanceKm > 0,
+  );
+  if (!runSessions.length) return false;
+
+  const sumKm = runSessions.reduce((acc, session) => acc + (session.plannedDistanceKm ?? 0), 0);
+  if (!Number.isFinite(sumKm) || sumKm <= 0) return false;
+
+  const low = volumeTargetKm * (1 - toleranceRatio);
+  const high = volumeTargetKm * (1 + toleranceRatio);
+  if (sumKm >= low && sumKm <= high) return false;
+
+  const scale = volumeTargetKm / sumKm;
+  let adjustedSum = 0;
+  for (const session of runSessions) {
+    const baseKm = session.plannedDistanceKm ?? 0;
+    const adjustedKm = Math.max(0.5, Math.round(baseKm * scale * 10) / 10);
+    session.plannedDistanceKm = adjustedKm;
+    adjustedSum += adjustedKm;
+  }
+
+  const anchorSession = [...runSessions]
+    .sort((a, b) => (b.plannedDistanceKm ?? 0) - (a.plannedDistanceKm ?? 0))[0];
+  if (!anchorSession) return true;
+
+  const targetRounded = Math.round(volumeTargetKm * 10) / 10;
+  const drift = Math.round((targetRounded - adjustedSum) * 10) / 10;
+  if (drift !== 0) {
+    const anchorBase = anchorSession.plannedDistanceKm ?? 0;
+    anchorSession.plannedDistanceKm = Math.max(
+      0.5,
+      Math.round((anchorBase + drift) * 10) / 10,
+    );
+  }
+
+  return true;
+};
+
 export async function POST(req: Request) {
   const trace = createTraceContext('ai.weekly-plan', req);
   let body: unknown;
@@ -1000,6 +1053,18 @@ export async function POST(req: Request) {
       const base = validateCoachWeekOutput(candidate);
       if (!base.ok) return base;
       if (blockVolumeTargetKm != null) {
+        const volumeCheck = validateCoachWeekVolumeVsBlockTarget(
+          candidate,
+          blockVolumeTargetKm,
+        );
+        if (volumeCheck.ok) return volumeCheck;
+
+        const normalized = normalizeCoachWeekVolumeToBlockTarget(
+          candidate,
+          blockVolumeTargetKm,
+        );
+        if (!normalized) return volumeCheck;
+
         return validateCoachWeekVolumeVsBlockTarget(
           candidate,
           blockVolumeTargetKm,
@@ -1419,8 +1484,8 @@ export async function POST(req: Request) {
         error.message === 'SOURCE_PLAN_NOT_FOUND_FOR_EDIT';
       sendError(
         isEditSourceMissing
-          ? 'No source weekly plan found for edit request.'
-          : 'No source weekly plan found for remaining-days replan.',
+          ? `No source weekly plan found for edit request${weekStartDate ? ` (week ${weekStartDate})` : ''}.`
+          : `No source weekly plan found for remaining-days replan${weekStartDate ? ` (week ${weekStartDate})` : ''}.`,
         {
         code: isEditSourceMissing
           ? 'source_plan_not_found_for_edit'

@@ -11,6 +11,7 @@ export type WeeklyPlanEditFocus = 'small_adjustments' | 'moderate_adjustments' |
 
 export interface WeeklyPlanRequirements {
   targetWeek: WeeklyTargetWeek;
+  targetWeekStart: string;
   generationMode: 'full' | 'remaining_days';
   runDaysPerWeek: number;
   preferredLongRunDay: string;
@@ -37,6 +38,7 @@ export interface TrainingBlockRequirements {
 }
 
 export interface WeeklyPlanEditRequirements {
+  targetWeekStart: string;
   generationMode: 'full' | 'remaining_days';
   editFocus: WeeklyPlanEditFocus;
   editGoal: string;
@@ -59,6 +61,7 @@ export const WEEKDAY_OPTIONS = [
 
 export const defaultWeeklyPlanRequirements = (): WeeklyPlanRequirements => ({
   targetWeek: 'next',
+  targetWeekStart: '',
   generationMode: 'full',
   runDaysPerWeek: 5,
   preferredLongRunDay: 'Sunday',
@@ -98,6 +101,7 @@ export const detectCoachIntakeIntent = (
 };
 
 export const defaultWeeklyPlanEditRequirements = (): WeeklyPlanEditRequirements => ({
+  targetWeekStart: '',
   generationMode: 'remaining_days',
   editFocus: 'small_adjustments',
   editGoal: 'Adjust the active weekly plan without overloading recovery.',
@@ -117,6 +121,7 @@ export const summarizeWeeklyPlanRequirements = (
       : 'No unavailable days provided.';
   return [
     `Target week: ${input.targetWeek}.`,
+    input.targetWeekStart ? `Target week start date: ${input.targetWeekStart}.` : null,
     `Generation mode: ${input.generationMode}.`,
     `Run days target: ${input.runDaysPerWeek}/week.`,
     `Preferred long run day: ${input.preferredLongRunDay}.`,
@@ -159,7 +164,9 @@ export const summarizeWeeklyPlanEditRequirements = (
   input: WeeklyPlanEditRequirements,
 ): string => {
   return [
-    'Edit request for active weekly plan.',
+    input.targetWeekStart
+      ? `Edit request for weekly plan starting ${input.targetWeekStart}.`
+      : 'Edit request for active weekly plan.',
     `Generation mode: ${input.generationMode}.`,
     `Edit focus: ${input.editFocus}.`,
     `Primary goal: ${input.editGoal}.`,
