@@ -1,6 +1,6 @@
 /** Focused pipeline prompts for generating unified weekly plans. */
 
-import type {CoachWeekOutput} from './weeklyPlanSchema';
+import type {CoachWeekOutput, CoachWeekSession} from './weeklyPlanSchema';
 
 /** One-line-per-day snapshot of the current week for partial repair prompts. */
 export const formatFrozenCoachWeekForRepair = (coach: CoachWeekOutput): string =>
@@ -218,3 +218,40 @@ ${context.preferences ? `\n## Athlete Preferences\nThe athlete has specified the
 - Include specific exercises with sets, reps, and tempo cues.
 - You may produce sessions for all 7 days, or skip days that truly need no physio work.
 - Each session must include the matching date from the running plan.`;
+
+/** Compact summary of sessions already generated earlier in the week (per-day coach mode). */
+export const formatPriorCoachSessionsForCoach = (
+  sessions: CoachWeekSession[],
+): string =>
+  sessions
+    .map(
+      (s) =>
+        `- ${s.day} (${s.date}): type=${s.type}, ${
+          s.plannedDistanceKm ?? 'n/a'
+        }km — ${s.description.slice(0, 200)}`,
+    )
+    .join('\n');
+
+export const buildCoachSingleDayContract = (context: {
+  weekStart: string;
+  weekEnd: string;
+  targetDay: string;
+  targetDate: string;
+  skeletonDayLine: string;
+  priorCoachSessionsSummary: string | null;
+}) => `
+
+## Single-day output mode (STRICT)
+- Output JSON with exactly **one** session in \`sessions\` (array length 1).
+- That session MUST use day="${context.targetDay}" and date="${context.targetDate}".
+- Week window: ${context.weekStart} to ${context.weekEnd}.
+- Follow this skeleton line for **this day only**:
+${context.skeletonDayLine}
+${
+  context.priorCoachSessionsSummary
+    ? `\n## Already planned earlier this week (stay coherent; do not contradict)\n${context.priorCoachSessionsSummary}\n`
+    : ''
+}
+- Ignore any instruction above that says "exactly 7 sessions" or "Monday through Sunday" for output shape — here you output **only this calendar day**.
+- For running days: warmupSteps, mainSteps, cooldownSteps each have ≥1 step. For rest/strength: use [] for all three phase arrays.
+`;

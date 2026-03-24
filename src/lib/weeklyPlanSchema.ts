@@ -82,6 +82,8 @@ export const coachWeekSessionSchema = z.object({
   notes: z.string().nullable().describe('Additional notes'),
 });
 
+export type CoachWeekSession = z.infer<typeof coachWeekSessionSchema>;
+
 export const coachWeekOutputSchema = z.object({
   sessions: z
     .array(coachWeekSessionSchema)
@@ -90,6 +92,16 @@ export const coachWeekOutputSchema = z.object({
 });
 
 export type CoachWeekOutput = z.infer<typeof coachWeekOutputSchema>;
+
+/** One-day structured coach output (per-day pipeline spike vs full-week generateObject). */
+export const coachSingleDayOutputSchema = z.object({
+  sessions: z
+    .array(coachWeekSessionSchema)
+    .length(1)
+    .describe('Exactly one session for the requested calendar day'),
+});
+
+export type CoachSingleDayOutput = z.infer<typeof coachSingleDayOutputSchema>;
 
 /** Partial coach output for distribution repair: only 1–3 days regenerated at a time. */
 export const coachDayRepairOutputSchema = z.object({

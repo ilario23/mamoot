@@ -254,6 +254,30 @@ describe('plan semantic validators', () => {
     expect(validateCoachSessionStepTotals(coach).ok).toBe(true);
   });
 
+  it('normalizes distance in repeat_block subSteps to match plannedDistanceKm', () => {
+    const coach = makeCoachWeek();
+    // 2 + 5*(2+1) + 1 = 18 km in steps vs 12 planned — distances only on leaves inside repeat_block
+    coach.sessions[1].plannedDistanceKm = 12;
+    coach.sessions[1].warmupSteps = [{...rs('Warmup'), distanceKm: 2}];
+    coach.sessions[1].mainSteps = [
+      {
+        ...rs('5 x interval'),
+        stepKind: 'repeat_block',
+        repeatCount: 5,
+        distanceKm: null,
+        subSteps: [
+          {...rl('800m'), distanceKm: 2},
+          {...rl('jog'), distanceKm: 1},
+        ],
+      },
+    ];
+    coach.sessions[1].cooldownSteps = [{...rs('Cooldown'), distanceKm: 1}];
+    expect(validateCoachSessionStepTotals(coach).ok).toBe(false);
+    const changed = normalizeCoachSessionStepTotals(coach);
+    expect(changed).toBe(true);
+    expect(validateCoachSessionStepTotals(coach).ok).toBe(true);
+  });
+
   it('supports nested repeat-block step structures', () => {
     const coach = makeCoachWeek();
     coach.sessions[1].mainSteps = [

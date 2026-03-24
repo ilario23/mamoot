@@ -180,6 +180,40 @@ const withinTolerance = (actual: number, expected: number, toleranceRatio = 0.12
   return delta <= Math.max(0.3, expected * toleranceRatio);
 };
 
+/** Scale every distanceKm on this row and nested subSteps (repeat_block / composite). */
+const scaleDistanceKmOnSteps = (steps: RunStep[] | undefined, scale: number): boolean => {
+  if (!steps?.length) return false;
+  let changed = false;
+  for (const step of steps) {
+    if (step.distanceKm != null) {
+      step.distanceKm = Math.max(0.1, Math.round(step.distanceKm * scale * 10) / 10);
+      changed = true;
+    }
+    const subs = step.subSteps ?? undefined;
+    if (subs?.length && scaleDistanceKmOnSteps(subs as RunStep[], scale)) {
+      changed = true;
+    }
+  }
+  return changed;
+};
+
+/** Scale every durationMin on this row and nested subSteps. */
+const scaleDurationMinOnSteps = (steps: RunStep[] | undefined, scale: number): boolean => {
+  if (!steps?.length) return false;
+  let changed = false;
+  for (const step of steps) {
+    if (step.durationMin != null) {
+      step.durationMin = Math.max(1, Math.round(step.durationMin * scale));
+      changed = true;
+    }
+    const subs = step.subSteps ?? undefined;
+    if (subs?.length && scaleDurationMinOnSteps(subs as RunStep[], scale)) {
+      changed = true;
+    }
+  }
+  return changed;
+};
+
 export const validateCoachSessionStepTotals = (
   coach: CoachWeekOutput,
 ): {ok: boolean; reason?: string} => {
@@ -223,20 +257,14 @@ export const normalizeCoachSessionStepTotals = (
     const stepDuration = sumStepMetricRecursive(allSteps, 'durationMin');
     if (session.plannedDistanceKm != null && stepDistance > 0 && !withinTolerance(stepDistance, session.plannedDistanceKm)) {
       const scale = session.plannedDistanceKm / stepDistance;
-      for (const step of allSteps) {
-        if (step.distanceKm != null) {
-          step.distanceKm = Math.max(0.1, Math.round(step.distanceKm * scale * 10) / 10);
-          changed = true;
-        }
+      for (const phase of [session.warmupSteps, session.mainSteps, session.cooldownSteps]) {
+        if (scaleDistanceKmOnSteps(phase, scale)) changed = true;
       }
     }
     if (session.plannedDurationMin != null && stepDuration > 0 && !withinTolerance(stepDuration, session.plannedDurationMin, 0.2)) {
       const scale = session.plannedDurationMin / stepDuration;
-      for (const step of allSteps) {
-        if (step.durationMin != null) {
-          step.durationMin = Math.max(1, Math.round(step.durationMin * scale));
-          changed = true;
-        }
+      for (const phase of [session.warmupSteps, session.mainSteps, session.cooldownSteps]) {
+        if (scaleDurationMinOnSteps(phase, scale)) changed = true;
       }
     }
   }
